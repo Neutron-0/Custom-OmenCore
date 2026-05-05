@@ -36,6 +36,10 @@ namespace OmenCore.Services
         private int _autoCleanThresholdPercent = 80;
         private int _autoCleanCheckSeconds = 30;
         private MemoryAutoCleanProfile _autoCleanProfile = MemoryAutoCleanProfile.Balanced;
+        private DateTime _autoCleanPressureSinceUtc = DateTime.MinValue;
+        private DateTime _lastAutoCleanAtUtc = DateTime.MinValue;
+        private int _autoCleanSkipLogCountdown;
+        private bool _gameAwareQuietWindowEnabled = true;
         private bool _intervalCleanEnabled;
         private int _intervalCleanMinutes = 10;
         private readonly object _cleanLock = new();
@@ -733,10 +737,49 @@ namespace OmenCore.Services
             try
             {
                 var info = GetMemoryInfo();
-                if (info.MemoryLoadPercent >= _autoCleanThresholdPercent)
+                var nowUtc = DateTime.UtcNow;
+                var decision = EvaluateAutoCleanDecision(
+                    info,
+                    _autoCleanThresholdPercent,
+                    _autoCleanProfile,
+                    nowUtc,
+                    _autoCleanPressureSinceUtc,
+                    _lastAutoCleanAtUtc);
+
+                _autoCleanPressureSinceUtc = decision.PressureSinceUtc;
+
+                if (decision.ShouldClean)
                 {
-                    _logger.Info($"Auto-clean triggered: memory at {info.MemoryLoadPercent}% (threshold: {_autoCleanThresholdPercent}%)");
-                    TryRunScheduledClean($"Auto-clean: memory at {info.MemoryLoadPercent}%...");
+                    // Game-aware quiet window: skip aggressive standby/cache operations when a
+                    // fullscreen game is likely running in the foreground, unless pressure is critical.
+                    var cleanFlags = MemoryCleanFlags.AllSafe;
+                    if (_gameAwareQuietWindowEnabled && IsGameLikelyInForeground())
+                    {
+                        var isCritical = info.MemoryLoadPercent >= 95 || info.AvailablePhysicalMB <= 512;
+                        if (!isCritical)
+                        {
+                            cleanFlags = MemoryCleanFlags.WorkingSets;
+                            _logger.Info($"Auto-clean (game foreground, safe trim only): {decision.Reason}");
+                        }
+                        else
+                        {
+                            _logger.Info($"Auto-clean (game foreground but critical pressure, full safe clean): {decision.Reason}");
+                        }
+                    }
+                    else
+                    {
+                        _logger.Info($"Auto-clean triggered: {decision.Reason}");
+                    }
+
+                    if (TryRunScheduledClean($"Auto-clean: {decision.Reason}...", cleanFlags))
+                    {
+                        _lastAutoCleanAtUtc = nowUtc;
+                        _autoCleanSkipLogCountdown = 0;
+                    }
+                }
+                else if (decision.IsThrottled && _autoCleanSkipLogCountdown++ % 5 == 0)
+                {
+                    _logger.Debug($"Auto-clean skipped: {decision.Reason}");
                 }
             }
             catch (Exception ex)
@@ -758,24 +801,134 @@ namespace OmenCore.Services
             }
         }
 
-        private void TryRunScheduledClean(string statusMessage)
+        private bool TryRunScheduledClean(string statusMessage, MemoryCleanFlags flags = MemoryCleanFlags.AllSafe)
         {
             lock (_cleanLock)
             {
                 if (_isCleaning)
-                    return;
+                    return false;
 
                 _isCleaning = true;
                 try
                 {
                     StatusChanged?.Invoke(statusMessage);
-                    CleanMemoryInternal(MemoryCleanFlags.AllSafe);
+                    CleanMemoryInternal(flags);
+                    return true;
                 }
                 finally
                 {
                     _isCleaning = false;
                 }
             }
+        }
+
+        public static MemoryAutoCleanDecision EvaluateAutoCleanDecision(
+            MemoryInfo info,
+            int thresholdPercent,
+            MemoryAutoCleanProfile profile,
+            DateTime nowUtc,
+            DateTime pressureSinceUtc,
+            DateTime lastCleanAtUtc)
+        {
+            var threshold = Math.Clamp(thresholdPercent, 50, 95);
+            if (!IsMemoryPressureActionable(info, threshold))
+            {
+                return new MemoryAutoCleanDecision(
+                    shouldClean: false,
+                    isThrottled: false,
+                    DateTime.MinValue,
+                    $"memory pressure below actionable threshold ({info.MemoryLoadPercent}%)");
+            }
+
+            var cooldown = GetAutoCleanCooldown(profile);
+            if (lastCleanAtUtc != DateTime.MinValue)
+            {
+                var elapsedSinceClean = nowUtc - lastCleanAtUtc;
+                if (elapsedSinceClean < cooldown)
+                {
+                    return new MemoryAutoCleanDecision(
+                        shouldClean: false,
+                        isThrottled: true,
+                        pressureSinceUtc,
+                        $"cooldown active for {Math.Ceiling((cooldown - elapsedSinceClean).TotalSeconds)}s");
+                }
+            }
+
+            var effectivePressureSinceUtc = pressureSinceUtc == DateTime.MinValue ? nowUtc : pressureSinceUtc;
+            var pressureAge = nowUtc - effectivePressureSinceUtc;
+            var grace = GetAutoCleanPressureGrace(profile);
+            if (pressureAge < grace)
+            {
+                return new MemoryAutoCleanDecision(
+                    shouldClean: false,
+                    isThrottled: true,
+                    effectivePressureSinceUtc,
+                    $"waiting for sustained memory pressure ({Math.Ceiling((grace - pressureAge).TotalSeconds)}s)");
+            }
+
+            var availablePercent = GetAvailablePhysicalPercent(info);
+            var commitPercent = GetCommitPercent(info);
+            return new MemoryAutoCleanDecision(
+                shouldClean: true,
+                isThrottled: false,
+                effectivePressureSinceUtc,
+                $"memory {info.MemoryLoadPercent}% load, {availablePercent:F1}% available, {commitPercent:F1}% commit");
+        }
+
+        public static TimeSpan GetAutoCleanCooldown(MemoryAutoCleanProfile profile)
+        {
+            return profile switch
+            {
+                MemoryAutoCleanProfile.Aggressive => TimeSpan.FromMinutes(2),
+                MemoryAutoCleanProfile.Conservative => TimeSpan.FromMinutes(10),
+                MemoryAutoCleanProfile.OffPeakOnly => TimeSpan.FromMinutes(30),
+                _ => TimeSpan.FromMinutes(5)
+            };
+        }
+
+        public static TimeSpan GetAutoCleanPressureGrace(MemoryAutoCleanProfile profile)
+        {
+            return profile switch
+            {
+                MemoryAutoCleanProfile.Aggressive => TimeSpan.FromSeconds(10),
+                MemoryAutoCleanProfile.Conservative => TimeSpan.FromSeconds(30),
+                MemoryAutoCleanProfile.OffPeakOnly => TimeSpan.FromSeconds(60),
+                _ => TimeSpan.FromSeconds(20)
+            };
+        }
+
+        private static bool IsMemoryPressureActionable(MemoryInfo info, int thresholdPercent)
+        {
+            if (info.MemoryLoadPercent < thresholdPercent)
+            {
+                return false;
+            }
+
+            var availablePercent = GetAvailablePhysicalPercent(info);
+            var commitPercent = GetCommitPercent(info);
+            return info.AvailablePhysicalMB <= 2048 ||
+                   availablePercent <= 20 ||
+                   commitPercent >= thresholdPercent;
+        }
+
+        private static double GetAvailablePhysicalPercent(MemoryInfo info)
+        {
+            if (info.TotalPhysicalMB <= 0)
+            {
+                return 100;
+            }
+
+            return Math.Clamp(info.AvailablePhysicalMB * 100d / info.TotalPhysicalMB, 0, 100);
+        }
+
+        private static double GetCommitPercent(MemoryInfo info)
+        {
+            if (info.CommitLimitMB <= 0)
+            {
+                return 0;
+            }
+
+            return Math.Clamp(info.CommitTotalMB * 100d / info.CommitLimitMB, 0, 100);
         }
 
         public bool AutoCleanEnabled => _autoCleanEnabled;
@@ -862,6 +1015,59 @@ namespace OmenCore.Services
             catch (Exception ex)
             {
                 _logger.Warn($"Failed to set memory compression: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Enable or disable the game-aware quiet window feature.
+        /// When enabled (default), auto-clean will skip aggressive standby/cache purges
+        /// when a fullscreen game process is detected in the foreground. Working-set trimming
+        /// still occurs, and any critical-pressure condition (>95% load / &lt;512 MB free)
+        /// overrides the quiet window and performs a full safe clean.
+        /// </summary>
+        public void SetGameAwareQuietWindowEnabled(bool enabled) =>
+            _gameAwareQuietWindowEnabled = enabled;
+
+        public bool GameAwareQuietWindowEnabled => _gameAwareQuietWindowEnabled;
+
+        /// <summary>
+        /// Heuristic: returns true when a fullscreen exclusive window is occupying the primary
+        /// monitor. This is not a definitive "game running" check, but it reliably catches games
+        /// running in exclusive fullscreen mode (the vast majority of gaming sessions where
+        /// memory operations would cause stutter). Windowed/borderless games do not trigger this.
+        /// Pure P/Invoke; never throws — returns false on any error.
+        /// </summary>
+        public static bool IsGameLikelyInForeground()
+        {
+            try
+            {
+                var hwnd = NativeMethods.GetForegroundWindow();
+                if (hwnd == IntPtr.Zero)
+                    return false;
+
+                // If the shell/taskbar is the foreground window, not a game
+                var shellHwnd = NativeMethods.GetShellWindow();
+                if (hwnd == shellHwnd)
+                    return false;
+
+                // Get foreground window rect
+                if (!NativeMethods.GetWindowRect(hwnd, out var windowRect))
+                    return false;
+
+                // Compare with primary monitor bounds
+                int screenWidth = NativeMethods.GetSystemMetrics(0 /* SM_CXSCREEN */);
+                int screenHeight = NativeMethods.GetSystemMetrics(1 /* SM_CYSCREEN */);
+
+                bool coversScreen = windowRect.Left == 0
+                    && windowRect.Top == 0
+                    && windowRect.Right == screenWidth
+                    && windowRect.Bottom == screenHeight;
+
+                return coversScreen;
+            }
+            catch
+            {
                 return false;
             }
         }
@@ -1004,6 +1210,30 @@ namespace OmenCore.Services
                 IntPtr previousState,
                 IntPtr returnLength);
 
+            // ===== user32.dll (game foreground detection) =====
+
+            [DllImport("user32.dll")]
+            public static extern IntPtr GetForegroundWindow();
+
+            [DllImport("user32.dll")]
+            public static extern IntPtr GetShellWindow();
+
+            [DllImport("user32.dll", SetLastError = true)]
+            [return: MarshalAs(UnmanagedType.Bool)]
+            public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+
+            [DllImport("user32.dll")]
+            public static extern int GetSystemMetrics(int nIndex);
+
+            [StructLayout(LayoutKind.Sequential)]
+            public struct RECT
+            {
+                public int Left;
+                public int Top;
+                public int Right;
+                public int Bottom;
+            }
+
             // ===== Constants =====
 
             public const uint TOKEN_ADJUST_PRIVILEGES = 0x0020;
@@ -1102,6 +1332,22 @@ namespace OmenCore.Services
     }
 
     // ========== PUBLIC MODELS ==========
+
+    public sealed class MemoryAutoCleanDecision
+    {
+        public MemoryAutoCleanDecision(bool shouldClean, bool isThrottled, DateTime pressureSinceUtc, string reason)
+        {
+            ShouldClean = shouldClean;
+            IsThrottled = isThrottled;
+            PressureSinceUtc = pressureSinceUtc;
+            Reason = reason;
+        }
+
+        public bool ShouldClean { get; }
+        public bool IsThrottled { get; }
+        public DateTime PressureSinceUtc { get; }
+        public string Reason { get; }
+    }
 
     /// <summary>
     /// Current system memory information.

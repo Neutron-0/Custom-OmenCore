@@ -1,5 +1,6 @@
 using System.CommandLine;
 using System.Text.Json;
+using OmenCore.Linux.Config;
 using OmenCore.Linux.Hardware;
 
 namespace OmenCore.Linux.Commands;
@@ -36,6 +37,13 @@ public static class StatusCommand
         var ec = new LinuxEcController();
         var hwmon = new LinuxHwMonController();
         var keyboard = new LinuxKeyboardController();
+        var config = OmenCoreConfig.Load();
+        var isRoot = LinuxEcController.CheckRootAccess();
+        var ecIoPathExists = File.Exists("/sys/kernel/debug/ec/ec0/io");
+        var hpWmiPathExists = Directory.Exists("/sys/devices/platform/hp-wmi");
+        var hasThermalProfilePath = File.Exists("/sys/devices/platform/hp-wmi/thermal_profile");
+        var hasPlatformProfilePath = File.Exists("/sys/devices/platform/hp-wmi/platform_profile");
+        var hasAcpiPlatformProfilePath = File.Exists("/sys/firmware/acpi/platform_profile");
 
         var cpuReading = LinuxTelemetryResolver.GetCpuTemperature(ec, hwmon);
         var gpuReading = LinuxTelemetryResolver.GetGpuTemperature(ec, hwmon);
@@ -45,18 +53,18 @@ public static class StatusCommand
         var (fan1Rpm, fan2Rpm) = ec.IsAvailable ? ec.GetFanSpeeds() : (0, 0);
         var (fan1Pct, fan2Pct) = ec.IsAvailable ? ec.GetFanSpeedPercent() : (0, 0);
         var capabilityAssessment = LinuxCapabilityClassifier.Assess(
-            LinuxEcController.CheckRootAccess(),
+            isRoot,
             ec.HasEcAccess,
-            Directory.Exists("/sys/devices/platform/hp-wmi"),
-            File.Exists("/sys/devices/platform/hp-wmi/thermal_profile"),
-            File.Exists("/sys/devices/platform/hp-wmi/platform_profile"),
-            File.Exists("/sys/firmware/acpi/platform_profile"),
+            hpWmiPathExists,
+            hasThermalProfilePath,
+            hasPlatformProfilePath,
+            hasAcpiPlatformProfilePath,
             File.Exists("/sys/devices/platform/hp-wmi/fan1_output"),
             File.Exists("/sys/devices/platform/hp-wmi/fan2_output"),
             Directory.Exists("/sys/devices/platform/hp-wmi/hwmon") && Directory.GetDirectories("/sys/devices/platform/hp-wmi/hwmon", "hwmon*", SearchOption.TopDirectoryOnly).Any(dir => File.Exists(Path.Combine(dir, "fan1_target"))),
             Directory.Exists("/sys/devices/platform/hp-wmi/hwmon") && Directory.GetDirectories("/sys/devices/platform/hp-wmi/hwmon", "hwmon*", SearchOption.TopDirectoryOnly).Any(dir => File.Exists(Path.Combine(dir, "fan2_target"))),
             ec.HasHwmonFanAccess,
-            File.Exists("/sys/kernel/debug/ec/ec0/io") || Directory.Exists("/sys/devices/platform/hp-wmi"),
+            ecIoPathExists || hpWmiPathExists,
             ec.IsUnsafeEcModel,
             ec.DetectedModel,
             ec.DetectedBoardId);
@@ -92,10 +100,30 @@ public static class StatusCommand
                 },
                 Performance = new PerformanceInfo
                 {
-                    Mode = perfModeStr.ToLowerInvariant()
+                    Mode = perfModeStr.ToLowerInvariant(),
+                    HoldEnabled = config.Performance.HoldEnabled,
+                    HoldIntervalSeconds = config.Performance.HoldIntervalSeconds,
+                    ThermalPowerLimit = config.Performance.ThermalPowerLimit
                 },
                 CapabilityClass = capabilityAssessment.CapabilityKey,
                 CapabilityReason = capabilityAssessment.Reason,
+                Access = new LinuxAccessInfo
+                {
+                    IsRoot = isRoot,
+                    AccessMethod = ec.AccessMethod,
+                    EcIoPathExists = ecIoPathExists,
+                    HpWmiPathExists = hpWmiPathExists,
+                    HasHwmonFanAccess = ec.HasHwmonFanAccess,
+                    HasThermalProfilePath = hasThermalProfilePath,
+                    HasPlatformProfilePath = hasPlatformProfilePath,
+                    HasAcpiPlatformProfilePath = hasAcpiPlatformProfilePath,
+                    SupportsManualFanControl = capabilityAssessment.SupportsManualFanControl,
+                    SupportsProfileControl = capabilityAssessment.SupportsProfileControl,
+                    SupportsTelemetry = capabilityAssessment.SupportsTelemetry,
+                    WriteRequirementHint = isRoot
+                        ? "root privileges detected; writable interfaces depend on kernel/firmware-exposed paths"
+                        : "run with sudo for write-capable fan/performance control"
+                },
                 GpuTelemetrySource = gpuReading?.Source ?? "unavailable",
                 GpuTelemetryPath = gpuReading?.Path ?? string.Empty,
                 Timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds()
@@ -146,6 +174,14 @@ public static class StatusCommand
         Console.WriteLine($"║  CAPABILITY: {capabilityAssessment.CapabilityKey,-44} ║");
         Console.WriteLine($"║  {Truncate(capabilityAssessment.Reason, 57),-57}║");
         Console.WriteLine("╠═══════════════════════════════════════════════════════════╣");
+        Console.WriteLine("║  ACCESS CONTEXT                                           ║");
+        Console.WriteLine($"║    Root: {(isRoot ? "yes" : "no"),-49} ║");
+        Console.WriteLine($"║    Access Method: {Truncate(ec.AccessMethod, 39),-39} ║");
+        Console.WriteLine($"║    EC io path: {(ecIoPathExists ? "present" : "missing"),-42} ║");
+        Console.WriteLine($"║    hp-wmi path: {(hpWmiPathExists ? "present" : "missing"),-41} ║");
+        Console.WriteLine($"║    hwmon fan control: {(ec.HasHwmonFanAccess ? "present" : "missing"),-35} ║");
+        Console.WriteLine($"║    thermal/platform profile path: {Truncate($"{(hasThermalProfilePath ? "thermal" : "-")}/{(hasPlatformProfilePath ? "platform" : "-")}/{(hasAcpiPlatformProfilePath ? "acpi" : "-")}", 25),-25} ║");
+        Console.WriteLine("╠═══════════════════════════════════════════════════════════╣");
         Console.WriteLine("║  TEMPERATURES                                             ║");
         Console.WriteLine($"║    CPU Temperature: {cpuTemp ?? 0,3}°C                                ║");
         Console.WriteLine($"║    GPU Temperature: {gpuTemp ?? 0,3}°C                                ║");
@@ -172,6 +208,8 @@ public static class StatusCommand
         if (ec.IsAvailable)
         {
             Console.WriteLine($"║    Mode: {perfModeStr,-48} ║");
+            Console.WriteLine($"║    Hold Enabled: {(config.Performance.HoldEnabled ? "yes" : "no"),-40} ║");
+            Console.WriteLine($"║    Hold Interval: {config.Performance.HoldIntervalSeconds,3}s                            ║");
         }
         else
         {

@@ -48,6 +48,11 @@ namespace OmenCore.ViewModels
         private int _gpuOcTestCountdownSeconds;
         private bool _gpuOcTestPending;
         private string _gpuOcTestStatusText = "Test Apply runs tuning temporarily and reverts automatically unless you keep it.";
+        private CancellationTokenSource? _cpuUndervoltTestCancellation;
+        private (double CoreMv, double CacheMv)? _cpuUndervoltTestSnapshot;
+        private bool _cpuUndervoltTestPending;
+        private int _cpuUndervoltTestCountdownSeconds;
+        private string _cpuUndervoltTestStatusText = "Test Apply runs the undervolt temporarily and reverts automatically unless you keep it.";
 
         public ObservableCollection<PerformanceMode> PerformanceModes { get; } = new();
         public ObservableCollection<string> OmenCleanupSteps { get; } = new();
@@ -83,7 +88,15 @@ namespace OmenCore.ViewModels
             {
                 _undervoltStatus = value;
                 OnPropertyChanged();
+                OnPropertyChanged(nameof(UndervoltStatusText));
                 OnPropertyChanged(nameof(UndervoltStatusSummary));
+                OnPropertyChanged(nameof(UndervoltRequestedChipText));
+                OnPropertyChanged(nameof(UndervoltConfirmedChipText));
+                OnPropertyChanged(nameof(UndervoltStateLabel));
+                OnPropertyChanged(nameof(UndervoltStateIconGlyph));
+                OnPropertyChanged(nameof(UndervoltStateIconBrush));
+                OnPropertyChanged(nameof(TuningDiagnosticsCompactSummary));
+                OnPropertyChanged(nameof(TuningDiagnosticsCompactDetail));
                 (ApplyUndervoltCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
             }
         }
@@ -93,10 +106,16 @@ namespace OmenCore.ViewModels
             get => _requestedCoreOffset;
             set
             {
-                if (_requestedCoreOffset != value)
+                var clamped = TuningGuardrails.ClampCpuUndervoltMv(value, IsAmdCpu);
+                if (_requestedCoreOffset != clamped)
                 {
-                    _requestedCoreOffset = value;
+                    _requestedCoreOffset = clamped;
                     OnPropertyChanged();
+                    OnPropertyChanged(nameof(UndervoltStatusText));
+                    OnPropertyChanged(nameof(UndervoltRequestedChipText));
+                    OnPropertyChanged(nameof(UndervoltStateLabel));
+                    OnPropertyChanged(nameof(UndervoltStateIconGlyph));
+                    OnPropertyChanged(nameof(UndervoltStateIconBrush));
                 }
             }
         }
@@ -106,10 +125,16 @@ namespace OmenCore.ViewModels
             get => _requestedCacheOffset;
             set
             {
-                if (_requestedCacheOffset != value)
+                var clamped = TuningGuardrails.ClampCpuUndervoltMv(value, IsAmdCpu);
+                if (_requestedCacheOffset != clamped)
                 {
-                    _requestedCacheOffset = value;
+                    _requestedCacheOffset = clamped;
                     OnPropertyChanged();
+                    OnPropertyChanged(nameof(UndervoltStatusText));
+                    OnPropertyChanged(nameof(UndervoltRequestedChipText));
+                    OnPropertyChanged(nameof(UndervoltStateLabel));
+                    OnPropertyChanged(nameof(UndervoltStateIconGlyph));
+                    OnPropertyChanged(nameof(UndervoltStateIconBrush));
                 }
             }
         }
@@ -317,17 +342,11 @@ namespace OmenCore.ViewModels
             }
         }
         
-        public string UndervoltStatusText => UndervoltStatus?.HasExternalController == true
-            ? $"External controller detected: {UndervoltStatus?.ExternalController ?? "Unknown"}"
-            : !string.IsNullOrWhiteSpace(UndervoltStatus?.Warning)
-                ? UndervoltStatus!.Warning!
-            : !string.IsNullOrWhiteSpace(UndervoltStatus?.Error)
-                ? UndervoltStatus!.Error!
-            : (UndervoltStatus?.CurrentCoreOffsetMv != 0 || UndervoltStatus?.CurrentCacheOffsetMv != 0)
-                ? (IsAmdCpu
-                    ? $"Active CO: Core {UndervoltStatus?.CurrentCoreOffsetMv:+0;-0;0} mV eq. / iGPU {UndervoltStatus?.CurrentCacheOffsetMv:+0;-0;0} mV eq."
-                    : $"Active: Core {UndervoltStatus?.CurrentCoreOffsetMv:+0;-0;0} mV, Cache {UndervoltStatus?.CurrentCacheOffsetMv:+0;-0;0} mV")
-                : (IsAmdCpu ? "No Curve Optimizer offset active" : "No undervolt active");
+        public string UndervoltStatusText => TuningStatusFormatter.BuildUndervoltStatusText(
+            RequestedCoreOffset,
+            RequestedCacheOffset,
+            UndervoltStatus,
+            IsAmdCpu);
         
         public System.Windows.Media.Brush UndervoltStatusColor => UndervoltStatus?.HasExternalController == true
             ? System.Windows.Media.Brushes.Orange
@@ -338,6 +357,73 @@ namespace OmenCore.ViewModels
             : (UndervoltStatus?.CurrentCoreOffsetMv != 0 || UndervoltStatus?.CurrentCacheOffsetMv != 0)
                 ? System.Windows.Media.Brushes.Lime
                 : System.Windows.Media.Brushes.Gray;
+
+        public string UndervoltRequestedChipText =>
+            $"Requested: Core {RequestedCoreOffset:+0;-0;0} mV | Cache {RequestedCacheOffset:+0;-0;0} mV";
+
+        public string UndervoltConfirmedChipText => UndervoltStatus == null
+            ? "Confirmed: n/a"
+            : $"Confirmed: Core {UndervoltStatus.CurrentCoreOffsetMv:+0;-0;0} mV | Cache {UndervoltStatus.CurrentCacheOffsetMv:+0;-0;0} mV";
+
+        private bool UndervoltHasMismatch
+        {
+            get
+            {
+                if (UndervoltStatus == null)
+                {
+                    return false;
+                }
+
+                return Math.Abs(UndervoltStatus.CurrentCoreOffsetMv - RequestedCoreOffset) > 0.5
+                    || Math.Abs(UndervoltStatus.CurrentCacheOffsetMv - RequestedCacheOffset) > 0.5;
+            }
+        }
+
+        public string UndervoltStateLabel
+        {
+            get
+            {
+                if (UndervoltStatus?.HasExternalController == true)
+                {
+                    return "Overwritten";
+                }
+
+                if (!IsUndervoltSupported)
+                {
+                    return "Blocked";
+                }
+
+                if (!string.IsNullOrWhiteSpace(UndervoltStatus?.Error))
+                {
+                    return "Blocked";
+                }
+
+                if (UndervoltHasMismatch || !string.IsNullOrWhiteSpace(UndervoltStatus?.Warning))
+                {
+                    return "Degraded";
+                }
+
+                return "Confirmed";
+            }
+        }
+
+        public string UndervoltStateIconGlyph => UndervoltStateLabel switch
+        {
+            "Confirmed" => "✓",
+            "Degraded" => "!",
+            "Blocked" => "■",
+            "Overwritten" => "⟳",
+            _ => "•"
+        };
+
+        public System.Windows.Media.Brush UndervoltStateIconBrush => UndervoltStateLabel switch
+        {
+            "Confirmed" => System.Windows.Media.Brushes.LimeGreen,
+            "Degraded" => System.Windows.Media.Brushes.Gold,
+            "Blocked" => System.Windows.Media.Brushes.OrangeRed,
+            "Overwritten" => System.Windows.Media.Brushes.Orange,
+            _ => System.Windows.Media.Brushes.Gray
+        };
         
         // External controller detection properties
         public bool HasExternalUndervoltController => UndervoltStatus?.HasExternalController ?? false;
@@ -665,6 +751,10 @@ namespace OmenCore.ViewModels
                     _gpuCoreClockOffset = Math.Clamp(value, GpuCoreOffsetMin, GpuCoreOffsetMax);
                     OnPropertyChanged();
                     OnPropertyChanged(nameof(GpuCoreClockOffsetText));
+                    OnPropertyChanged(nameof(GpuOcRequestedChipText));
+                    OnPropertyChanged(nameof(GpuOcStateLabel));
+                    OnPropertyChanged(nameof(GpuOcStateIconGlyph));
+                    OnPropertyChanged(nameof(GpuOcStateIconBrush));
                 }
             }
         }
@@ -683,6 +773,10 @@ namespace OmenCore.ViewModels
                     _gpuMemoryClockOffset = Math.Clamp(value, GpuMemoryOffsetMin, GpuMemoryOffsetMax);
                     OnPropertyChanged();
                     OnPropertyChanged(nameof(GpuMemoryClockOffsetText));
+                    OnPropertyChanged(nameof(GpuOcRequestedChipText));
+                    OnPropertyChanged(nameof(GpuOcStateLabel));
+                    OnPropertyChanged(nameof(GpuOcStateIconGlyph));
+                    OnPropertyChanged(nameof(GpuOcStateIconBrush));
                 }
             }
         }
@@ -701,6 +795,10 @@ namespace OmenCore.ViewModels
                     _gpuPowerLimitPercent = Math.Clamp(value, GpuPowerLimitMin, GpuPowerLimitMax);
                     OnPropertyChanged();
                     OnPropertyChanged(nameof(GpuPowerLimitText));
+                    OnPropertyChanged(nameof(GpuOcRequestedChipText));
+                    OnPropertyChanged(nameof(GpuOcStateLabel));
+                    OnPropertyChanged(nameof(GpuOcStateIconGlyph));
+                    OnPropertyChanged(nameof(GpuOcStateIconBrush));
                 }
             }
         }
@@ -757,6 +855,131 @@ namespace OmenCore.ViewModels
             ? $"Test active: auto-revert in {GpuOcTestCountdownSeconds}s unless you press Keep"
             : "Test Apply runs the selected tuning for 30 seconds, then restores the previous GPU state unless you keep it.";
 
+        public bool IsCpuUndervoltTestPending
+        {
+            get => _cpuUndervoltTestPending;
+            private set
+            {
+                if (_cpuUndervoltTestPending != value)
+                {
+                    _cpuUndervoltTestPending = value;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(CpuUndervoltTestActionText));
+                    (TestUndervoltCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+                    (ConfirmUndervoltTestCommand as RelayCommand)?.RaiseCanExecuteChanged();
+                    (ApplyUndervoltCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+                    (ResetUndervoltCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+                }
+            }
+        }
+
+        public int CpuUndervoltTestCountdownSeconds
+        {
+            get => _cpuUndervoltTestCountdownSeconds;
+            private set
+            {
+                if (_cpuUndervoltTestCountdownSeconds != value)
+                {
+                    _cpuUndervoltTestCountdownSeconds = value;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(CpuUndervoltTestActionText));
+                }
+            }
+        }
+
+        public string CpuUndervoltTestStatusText
+        {
+            get => _cpuUndervoltTestStatusText;
+            private set
+            {
+                if (_cpuUndervoltTestStatusText != value)
+                {
+                    _cpuUndervoltTestStatusText = value;
+                    OnPropertyChanged();
+                }
+            }
+        }
+
+        public string CpuUndervoltTestActionText => IsCpuUndervoltTestPending
+            ? $"Test active: auto-revert in {CpuUndervoltTestCountdownSeconds}s unless you press Keep"
+            : "Test Apply runs the undervolt for 30 seconds, then restores the previous CPU voltage unless you keep it.";
+
+        // ---- Tuning conflict report ----
+        private TuningConflictReport? _lastTuningConflictReport;
+        private bool _startupRecoveryNoticeVisible;
+        private string _startupRecoveryNoticeText = string.Empty;
+
+        public string TuningConflictBannerText => _lastTuningConflictReport?.BannerText ?? string.Empty;
+        public bool TuningConflictBannerVisible => _lastTuningConflictReport?.HasConflicts == true;
+        public bool TuningConflictHighRisk => _lastTuningConflictReport?.HasHighRiskConflict == true;
+
+        public string TuningDiagnosticsCompactSummary =>
+            $"CPU UV: {UndervoltStateLabel} | GPU OC: {GpuOcStateLabel} | Conflicts: {(TuningConflictBannerVisible ? "Detected" : "None")}";
+
+        public string TuningDiagnosticsCompactDetail
+        {
+            get
+            {
+                var startupRecovery = StartupRecoveryNoticeVisible ? "Startup recovery applied" : "No startup recovery event";
+                var gpuBackend = GpuNvapiAvailable ? "NVAPI online" : "NVAPI unavailable";
+                return $"{startupRecovery} | GPU backend: {gpuBackend}";
+            }
+        }
+
+        public bool StartupRecoveryNoticeVisible
+        {
+            get => _startupRecoveryNoticeVisible;
+            private set
+            {
+                if (_startupRecoveryNoticeVisible != value)
+                {
+                    _startupRecoveryNoticeVisible = value;
+                    OnPropertyChanged();
+                }
+            }
+        }
+
+        public string StartupRecoveryNoticeText
+        {
+            get => _startupRecoveryNoticeText;
+            private set
+            {
+                if (_startupRecoveryNoticeText != value)
+                {
+                    _startupRecoveryNoticeText = value;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(TuningDiagnosticsCompactSummary));
+                    OnPropertyChanged(nameof(TuningDiagnosticsCompactDetail));
+                }
+            }
+        }
+
+        /// <summary>
+        /// Detail text for each detected tuning conflict (one entry per conflict, including its suggestion).
+        /// </summary>
+        public IReadOnlyList<string> TuningConflictDetails
+        {
+            get
+            {
+                if (_lastTuningConflictReport == null)
+                    return Array.Empty<string>();
+                return _lastTuningConflictReport.Conflicts
+                    .Select(c => $"{c.Title}: {c.Detail}\n  → {c.Suggestion}")
+                    .ToList();
+            }
+        }
+
+        private void SetTuningConflictReport(TuningConflictReport report)
+        {
+            _lastTuningConflictReport = report;
+            OnPropertyChanged(nameof(TuningConflictBannerText));
+            OnPropertyChanged(nameof(TuningConflictBannerVisible));
+            OnPropertyChanged(nameof(TuningConflictHighRisk));
+            OnPropertyChanged(nameof(TuningConflictDetails));
+            OnPropertyChanged(nameof(TuningDiagnosticsCompactSummary));
+            OnPropertyChanged(nameof(TuningDiagnosticsCompactDetail));
+        }
+
         private int _gpuVoltageOffsetMv;
         public int GpuVoltageOffsetMv
         {
@@ -765,9 +988,13 @@ namespace OmenCore.ViewModels
             {
                 if (_gpuVoltageOffsetMv != value)
                 {
-                    _gpuVoltageOffsetMv = Math.Clamp(value, -200, 100);
+                    _gpuVoltageOffsetMv = TuningGuardrails.ClampGpuVoltageOffsetMv(value);
                     OnPropertyChanged();
                     OnPropertyChanged(nameof(GpuVoltageOffsetText));
+                    OnPropertyChanged(nameof(GpuOcRequestedChipText));
+                    OnPropertyChanged(nameof(GpuOcStateLabel));
+                    OnPropertyChanged(nameof(GpuOcStateIconGlyph));
+                    OnPropertyChanged(nameof(GpuOcStateIconBrush));
                 }
             }
         }
@@ -938,9 +1165,93 @@ namespace OmenCore.ViewModels
                 {
                     _gpuOcStatus = value;
                     OnPropertyChanged();
+                    OnPropertyChanged(nameof(GpuOcConfirmedChipText));
+                    OnPropertyChanged(nameof(GpuOcStateLabel));
+                    OnPropertyChanged(nameof(GpuOcStateIconGlyph));
+                    OnPropertyChanged(nameof(GpuOcStateIconBrush));
+                    OnPropertyChanged(nameof(TuningDiagnosticsCompactSummary));
+                    OnPropertyChanged(nameof(TuningDiagnosticsCompactDetail));
                 }
             }
         }
+
+        public string GpuOcRequestedChipText =>
+            $"Requested: Core {GpuCoreClockOffset:+0;-0;0} MHz | Memory {GpuMemoryClockOffset:+0;-0;0} MHz | Power {GpuPowerLimitPercent}% | Voltage {GpuVoltageOffsetMv:+0;-0;0} mV";
+
+        public string GpuOcConfirmedChipText
+        {
+            get
+            {
+                if (_nvapiService == null || !GpuNvapiAvailable)
+                {
+                    return "Confirmed: n/a";
+                }
+
+                return $"Confirmed: Core {_nvapiService.CoreClockOffsetMHz:+0;-0;0} MHz | Memory {_nvapiService.MemoryClockOffsetMHz:+0;-0;0} MHz | Power {_nvapiService.PowerLimitPercent}% | Voltage {_nvapiService.VoltageOffsetMv:+0;-0;0} mV";
+            }
+        }
+
+        private bool GpuOcHasMismatch
+        {
+            get
+            {
+                if (_nvapiService == null || !GpuNvapiAvailable)
+                {
+                    return false;
+                }
+
+                return _nvapiService.CoreClockOffsetMHz != GpuCoreClockOffset
+                    || _nvapiService.MemoryClockOffsetMHz != GpuMemoryClockOffset
+                    || _nvapiService.PowerLimitPercent != GpuPowerLimitPercent
+                    || _nvapiService.VoltageOffsetMv != GpuVoltageOffsetMv;
+            }
+        }
+
+        public string GpuOcStateLabel
+        {
+            get
+            {
+                if (!GpuNvapiAvailable)
+                {
+                    return "Blocked";
+                }
+
+                if (GpuOcStatus.Contains("battery", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "Blocked";
+                }
+
+                if (GpuOcStatus.Contains("external", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "Overwritten";
+                }
+
+                if (GpuOcStatus.Contains("partial", StringComparison.OrdinalIgnoreCase) || GpuOcHasMismatch)
+                {
+                    return "Degraded";
+                }
+
+                return "Confirmed";
+            }
+        }
+
+        public string GpuOcStateIconGlyph => GpuOcStateLabel switch
+        {
+            "Confirmed" => "✓",
+            "Degraded" => "!",
+            "Blocked" => "■",
+            "Overwritten" => "⟳",
+            _ => "•"
+        };
+
+        public System.Windows.Media.Brush GpuOcStateIconBrush => GpuOcStateLabel switch
+        {
+            "Confirmed" => System.Windows.Media.Brushes.LimeGreen,
+            "Degraded" => System.Windows.Media.Brushes.Gold,
+            "Blocked" => System.Windows.Media.Brushes.OrangeRed,
+            "Overwritten" => System.Windows.Media.Brushes.Orange,
+            _ => System.Windows.Media.Brushes.Gray
+        };
 
         // GPU OC limits (set by NvapiService based on GPU type)
         public int GpuCoreOffsetMin { get; private set; } = -500;
@@ -961,6 +1272,13 @@ namespace OmenCore.ViewModels
             OnPropertyChanged(nameof(GpuCoreOffsetRangeText));
             OnPropertyChanged(nameof(GpuMemoryOffsetRangeText));
             OnPropertyChanged(nameof(GpuPowerLimitRangeText));
+            OnPropertyChanged(nameof(GpuOcRequestedChipText));
+            OnPropertyChanged(nameof(GpuOcConfirmedChipText));
+            OnPropertyChanged(nameof(GpuOcStateLabel));
+            OnPropertyChanged(nameof(GpuOcStateIconGlyph));
+            OnPropertyChanged(nameof(GpuOcStateIconBrush));
+            OnPropertyChanged(nameof(TuningDiagnosticsCompactSummary));
+            OnPropertyChanged(nameof(TuningDiagnosticsCompactDetail));
         }
 
         private static string FormatSignedValue(int value, string unit)
@@ -1275,12 +1593,26 @@ namespace OmenCore.ViewModels
                 {
                     if (persistToConfig)
                     {
-                        SaveGpuOcToConfig();
+                        SaveGpuOcToConfig(applyOnStartup: false);
                     }
 
-                    var statusText = GpuOcAvailable
-                        ? $"{successPrefix}: Core {GpuCoreClockOffsetText}, Mem {GpuMemoryClockOffsetText}, Power {GpuPowerLimitText}, Voltage {GpuVoltageOffsetText}"
-                        : $"{successPrefix}: Power {GpuPowerLimitText} (clock offsets unavailable on this GPU/driver)";
+                    var appliedCore = _nvapiService.CoreClockOffsetMHz;
+                    var appliedMemory = _nvapiService.MemoryClockOffsetMHz;
+                    var appliedPower = _nvapiService.PowerLimitPercent;
+                    var appliedVoltage = _nvapiService.VoltageOffsetMv;
+
+                    var statusText = $"{successPrefix}: " +
+                        TuningStatusFormatter.BuildGpuOcStatusText(
+                            requestedCoreOffset,
+                            requestedMemoryOffset,
+                            requestedPowerLimit,
+                            requestedVoltageOffset,
+                            appliedCore,
+                            appliedMemory,
+                            appliedPower,
+                            appliedVoltage,
+                            backendAvailable: true,
+                            allWritesSucceeded: true);
 
                     if (!string.IsNullOrEmpty(guardrailNote))
                     {
@@ -1304,13 +1636,25 @@ namespace OmenCore.ViewModels
                 if (!powerSuccess) failures.Add("power");
                 if (!voltageSuccess) failures.Add("voltage");
 
+                var partialStatus = TuningStatusFormatter.BuildGpuOcStatusText(
+                    requestedCoreOffset,
+                    requestedMemoryOffset,
+                    requestedPowerLimit,
+                    requestedVoltageOffset,
+                    _nvapiService.CoreClockOffsetMHz,
+                    _nvapiService.MemoryClockOffsetMHz,
+                    _nvapiService.PowerLimitPercent,
+                    _nvapiService.VoltageOffsetMv,
+                    backendAvailable: true,
+                    allWritesSucceeded: false);
+
                 return new GpuOcApplyResult
                 {
                     CoreSuccess = coreSuccess,
                     MemorySuccess = memSuccess,
                     PowerSuccess = powerSuccess,
                     VoltageSuccess = voltageSuccess,
-                    StatusText = $"⚠ Partial: {string.Join(", ", failures)} failed - API may be restricted",
+                    StatusText = $"⚠ Partial ({string.Join(", ", failures)} failed): {partialStatus}",
                     GuardrailNote = guardrailNote
                 };
             }
@@ -1336,6 +1680,25 @@ namespace OmenCore.ViewModels
                 return;
             }
 
+            if (!ValidateGpuOcPowerSourceForIncrease())
+            {
+                return;
+            }
+
+            // Pre-apply conflict scan
+            var conflictReport = await Task.Run(() => TuningConflictGuard.Check(TuningConflictKind.GpuOc));
+            SetTuningConflictReport(conflictReport);
+            if (conflictReport.HasHighRiskConflict)
+            {
+                var proceed = System.Windows.MessageBox.Show(
+                    $"A conflicting tool is running:\n\n{string.Join("\n", conflictReport.Conflicts.Select(c => $"• {c.Title}: {c.Suggestion}"))}\n\nApplying GPU overclocking while this tool is active may cause instability or a driver crash.\n\nDo you want to continue anyway?",
+                    "Tuning Conflict Detected",
+                    System.Windows.MessageBoxButton.YesNo,
+                    System.Windows.MessageBoxImage.Warning);
+                if (proceed != System.Windows.MessageBoxResult.Yes)
+                    return;
+            }
+
             var confirmation = System.Windows.MessageBox.Show(
                 "Test Apply will apply the current GPU tuning for 30 seconds and then automatically restore the previous GPU state unless you press Keep. Continue?",
                 "Test GPU Tuning",
@@ -1347,12 +1710,14 @@ namespace OmenCore.ViewModels
                 return;
             }
 
+            SetGpuOcTestPendingFlag(true);
             _gpuOcTestSnapshot = CaptureCurrentGpuOcSnapshot();
             var testResult = ApplyGpuOcValues(GpuCoreClockOffset, GpuMemoryClockOffset, GpuPowerLimitPercent, GpuVoltageOffsetMv, false, "✓ Test applied");
             GpuOcStatus = testResult.StatusText;
 
             if (!testResult.Success)
             {
+                SetGpuOcTestPendingFlag(false);
                 _gpuOcTestSnapshot = null;
                 GpuOcTestStatusText = "Test Apply did not start because one or more GPU settings failed to apply.";
                 return;
@@ -1396,7 +1761,9 @@ namespace OmenCore.ViewModels
             _gpuOcTestSnapshot = null;
             IsGpuOcTestPending = false;
             GpuOcTestCountdownSeconds = 0;
-            SaveGpuOcToConfig();
+            SetGpuOcTestPendingFlag(false);
+            RecordConfirmedGpuOcMetadata();
+            SaveGpuOcToConfig(applyOnStartup: true);
             GpuOcStatus = GpuOcAvailable
                 ? $"✓ Test confirmed: Core {GpuCoreClockOffsetText}, Mem {GpuMemoryClockOffsetText}, Power {GpuPowerLimitText}, Voltage {GpuVoltageOffsetText}"
                 : $"✓ Test confirmed: Power {GpuPowerLimitText}";
@@ -1413,6 +1780,7 @@ namespace OmenCore.ViewModels
             _gpuOcTestSnapshot = null;
             IsGpuOcTestPending = false;
             GpuOcTestCountdownSeconds = 0;
+            SetGpuOcTestPendingFlag(false);
 
             if (snapshot == null)
             {
@@ -1433,6 +1801,191 @@ namespace OmenCore.ViewModels
             _logging.Info(statusText);
         }
         
+        private async Task StartCpuUndervoltTestApplyAsync()
+        {
+            if (!IsUndervoltSupported || IsCpuUndervoltTestPending)
+            {
+                return;
+            }
+
+            // Pre-apply conflict scan
+            var conflictReport = await Task.Run(() => TuningConflictGuard.Check(TuningConflictKind.CpuUndervolt));
+            SetTuningConflictReport(conflictReport);
+            if (conflictReport.HasHighRiskConflict)
+            {
+                var proceed = System.Windows.MessageBox.Show(
+                    $"A conflicting tool is running:\n\n{string.Join("\n", conflictReport.Conflicts.Select(c => $"• {c.Title}: {c.Suggestion}"))}\n\nApplying a CPU undervolt while this tool is active may cause instability or a crash.\n\nDo you want to continue anyway?",
+                    "Tuning Conflict Detected",
+                    System.Windows.MessageBoxButton.YesNo,
+                    System.Windows.MessageBoxImage.Warning);
+                if (proceed != System.Windows.MessageBoxResult.Yes)
+                    return;
+            }
+
+            var confirmation = System.Windows.MessageBox.Show(
+                "Test Apply will apply the current CPU undervolt for 30 seconds and then automatically restore the previous CPU voltage unless you press Keep. Continue?",
+                "Test CPU Undervolt",
+                System.Windows.MessageBoxButton.YesNo,
+                System.Windows.MessageBoxImage.Warning);
+
+            if (confirmation != System.Windows.MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            SetUndervoltTestPendingFlag(true);
+            // Snapshot current offset before applying
+            _cpuUndervoltTestSnapshot = (RequestedCoreOffset, RequestedCacheOffset);
+
+            // Apply requested values (hardware-only, no config save)
+            try
+            {
+                UndervoltLastActionText = "Applying test CPU undervolt...";
+                UndervoltLastActionColor = System.Windows.Media.Brushes.SkyBlue;
+
+                var testOffset = new UndervoltOffset
+                {
+                    CoreMv = RequestedCoreOffset,
+                    CacheMv = RequestedCacheOffset
+                };
+                if (EnablePerCoreUndervolt && RequestedPerCoreOffsets != null)
+                {
+                    testOffset.PerCoreOffsetsMv = RequestedPerCoreOffsets;
+                }
+                await _undervoltService.ApplyAsync(testOffset);
+            }
+            catch (Exception ex)
+            {
+                _logging.Error("CPU undervolt test apply failed", ex);
+                SetUndervoltTestPendingFlag(false);
+                _cpuUndervoltTestSnapshot = null;
+                CpuUndervoltTestStatusText = $"Test Apply did not start: {ex.Message}";
+                UndervoltLastActionText = $"Test failed: {ex.Message}";
+                UndervoltLastActionColor = System.Windows.Media.Brushes.OrangeRed;
+                return;
+            }
+
+            _cpuUndervoltTestCancellation?.Cancel();
+            _cpuUndervoltTestCancellation?.Dispose();
+            _cpuUndervoltTestCancellation = new CancellationTokenSource();
+
+            IsCpuUndervoltTestPending = true;
+            CpuUndervoltTestCountdownSeconds = 30;
+            CpuUndervoltTestStatusText = "Test undervolt is live. Run a stress test or game, then press Keep if stable.";
+            UndervoltLastActionText = IsAmdCpu
+                ? $"Test CO applied: Core {RequestedCoreOffset:+0;-0;0} mV eq."
+                : $"Test undervolt applied: Core {RequestedCoreOffset:+0;-0;0} mV, Cache {RequestedCacheOffset:+0;-0;0} mV";
+            UndervoltLastActionColor = System.Windows.Media.Brushes.SkyBlue;
+            _logging.Info($"CPU undervolt test apply started: Core={RequestedCoreOffset} mV, Cache={RequestedCacheOffset} mV");
+
+            try
+            {
+                var token = _cpuUndervoltTestCancellation.Token;
+                while (CpuUndervoltTestCountdownSeconds > 0)
+                {
+                    await Task.Delay(1000, token);
+                    CpuUndervoltTestCountdownSeconds--;
+                }
+
+                RevertCpuUndervoltTest("CPU undervolt test expired; previous voltage restored.");
+            }
+            catch (OperationCanceledException)
+            {
+                _logging.Info("CPU undervolt test countdown cancelled");
+            }
+        }
+
+        private void ConfirmCpuUndervoltTest()
+        {
+            if (!IsCpuUndervoltTestPending)
+            {
+                return;
+            }
+
+            _cpuUndervoltTestCancellation?.Cancel();
+            _cpuUndervoltTestCancellation?.Dispose();
+            _cpuUndervoltTestCancellation = null;
+            _cpuUndervoltTestSnapshot = null;
+            IsCpuUndervoltTestPending = false;
+            CpuUndervoltTestCountdownSeconds = 0;
+            SetUndervoltTestPendingFlag(false);
+
+            // Persist current values and enable startup reapply now that the user confirmed stability.
+            var config = _configService.Config;
+            config.Undervolt ??= new UndervoltPreferences();
+            config.Undervolt.DefaultOffset ??= new UndervoltOffset();
+            config.Undervolt.DefaultOffset.CoreMv = RequestedCoreOffset;
+            config.Undervolt.DefaultOffset.CacheMv = RequestedCacheOffset;
+            config.Undervolt.EnablePerCoreUndervolt = EnablePerCoreUndervolt;
+            config.Undervolt.PerCoreOffsetsMv = RequestedPerCoreOffsets?.Clone() as int?[];
+            config.Undervolt.RespectExternalControllers = RespectExternalUndervolt;
+            config.Undervolt.ApplyOnStartup = true;
+            config.Undervolt.LastConfirmedOffset = new UndervoltOffset
+            {
+                CoreMv = RequestedCoreOffset,
+                CacheMv = RequestedCacheOffset,
+                PerCoreOffsetsMv = RequestedPerCoreOffsets?.Clone() as int?[]
+            };
+            config.Undervolt.LastConfirmedAtUtc = DateTime.UtcNow;
+            config.Undervolt.PendingTestApply = false;
+            config.Undervolt.StartupPendingConfirmation = false;
+            config.Undervolt.LastStartupHadUnconfirmedState = false;
+            _configService.Save(config);
+
+            CpuUndervoltTestStatusText = "Test undervolt was kept and saved for startup reapply.";
+            UndervoltLastActionText = IsAmdCpu
+                ? $"✓ Test confirmed: Core {RequestedCoreOffset:+0;-0;0} mV eq. (startup reapply enabled)"
+                : $"✓ Test confirmed: Core {RequestedCoreOffset:+0;-0;0} mV, Cache {RequestedCacheOffset:+0;-0;0} mV (startup reapply enabled)";
+            UndervoltLastActionColor = System.Windows.Media.Brushes.Lime;
+            _logging.Info($"CPU undervolt test confirmed, startup reapply enabled: Core={RequestedCoreOffset} mV, Cache={RequestedCacheOffset} mV");
+        }
+
+        private void RevertCpuUndervoltTest(string statusText)
+        {
+            var snapshot = _cpuUndervoltTestSnapshot;
+
+            _cpuUndervoltTestCancellation?.Dispose();
+            _cpuUndervoltTestCancellation = null;
+            _cpuUndervoltTestSnapshot = null;
+            IsCpuUndervoltTestPending = false;
+            CpuUndervoltTestCountdownSeconds = 0;
+            SetUndervoltTestPendingFlag(false);
+
+            if (snapshot == null)
+            {
+                CpuUndervoltTestStatusText = "No test snapshot was available to restore.";
+                return;
+            }
+
+            RequestedCoreOffset = snapshot.Value.CoreMv;
+            RequestedCacheOffset = snapshot.Value.CacheMv;
+
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var revertOffset = new UndervoltOffset
+                    {
+                        CoreMv = snapshot.Value.CoreMv,
+                        CacheMv = snapshot.Value.CacheMv
+                    };
+                    await _undervoltService.ApplyAsync(revertOffset);
+                    _logging.Info($"CPU undervolt test reverted: Core={snapshot.Value.CoreMv} mV, Cache={snapshot.Value.CacheMv} mV");
+                }
+                catch (Exception ex)
+                {
+                    _logging.Error("CPU undervolt test revert failed", ex);
+                }
+            });
+
+            UndervoltLastActionText = IsAmdCpu
+                ? $"Test reverted: Core {snapshot.Value.CoreMv:+0;-0;0} mV eq. restored"
+                : $"Test reverted: Core {snapshot.Value.CoreMv:+0;-0;0} mV, Cache {snapshot.Value.CacheMv:+0;-0;0} mV restored";
+            UndervoltLastActionColor = System.Windows.Media.Brushes.Orange;
+            CpuUndervoltTestStatusText = statusText;
+            _logging.Info(statusText);
+        }
+
         // GPU OC Profiles
         public ObservableCollection<Models.GpuOcProfile> GpuOcProfiles { get; } = new();
         
@@ -1746,6 +2299,8 @@ namespace OmenCore.ViewModels
         public ICommand ApplyPerformanceModeCommand { get; }
         public ICommand ApplyUndervoltCommand { get; }
         public ICommand ResetUndervoltCommand { get; }
+        public ICommand TestUndervoltCommand { get; }
+        public ICommand ConfirmUndervoltTestCommand { get; }
         public ICommand CleanupOmenHubCommand { get; }
         public ICommand ApplyGpuOcCommand { get; }
         public ICommand ResetGpuOcCommand { get; }
@@ -1793,6 +2348,10 @@ namespace OmenCore.ViewModels
             _ecAccess = ecAccess;
             _amdGpuService = amdGpuService;
 
+            // Safety-first: detect interrupted/unconfirmed tuning tests from previous session
+            // and force a safe reset before any startup reapply operations run.
+            RecoverUnconfirmedTuningProfilesAtStartup();
+
             if (_hardwareMonitoringService != null)
             {
                 _hardwareMonitoringService.SampleUpdated += OnMonitoringSampleUpdated;
@@ -1820,8 +2379,10 @@ namespace OmenCore.ViewModels
 
             ApplyPerformanceModeCommand = new RelayCommand(_ => ApplyPerformanceMode(), _ => SelectedPerformanceMode != null);
             SelectPerformanceModeCommand = new RelayCommand(param => SelectPerformanceMode(param?.ToString() ?? "Balanced"));
-            ApplyUndervoltCommand = new AsyncRelayCommand(_ => ApplyUndervoltAsync(), _ => IsUndervoltSupported && (!RespectExternalUndervolt || !UndervoltStatus.HasExternalController));
-            ResetUndervoltCommand = new AsyncRelayCommand(_ => ResetUndervoltAsync(), _ => IsUndervoltSupported);
+            ApplyUndervoltCommand = new AsyncRelayCommand(_ => ApplyUndervoltAsync(), _ => IsUndervoltSupported && !IsCpuUndervoltTestPending && (!RespectExternalUndervolt || !UndervoltStatus.HasExternalController));
+            ResetUndervoltCommand = new AsyncRelayCommand(_ => ResetUndervoltAsync(), _ => IsUndervoltSupported && !IsCpuUndervoltTestPending);
+            TestUndervoltCommand = new AsyncRelayCommand(_ => StartCpuUndervoltTestApplyAsync(), _ => IsUndervoltSupported && !IsCpuUndervoltTestPending);
+            ConfirmUndervoltTestCommand = new RelayCommand(_ => ConfirmCpuUndervoltTest(), _ => IsCpuUndervoltTestPending);
             ApplyUndervoltPresetCommand = new AsyncRelayCommand(ApplyUndervoltPresetAsync);
             ApplyAggressiveUndervoltCommand = new AsyncRelayCommand(_ => ApplyAggressiveUndervoltAsync());
             CleanupOmenHubCommand = new AsyncRelayCommand(_ => RunCleanupAsync(), _ => !CleanupInProgress);
@@ -1960,6 +2521,29 @@ namespace OmenCore.ViewModels
             EnablePerCoreUndervolt = undervoltPrefs.EnablePerCoreUndervolt;
             RequestedPerCoreOffsets = undervoltPrefs.PerCoreOffsetsMv?.Clone() as int?[];
             RespectExternalUndervolt = undervoltPrefs.RespectExternalControllers;
+
+            // Startup reapply for CPU undervolt — only when ApplyOnStartup was set by Test Apply -> Keep.
+            if (undervoltPrefs.ApplyOnStartup && startupHardwareRestoreEnabled && (defaultOffset.CoreMv != 0 || defaultOffset.CacheMv != 0))
+            {
+                var coreToRestore = defaultOffset.CoreMv;
+                var cacheToRestore = defaultOffset.CacheMv;
+                _logging.Info($"Scheduling startup CPU undervolt reapply: Core={coreToRestore} mV, Cache={cacheToRestore} mV");
+                RunStartupTask(
+                    () => ReapplySettingWithRetryAsync(
+                        "CPU Undervolt",
+                        async () =>
+                        {
+                            var offset = new UndervoltOffset { CoreMv = coreToRestore, CacheMv = cacheToRestore };
+                            await _undervoltService.ApplyAsync(offset);
+                            _logging.Info($"Startup CPU undervolt reapplied: Core={coreToRestore} mV, Cache={cacheToRestore} mV");
+                        },
+                        maxRetries: 3,
+                        initialDelayMs: 3000,
+                        maxDelayMs: 8000
+                    ),
+                    "CPU Undervolt startup restore");
+            }
+
             
             // Initialize per-core offset view models
             InitializePerCoreOffsets();
@@ -2067,7 +2651,10 @@ namespace OmenCore.ViewModels
             
             for (int i = 0; i < PerCoreOffsets.Count; i++)
             {
-                offsets[i] = PerCoreOffsets[i].OffsetMv;
+                var requestedOffset = PerCoreOffsets[i].OffsetMv;
+                offsets[i] = requestedOffset.HasValue
+                    ? TuningGuardrails.ClampCpuUndervoltMv(requestedOffset.GetValueOrDefault(), IsAmdCpu)
+                    : null;
                 if (offsets[i].HasValue)
                     hasAnyOffset = true;
             }
@@ -3196,7 +3783,71 @@ namespace OmenCore.ViewModels
         /// </summary>
         private void ApplyGpuOc()
         {
+            if (!ValidateGpuOcPowerSourceForIncrease())
+            {
+                return;
+            }
+
             var result = ApplyGpuOcValues(GpuCoreClockOffset, GpuMemoryClockOffset, GpuPowerLimitPercent, GpuVoltageOffsetMv, true, "✓ Applied");
+            GpuOcStatus = result.StatusText;
+        }
+
+        private bool ValidateGpuOcPowerSourceForIncrease()
+        {
+            if (_nvapiService == null)
+            {
+                return true;
+            }
+
+            var isIncrease = GpuOcSafetyGuard.IsIncreaseRequest(
+                requestedCore: GpuCoreClockOffset,
+                requestedMemory: GpuMemoryClockOffset,
+                requestedPowerLimit: GpuPowerLimitPercent,
+                requestedVoltage: GpuVoltageOffsetMv,
+                currentCore: _nvapiService.CoreClockOffsetMHz,
+                currentMemory: _nvapiService.MemoryClockOffsetMHz,
+                currentPowerLimit: _nvapiService.PowerLimitPercent,
+                currentVoltage: _nvapiService.VoltageOffsetMv);
+
+            if (!isIncrease)
+            {
+                return true;
+            }
+
+            bool isOnAc;
+            try
+            {
+                var powerStatus = System.Windows.Forms.SystemInformation.PowerStatus;
+                isOnAc = powerStatus.PowerLineStatus == System.Windows.Forms.PowerLineStatus.Online;
+            }
+            catch
+            {
+                // Best-effort read failed: do not hard-block apply path, but keep a warning trail.
+                _logging.Warn("Could not read AC/battery status before GPU OC apply; proceeding.");
+                return true;
+            }
+
+            if (isOnAc)
+            {
+                return true;
+            }
+
+            System.Windows.MessageBox.Show(
+                "GPU OC increase detected while running on battery power.\n\n" +
+                "Applying higher clocks/power limits on battery can cause unstable clocks, rapid battery drain, and sudden throttling.\n\n" +
+                "Connect AC power before increasing GPU OC settings.",
+                "AC Power Recommended",
+                System.Windows.MessageBoxButton.OK,
+                System.Windows.MessageBoxImage.Warning);
+
+            GpuOcStatus = "GPU OC increase blocked: connect AC power first";
+            _logging.Warn("Blocked GPU OC increase because the system is on battery power.");
+            return false;
+        }
+        
+        private void ApplyGpuOcStartupRestore()
+        {
+            var result = ApplyGpuOcValues(GpuCoreClockOffset, GpuMemoryClockOffset, GpuPowerLimitPercent, GpuVoltageOffsetMv, false, "Restored");
             GpuOcStatus = result.StatusText;
         }
         
@@ -3225,7 +3876,7 @@ namespace OmenCore.ViewModels
             GpuOcStatus = GpuOcAvailable
                 ? "Reset to defaults (Core: 0 MHz, Memory: 0 MHz, Power: 100%, Voltage: 0 mV)"
                 : "Reset to defaults (Power: 100%)";
-            SaveGpuOcToConfig();
+            SaveGpuOcToConfig(applyOnStartup: false);
             _logging.Info("GPU OC reset to defaults");
         }
 
@@ -3279,11 +3930,129 @@ namespace OmenCore.ViewModels
         }
 
         #endregion
+
+        private void RecoverUnconfirmedTuningProfilesAtStartup()
+        {
+            try
+            {
+                var config = _configService.Config;
+                var outcome = TuningStartupRecoveryCoordinator.Recover(config);
+
+                if (outcome.CpuUndervoltReset)
+                {
+                    _logging.Warn("Startup safety reset: unconfirmed CPU undervolt test state detected from previous session.");
+                }
+
+                if (outcome.GpuOcReset)
+                {
+                    _logging.Warn("Startup safety reset: unconfirmed GPU OC test state detected from previous session.");
+                }
+
+                if (outcome.ConfigChanged)
+                {
+                    _configService.Save(config);
+
+                    StartupRecoveryNoticeVisible = true;
+                    StartupRecoveryNoticeText = BuildStartupRecoveryNoticeText(outcome);
+                }
+                else
+                {
+                    StartupRecoveryNoticeVisible = false;
+                    StartupRecoveryNoticeText = string.Empty;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logging.Warn($"Startup tuning safety recovery check failed: {ex.Message}");
+            }
+        }
+
+        private static string BuildStartupRecoveryNoticeText(TuningStartupRecoveryOutcome outcome)
+        {
+            if (outcome.CpuUndervoltReset && outcome.GpuOcReset)
+            {
+                return "Startup safety reset applied: an unconfirmed CPU undervolt test and GPU OC test were detected from the previous session. Tuning has been reset to safe defaults.";
+            }
+
+            if (outcome.CpuUndervoltReset)
+            {
+                return "Startup safety reset applied: an unconfirmed CPU undervolt test was detected from the previous session. CPU undervolt has been reset to safe defaults.";
+            }
+
+            if (outcome.GpuOcReset)
+            {
+                return "Startup safety reset applied: an unconfirmed GPU OC test was detected from the previous session. GPU tuning has been reset to safe defaults.";
+            }
+
+            return string.Empty;
+        }
+
+        private void SetUndervoltTestPendingFlag(bool pending)
+        {
+            try
+            {
+                var config = _configService.Config;
+                config.Undervolt ??= new UndervoltPreferences();
+                config.Undervolt.PendingTestApply = pending;
+                config.Undervolt.StartupPendingConfirmation = pending;
+                if (!pending)
+                {
+                    config.Undervolt.LastStartupHadUnconfirmedState = false;
+                }
+                _configService.Save(config);
+            }
+            catch (Exception ex)
+            {
+                _logging.Warn($"Failed to persist undervolt pending-test metadata: {ex.Message}");
+            }
+        }
+
+        private void SetGpuOcTestPendingFlag(bool pending)
+        {
+            try
+            {
+                var config = _configService.Config;
+                config.GpuOc ??= new GpuOcSettings();
+                config.GpuOc.PendingTestApply = pending;
+                config.GpuOc.StartupPendingConfirmation = pending;
+                if (!pending)
+                {
+                    config.GpuOc.LastStartupHadUnconfirmedState = false;
+                }
+                _configService.Save(config);
+            }
+            catch (Exception ex)
+            {
+                _logging.Warn($"Failed to persist GPU OC pending-test metadata: {ex.Message}");
+            }
+        }
+
+        private void RecordConfirmedGpuOcMetadata()
+        {
+            try
+            {
+                var config = _configService.Config;
+                config.GpuOc ??= new GpuOcSettings();
+                config.GpuOc.LastConfirmedCoreClockOffsetMHz = GpuOcAvailable ? GpuCoreClockOffset : 0;
+                config.GpuOc.LastConfirmedMemoryClockOffsetMHz = GpuOcAvailable ? GpuMemoryClockOffset : 0;
+                config.GpuOc.LastConfirmedPowerLimitPercent = GpuPowerLimitPercent;
+                config.GpuOc.LastConfirmedVoltageOffsetMv = GpuOcAvailable ? GpuVoltageOffsetMv : 0;
+                config.GpuOc.LastConfirmedAtUtc = DateTime.UtcNow;
+                config.GpuOc.PendingTestApply = false;
+                config.GpuOc.StartupPendingConfirmation = false;
+                config.GpuOc.LastStartupHadUnconfirmedState = false;
+                _configService.Save(config);
+            }
+            catch (Exception ex)
+            {
+                _logging.Warn($"Failed to persist GPU OC confirmed-profile metadata: {ex.Message}");
+            }
+        }
         
         /// <summary>
         /// Save GPU OC settings to config for persistence.
         /// </summary>
-        private void SaveGpuOcToConfig()
+        private void SaveGpuOcToConfig(bool applyOnStartup)
         {
             try
             {
@@ -3295,10 +4064,10 @@ namespace OmenCore.ViewModels
                 config.GpuOc.MemoryClockOffsetMHz = GpuOcAvailable ? GpuMemoryClockOffset : 0;
                 config.GpuOc.PowerLimitPercent = GpuPowerLimitPercent;
                 config.GpuOc.VoltageOffsetMv = GpuOcAvailable ? GpuVoltageOffsetMv : 0;
-                config.GpuOc.ApplyOnStartup = true; // Default to reapply
+                config.GpuOc.ApplyOnStartup = applyOnStartup;
                 
                 _configService.Save(config);
-                _logging.Info($"GPU OC settings saved: Core={GpuCoreClockOffset}, Mem={GpuMemoryClockOffset}, Power={GpuPowerLimitPercent}%, Voltage={GpuVoltageOffsetMv}mV");
+                _logging.Info($"GPU OC settings saved: Core={GpuCoreClockOffset}, Mem={GpuMemoryClockOffset}, Power={GpuPowerLimitPercent}%, Voltage={GpuVoltageOffsetMv}mV, StartupReapply={applyOnStartup}");
             }
             catch (Exception ex)
             {
@@ -3336,11 +4105,11 @@ namespace OmenCore.ViewModels
                         var dispatcher = App.Current?.Dispatcher;
                         if (dispatcher != null)
                         {
-                            await dispatcher.InvokeAsync(ApplyGpuOc);
+                            await dispatcher.InvokeAsync(ApplyGpuOcStartupRestore);
                         }
                         else
                         {
-                            ApplyGpuOc();
+                            ApplyGpuOcStartupRestore();
                         }
                     }, "GPU OC restore");
                 }
@@ -3734,7 +4503,9 @@ namespace OmenCore.ViewModels
 
                     await _undervoltService.ApplyAsync(offset);
 
-                    // Save undervolt preferences to config (with null safety)
+                    // Save undervolt preferences to config, preserving the existing ApplyOnStartup flag.
+                    // Direct Apply saves the current values but does not enable startup reapply.
+                    // Startup reapply is only granted after the Test Apply -> Keep flow completes.
                     var config = _configService.Config;
                     config.Undervolt ??= new UndervoltPreferences();
                     config.Undervolt.DefaultOffset ??= new UndervoltOffset();
@@ -3743,6 +4514,7 @@ namespace OmenCore.ViewModels
                     config.Undervolt.EnablePerCoreUndervolt = EnablePerCoreUndervolt;
                     config.Undervolt.PerCoreOffsetsMv = RequestedPerCoreOffsets?.Clone() as int?[];
                     config.Undervolt.RespectExternalControllers = RespectExternalUndervolt;
+                    // Do not modify ApplyOnStartup here — preserve the previously confirmed state.
                     _configService.Save(config);
                 }, "Applying undervolt settings...");
 

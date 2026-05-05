@@ -117,6 +117,24 @@ namespace OmenCoreApp.Tests.ViewModels
         }
 
         [Fact]
+        public async Task GuidedDiagnostic_ReportsVerificationEvidenceInSummary()
+        {
+            var logging = new LoggingService(); logging.Initialize();
+            var notificationService = new NotificationService(logging);
+            var fakeFanService = new FanService(new DummyFanController(), new ThermalSensorProvider(new LibreHardwareMonitorImpl()), logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService());
+            var verifier = new TestVerifier();
+
+            var vm = new FanDiagnosticsViewModel(verifier, fakeFanService, logging);
+
+            await vm.RunGuidedDiagnosticAsync();
+
+            vm.GuidedTestResult.Should().Contain("evidence:");
+            vm.GuidedTestResult.Should().Contain("RPM");
+
+            logging.Dispose();
+        }
+
+        [Fact]
         public void RefreshState_SetsCurrentValues()
         {
             var logging = new LoggingService(); logging.Initialize();

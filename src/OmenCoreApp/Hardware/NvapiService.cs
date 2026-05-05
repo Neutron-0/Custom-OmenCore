@@ -882,8 +882,8 @@ namespace OmenCore.Hardware
                 return false;
             }
 
-            // Clamp to safe range: -200mV to +100mV
-            offsetMv = Math.Clamp(offsetMv, -200, 100);
+            // Clamp to safe range before any provider-specific write path.
+            offsetMv = OmenCore.Models.TuningGuardrails.ClampGpuVoltageOffsetMv(offsetMv);
 
             try
             {

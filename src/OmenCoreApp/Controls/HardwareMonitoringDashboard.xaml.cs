@@ -698,7 +698,7 @@ namespace OmenCore.Controls
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Error checking alerts: {ex.Message}");
+                App.Logging.Warn($"HardwareMonitoringDashboard: Error checking alerts: {ex.Message}");
             }
         }
 
@@ -761,7 +761,7 @@ namespace OmenCore.Controls
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Error refreshing charts: {ex.Message}");
+                App.Logging.Warn($"HardwareMonitoringDashboard: Error refreshing charts: {ex.Message}");
             }
         }
 

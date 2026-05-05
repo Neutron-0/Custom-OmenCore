@@ -19,7 +19,9 @@ namespace OmenCoreApp.Tests.Hardware
         }
 
         [Theory]
+        [InlineData("8A43", OmenModelFamily.OMEN16)]
         [InlineData("8A44", OmenModelFamily.OMEN16)]
+        [InlineData("8C76", OmenModelFamily.OMEN16)]
         [InlineData("8A3E", OmenModelFamily.Victus)]
         [InlineData("8A26", OmenModelFamily.Victus)]
         [InlineData("8C58", OmenModelFamily.Transcend)]
@@ -74,6 +76,25 @@ namespace OmenCoreApp.Tests.Hardware
             caps.SupportsFanControlEc.Should().BeFalse();
             caps.SupportsRpmReadback.Should().BeFalse("GitHub #120 reports accepted fan commands but 0 RPM readback");
             caps.MaxFanLevel.Should().Be(55);
+        }
+
+        [Fact]
+        public void GetCapabilities_8C76_Wf1015ns_UsesExactV1WmiProfile()
+        {
+            var caps = ModelCapabilityDatabase.GetCapabilities("8C76");
+
+            caps.ProductId.Should().Be("8C76");
+            caps.ModelName.Should().Contain("wf1xxx");
+            caps.Family.Should().Be(OmenModelFamily.OMEN16);
+            caps.SupportsFanControlWmi.Should().BeTrue();
+            caps.SupportsFanControlEc.Should().BeFalse();
+            caps.SupportsFanCurves.Should().BeTrue();
+            caps.FanZoneCount.Should().Be(2);
+            caps.MaxFanLevel.Should().Be(55);
+            caps.HasMuxSwitch.Should().BeTrue();
+            caps.SupportsGpuPowerBoost.Should().BeTrue();
+            caps.HasFourZoneRgb.Should().BeTrue();
+            caps.UserVerified.Should().BeFalse();
         }
     }
 }

@@ -35,6 +35,14 @@ namespace OmenCore.ViewModels
         private DateTime? _lastVerifiedAt;
         private string _verificationSummary = "Verification pending";
         private bool _hasStateDrift;
+        private OptimizationDriftSummary _lastDriftSummary = new();
+        private string _driftWarningRollup = "No drift explanations yet.";
+        private string _lastExportedReportPath = string.Empty;
+        private OptimizationState? _expectedStateForDrift;
+        private string _preflightSummary = "Preflight: not loaded";
+        private string _preflightWarningRollup = "No additional preflight warnings.";
+        private bool _preflightHasHighRisk;
+        private int _preflightHighRiskCount;
         
         public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -71,6 +79,10 @@ namespace OmenCore.ViewModels
             ApplyInputCommand = new RelayCommand(_ => _ = ApplyCategoryAsync("Input & Gaming", InputOptimizations), _ => CanApplyCategory(InputOptimizations));
             ApplyVisualCommand = new RelayCommand(_ => _ = ApplyCategoryAsync("Visual Effects", VisualOptimizations), _ => CanApplyCategory(VisualOptimizations));
             ApplyStorageCommand = new RelayCommand(_ => _ = ApplyCategoryAsync("Storage & Disk", StorageOptimizations), _ => CanApplyCategory(StorageOptimizations));
+            RefreshPreflightCommand = new RelayCommand(_ => _ = RefreshPreflightAsync());
+            ExportOptimizationReportCommand = new RelayCommand(_ => _ = ExportOptimizationReportAsync(), _ => !IsLoading);
+            OpenExportedReportCommand = new RelayCommand(_ => OpenExportedReport(), _ => CanOpenExportedReport);
+            CopyExportedReportPathCommand = new RelayCommand(_ => CopyExportedReportPath(), _ => CanCopyExportedReportPath);
 
             _verificationTimer = new DispatcherTimer
             {
@@ -157,8 +169,63 @@ namespace OmenCore.ViewModels
             private set { _hasStateDrift = value; OnPropertyChanged(); }
         }
 
+        public string DriftSummaryText => _lastDriftSummary.HasDrift
+            ? _lastDriftSummary.OneLinerSummary
+            : "No drift detected since last verification.";
+
+        public string DriftWarningRollup
+        {
+            get => _driftWarningRollup;
+            private set { _driftWarningRollup = value; OnPropertyChanged(); }
+        }
+
+        public string LastExportedReportPath
+        {
+            get => _lastExportedReportPath;
+            private set
+            {
+                _lastExportedReportPath = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(HasExportedReport));
+                OnPropertyChanged(nameof(CanOpenExportedReport));
+                OnPropertyChanged(nameof(CanCopyExportedReportPath));
+            }
+        }
+
+        public bool HasExportedReport => !string.IsNullOrWhiteSpace(LastExportedReportPath);
+        public bool CanOpenExportedReport => SystemOptimizerReportActionGuard.CanOpenReport(LastExportedReportPath);
+        public bool CanCopyExportedReportPath => SystemOptimizerReportActionGuard.CanCopyPath(LastExportedReportPath);
+
         public string OptimizationSummary => 
             $"{ActiveOptimizationCount} of {TotalOptimizationCount} optimizations active";
+
+        public string PreflightSummary
+        {
+            get => _preflightSummary;
+            private set { _preflightSummary = value; OnPropertyChanged(); }
+        }
+
+        public string PreflightWarningRollup
+        {
+            get => _preflightWarningRollup;
+            private set { _preflightWarningRollup = value; OnPropertyChanged(); }
+        }
+
+        public bool PreflightHasHighRisk
+        {
+            get => _preflightHasHighRisk;
+            private set { _preflightHasHighRisk = value; OnPropertyChanged(); OnPropertyChanged(nameof(PreflightRiskBannerText)); }
+        }
+
+        public int PreflightHighRiskCount
+        {
+            get => _preflightHighRiskCount;
+            private set { _preflightHighRiskCount = value; OnPropertyChanged(); OnPropertyChanged(nameof(PreflightRiskBannerText)); }
+        }
+
+        public string PreflightRiskBannerText => PreflightHasHighRisk
+            ? $"Preflight found {PreflightHighRiskCount} High-risk optimization(s). Review before applying Gaming Max."
+            : "Preflight contains no High-risk optimizations.";
 
         // Optimization Collections
         public ObservableCollection<OptimizationItem> PowerOptimizations { get; }
@@ -180,6 +247,10 @@ namespace OmenCore.ViewModels
         public ICommand ApplyInputCommand { get; }
         public ICommand ApplyVisualCommand { get; }
         public ICommand ApplyStorageCommand { get; }
+        public ICommand RefreshPreflightCommand { get; }
+        public ICommand ExportOptimizationReportCommand { get; }
+        public ICommand OpenExportedReportCommand { get; }
+        public ICommand CopyExportedReportPathCommand { get; }
 
         // ========== METHODS ==========
 
@@ -195,9 +266,15 @@ namespace OmenCore.ViewModels
                 SetStatusAction(showOverlay ? "Scanning system state" : "Refreshing optimizer state");
                 
                 _currentState = await _optimizerService.VerifyStateAsync();
+                _expectedStateForDrift = _currentState;
                 LastVerifiedAt = _currentState.LastChecked;
                 VerificationSummary = "Verified against current system state";
                 HasStateDrift = false;
+                _lastDriftSummary = new OptimizationDriftSummary();
+                DriftWarningRollup = "No drift explanations yet.";
+                OnPropertyChanged(nameof(DriftSummaryText));
+
+                await RefreshPreflightAsync(showStatus: false);
                 
                 UpdateOptimizationCollections();
                 
@@ -524,8 +601,12 @@ namespace OmenCore.ViewModels
 
         private async Task ApplyGamingMaxAsync()
         {
+            var preflight = await _optimizerService.GeneratePreflightReportAsync(includeHighRisk: true);
+
             var msgResult = MessageBox.Show(
                 "This will apply ALL gaming optimizations for maximum performance.\n\n" +
+                $"{SystemOptimizerPreflightFormatter.BuildSummary(preflight)}\n" +
+                $"{SystemOptimizerPreflightFormatter.BuildWarningRollup(preflight)}\n\n" +
                 "A system restore point will be created before making changes.\n\n" +
                 "Continue?",
                 "Apply Gaming Maximum",
@@ -650,8 +731,12 @@ namespace OmenCore.ViewModels
 
         private async Task ApplyBalancedAsync()
         {
+            var preflight = await _optimizerService.GeneratePreflightReportAsync(includeHighRisk: false);
+
             var msgResult = MessageBox.Show(
                 "This will apply recommended optimizations with minimal risk.\n\n" +
+                $"{SystemOptimizerPreflightFormatter.BuildSummary(preflight)}\n" +
+                $"{SystemOptimizerPreflightFormatter.BuildWarningRollup(preflight)}\n\n" +
                 "A system restore point will be created before making changes.\n\n" +
                 "Continue?",
                 "Apply Balanced Optimizations",
@@ -794,11 +879,14 @@ namespace OmenCore.ViewModels
                 var verifiedState = await _optimizerService.VerifyStateAsync();
                 LastVerifiedAt = verifiedState.LastChecked;
 
-                var driftedOptimizations = GetDriftedOptimizations(expectedState, verifiedState).ToList();
-                if (!driftedOptimizations.Any())
+                var driftSummary = SystemOptimizerService.GetDriftExplanations(expectedState, verifiedState);
+                if (!driftSummary.HasDrift)
                 {
                     VerificationSummary = "Verified: no drift detected";
                     HasStateDrift = false;
+                    _lastDriftSummary = driftSummary;
+                    DriftWarningRollup = "No drift explanations yet.";
+                    OnPropertyChanged(nameof(DriftSummaryText));
                     return;
                 }
 
@@ -807,19 +895,28 @@ namespace OmenCore.ViewModels
                 {
                     verifiedState = await _optimizerService.VerifyStateAsync();
                     LastVerifiedAt = verifiedState.LastChecked;
-                    driftedOptimizations = GetDriftedOptimizations(expectedState, verifiedState).ToList();
+                    driftSummary = SystemOptimizerService.GetDriftExplanations(expectedState, verifiedState);
                 }
 
                 _currentState = verifiedState;
+                _expectedStateForDrift = expectedState;
                 UpdateOptimizationCollections();
                 OnPropertyChanged(nameof(ActiveOptimizationCount));
                 OnPropertyChanged(nameof(TotalOptimizationCount));
                 OnPropertyChanged(nameof(OptimizationSummary));
 
-                HasStateDrift = driftedOptimizations.Any();
+                _lastDriftSummary = driftSummary;
+                DriftWarningRollup = driftSummary.HasDrift
+                    ? string.Join(" | ", driftSummary.DriftedItems.Take(3).Select(d => d.Explanation))
+                    : "No drift explanations yet.";
+                OnPropertyChanged(nameof(DriftSummaryText));
+
+                HasStateDrift = driftSummary.HasDrift;
                 VerificationSummary = HasStateDrift
-                    ? $"Drift detected: {string.Join(", ", driftedOptimizations.Take(3))}"
+                    ? $"Drift detected: {string.Join(", ", driftSummary.DriftedItems.Select(d => d.Name).Take(3))}"
                     : $"Verified: auto-corrected {autoCorrectionResults.Count(result => result.Success)} service setting(s)";
+
+                await RefreshPreflightAsync(showStatus: false);
             }
             catch (Exception ex)
             {
@@ -828,34 +925,101 @@ namespace OmenCore.ViewModels
             }
         }
 
-        private static IEnumerable<string> GetDriftedOptimizations(OptimizationState expected, OptimizationState actual)
+        private async Task RefreshPreflightAsync(bool showStatus = true)
         {
-            if (expected.Power.UltimatePerformancePlan != actual.Power.UltimatePerformancePlan) yield return "Ultimate Performance Plan";
-            if (expected.Power.HardwareGpuScheduling != actual.Power.HardwareGpuScheduling) yield return "Hardware GPU Scheduling";
-            if (expected.Power.GameModeEnabled != actual.Power.GameModeEnabled) yield return "Game Mode";
-            if (expected.Power.ForegroundPriority != actual.Power.ForegroundPriority) yield return "Foreground Priority Boost";
+            try
+            {
+                if (showStatus)
+                {
+                    SetStatusAction("Refreshing optimizer preflight");
+                }
 
-            if (expected.Services.TelemetryDisabled != actual.Services.TelemetryDisabled) yield return "Disable Telemetry";
-            if (expected.Services.SysMainDisabled != actual.Services.SysMainDisabled) yield return "Disable SysMain";
-            if (expected.Services.SearchIndexingDisabled != actual.Services.SearchIndexingDisabled) yield return "Disable Search Indexing";
-            if (expected.Services.DiagTrackDisabled != actual.Services.DiagTrackDisabled) yield return "Disable Connected Experiences";
+                var report = await _optimizerService.GeneratePreflightReportAsync(includeHighRisk: true);
+                PreflightSummary = SystemOptimizerPreflightFormatter.BuildSummary(report);
+                PreflightWarningRollup = SystemOptimizerPreflightFormatter.BuildWarningRollup(report);
+                PreflightHasHighRisk = report.HasHighRisk;
+                PreflightHighRiskCount = report.HighRiskCount;
 
-            if (expected.Network.TcpNoDelay != actual.Network.TcpNoDelay) yield return "TCP No Delay";
-            if (expected.Network.TcpAckFrequency != actual.Network.TcpAckFrequency) yield return "TCP ACK Optimization";
-            if (expected.Network.DeliveryOptimizationDisabled != actual.Network.DeliveryOptimizationDisabled) yield return "Disable P2P Updates";
-            if (expected.Network.NagleDisabled != actual.Network.NagleDisabled) yield return "Disable Nagle Algorithm";
+                if (showStatus)
+                {
+                    SetStatusDone("Preflight updated");
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"Failed to refresh preflight: {ex.Message}");
+                if (showStatus)
+                {
+                    SetStatusFailed($"Preflight refresh failed: {ex.Message}");
+                }
+            }
+        }
 
-            if (expected.Input.MouseAccelerationDisabled != actual.Input.MouseAccelerationDisabled) yield return "Disable Mouse Acceleration";
-            if (expected.Input.GameDvrDisabled != actual.Input.GameDvrDisabled) yield return "Disable Game DVR";
-            if (expected.Input.GameBarDisabled != actual.Input.GameBarDisabled) yield return "Disable Xbox Game Bar";
-            if (expected.Input.FullscreenOptimizationsDisabled != actual.Input.FullscreenOptimizationsDisabled) yield return "Fullscreen Optimizations";
+        private async Task ExportOptimizationReportAsync()
+        {
+            try
+            {
+                SetStatusAction("Exporting optimization report");
+                var exportPath = await _optimizerService.ExportOptimizationReportAsync(_expectedStateForDrift);
+                if (string.IsNullOrWhiteSpace(exportPath))
+                {
+                    SetStatusFailed("Could not export optimization report");
+                    return;
+                }
 
-            if (expected.Visual.TransparencyDisabled != actual.Visual.TransparencyDisabled) yield return "Disable Transparency";
-            if (expected.Visual.AnimationsDisabled != actual.Visual.AnimationsDisabled) yield return "Disable Animations";
+                LastExportedReportPath = exportPath;
+                SetStatusDone($"Report exported: {exportPath}");
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"Failed to export optimization report: {ex.Message}");
+                SetStatusFailed($"Report export failed: {ex.Message}");
+            }
+        }
 
-            if (expected.Storage.TrimEnabled != actual.Storage.TrimEnabled) yield return "TRIM for SSD";
-            if (expected.Storage.LastAccessDisabled != actual.Storage.LastAccessDisabled) yield return "Disable Last Access Timestamps";
-            if (expected.Storage.ShortNamesDisabled != actual.Storage.ShortNamesDisabled) yield return "Disable 8.3 Names";
+        private void OpenExportedReport()
+        {
+            var path = SystemOptimizerReportActionGuard.NormalizePath(LastExportedReportPath);
+            if (!SystemOptimizerReportActionGuard.CanOpenReport(path))
+            {
+                SetStatusFailed("Report file not found");
+                return;
+            }
+
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(path)
+                {
+                    UseShellExecute = true
+                });
+                SetStatusDone("Opened exported report");
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"Failed to open optimization report: {ex.Message}");
+                SetStatusFailed($"Could not open report: {ex.Message}");
+            }
+        }
+
+        private void CopyExportedReportPath()
+        {
+            var path = SystemOptimizerReportActionGuard.NormalizePath(LastExportedReportPath);
+            if (!SystemOptimizerReportActionGuard.CanCopyPath(path))
+            {
+                SetStatusFailed("No report path to copy");
+                return;
+            }
+
+            try
+            {
+                Clipboard.SetText(path);
+                SetStatusDone("Copied report path to clipboard");
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"Failed to copy report path: {ex.Message}");
+                SetStatusFailed($"Could not copy report path: {ex.Message}");
+            }
         }
 
         private bool CanApplyCategory(ObservableCollection<OptimizationItem> optimizations)
@@ -871,6 +1035,9 @@ namespace OmenCore.ViewModels
             (ApplyInputCommand as RelayCommand)?.RaiseCanExecuteChanged();
             (ApplyVisualCommand as RelayCommand)?.RaiseCanExecuteChanged();
             (ApplyStorageCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            (ExportOptimizationReportCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            (OpenExportedReportCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            (CopyExportedReportPathCommand as RelayCommand)?.RaiseCanExecuteChanged();
         }
 
         private static void ApplyRiskAssessmentMetadata(IEnumerable<OptimizationItem> items)

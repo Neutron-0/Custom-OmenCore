@@ -31,6 +31,20 @@ namespace OmenCore.Services
         }
 
         /// <summary>
+        /// Normalize model text into a stable key used for fan calibration storage lookups.
+        /// </summary>
+        public static string NormalizeModelId(string modelInfo)
+        {
+            return (modelInfo ?? string.Empty)
+                .ToLowerInvariant()
+                .Replace(" ", "_")
+                .Replace("-", "_")
+                .Replace(".", string.Empty)
+                .Replace("(", string.Empty)
+                .Replace(")", string.Empty);
+        }
+
+        /// <summary>
         /// Get calibration data for a specific model.
         /// </summary>
         public FanModelCalibration? GetCalibration(string modelId)

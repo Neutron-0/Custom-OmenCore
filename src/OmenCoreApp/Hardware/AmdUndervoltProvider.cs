@@ -11,7 +11,7 @@ namespace OmenCore.Hardware
     /// </summary>
     public class AmdUndervoltProvider : ICpuUndervoltProvider, IDisposable
     {
-        private const string RyzenAi9UnsupportedMessage = "CPU Curve Optimizer is not yet supported on Ryzen AI 9 processors.";
+        private const string RyzenAi9ExperimentalMessage = "Ryzen AI 9 Curve Optimizer path is experimental. Use conservative offsets and verify stability.";
         private readonly object _stateLock = new();
         private readonly RyzenSmu _smu;
         private readonly RyzenCpuInfo _cpuInfo;
@@ -44,10 +44,12 @@ namespace OmenCore.Hardware
         /// </summary>
         public Task ApplyOffsetAsync(UndervoltOffset offset, CancellationToken token)
         {
+            var safeOffset = TuningGuardrails.ClampCpuUndervoltOffset(offset, amdCurveOptimizer: true);
+
             // Convert Intel-style mV offset to Curve Optimizer units
             // CO is roughly 3-5mV per count, we'll approximate
-            int coCounts = (int)(offset.CoreMv / 4.0);
-            int igpuCoCounts = SupportsIgpu ? (int)(offset.CacheMv / 4.0) : 0;
+            int coCounts = (int)(safeOffset.CoreMv / 4.0);
+            int igpuCoCounts = SupportsIgpu ? (int)(safeOffset.CacheMv / 4.0) : 0;
 
             return ApplyRyzenOffsetAsync(coCounts, igpuCoCounts, token);
         }
@@ -60,11 +62,6 @@ namespace OmenCore.Hardware
             token.ThrowIfCancellationRequested();
             lock (_stateLock)
             {
-                if (RyzenControl.IsRyzenAi9CurveOptimizerUnsupported())
-                {
-                    throw new InvalidOperationException(RyzenAi9UnsupportedMessage);
-                }
-
                 if (!_smu.IsAvailable)
                 {
                     throw new InvalidOperationException("Ryzen SMU is not available. Install PawnIO driver.");
@@ -153,8 +150,7 @@ namespace OmenCore.Hardware
                 }
                 else if (RyzenControl.IsRyzenAi9CurveOptimizerUnsupported())
                 {
-                    status.Warning = RyzenAi9UnsupportedMessage;
-                    status.ControlledByOmenCore = false;
+                    status.Warning = RyzenAi9ExperimentalMessage;
                 }
                 else if (!_cpuInfo.SupportsUndervolt)
                 {
@@ -294,6 +290,8 @@ namespace OmenCore.Hardware
         /// </summary>
         public RyzenSmu.SmuStatus SetStapmLimit(uint valueMw)
         {
+            valueMw = Math.Clamp(valueMw, 15_000u, 54_000u);
+
             uint[] args = new uint[6];
             args[0] = valueMw;
             RyzenSmu.SmuStatus result = RyzenSmu.SmuStatus.Failed;
@@ -328,6 +326,8 @@ namespace OmenCore.Hardware
         /// </summary>
         public RyzenSmu.SmuStatus SetTctlTemp(uint tempC)
         {
+            tempC = Math.Clamp(tempC, 75u, 105u);
+
             uint[] args = new uint[6];
             args[0] = tempC;
             RyzenSmu.SmuStatus result = RyzenSmu.SmuStatus.Failed;

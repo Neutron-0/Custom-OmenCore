@@ -489,6 +489,15 @@ namespace OmenCore
                     var win = MainWindow;
                     var active = win != null && win.IsVisible && win.WindowState != WindowState.Minimized;
                     monSvc.SetUiWindowActive(active);
+
+                    // Ultra-low tray-only cadence: no visible window and no active fan curve/hold.
+                    var trayOnly = !active;
+                    if (trayOnly && mainViewModel.FanService != null)
+                    {
+                        try { trayOnly = !mainViewModel.FanService.IsCurveOrHoldActive; }
+                        catch { /* best-effort */ }
+                    }
+                    monSvc.SetTrayOnlyMode(trayOnly);
                 }
                 // Defer subscription until the window is actually created (it may not exist yet).
                 Dispatcher.InvokeAsync(() =>

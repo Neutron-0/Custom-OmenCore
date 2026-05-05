@@ -38,6 +38,7 @@ namespace OmenCore.Utils
         private MenuItem? _monitoringHealthMenuItem;
         private MonitoringSample? _latestSample;
         private string _currentFanMode = "Auto";
+        private string? _pendingFanModeRequest;
         private string _currentPerformanceMode = "Balanced";
         private string? _curvePresetName;
         private bool _linkFanToPerformanceMode;
@@ -194,7 +195,7 @@ namespace OmenCore.Utils
                         }
                     }
                 }
-                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[Tray] Submenu style error: {ex.Message}"); }
+                catch (Exception ex) { App.Logging.Warn($"[Tray] Submenu style error: {ex.Message}"); }
             };
 
             contextMenu.Items.Add(quickProfileMenuItem);
@@ -237,7 +238,7 @@ namespace OmenCore.Utils
                         }
                     }
                 }
-                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[Tray] Fan submenu style error: {ex.Message}"); }
+                catch (Exception ex) { App.Logging.Warn($"[Tray] Fan submenu style error: {ex.Message}"); }
             };
             advancedMenuItem.Items.Add(_fanModeMenuItem);
 
@@ -276,7 +277,7 @@ namespace OmenCore.Utils
                         }
                     }
                 }
-                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[Tray] Performance submenu style error: {ex.Message}"); }
+                catch (Exception ex) { App.Logging.Warn($"[Tray] Performance submenu style error: {ex.Message}"); }
             };
             advancedMenuItem.Items.Add(_performanceModeMenuItem);
 
@@ -321,7 +322,7 @@ namespace OmenCore.Utils
                         }
                     }
                 }
-                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[Tray] Display submenu style error: {ex.Message}"); }
+                catch (Exception ex) { App.Logging.Warn($"[Tray] Display submenu style error: {ex.Message}"); }
             };
 
             advancedMenuItem.Items.Add(_displayMenuItem);
@@ -361,7 +362,7 @@ namespace OmenCore.Utils
                         }
                     }
                 }
-                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[Tray] GPU Power submenu style error: {ex.Message}"); }
+                catch (Exception ex) { App.Logging.Warn($"[Tray] GPU Power submenu style error: {ex.Message}"); }
             };
             advancedMenuItem.Items.Add(_gpuPowerMenuItem);
             
@@ -407,7 +408,7 @@ namespace OmenCore.Utils
                         }
                     }
                 }
-                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[Tray] Keyboard submenu style error: {ex.Message}"); }
+                catch (Exception ex) { App.Logging.Warn($"[Tray] Keyboard submenu style error: {ex.Message}"); }
             };
             advancedMenuItem.Items.Add(_keyboardBacklightMenuItem);
             
@@ -433,7 +434,7 @@ namespace OmenCore.Utils
                         }
                     }
                 }
-                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[Tray] Advanced submenu style error: {ex.Message}"); }
+                catch (Exception ex) { App.Logging.Warn($"[Tray] Advanced submenu style error: {ex.Message}"); }
             };
             
             contextMenu.Items.Add(advancedMenuItem);
@@ -617,17 +618,14 @@ namespace OmenCore.Utils
 
         private void SetFanMode(string mode)
         {
-            _currentFanMode = mode;
+            _pendingFanModeRequest = mode;
             if (_fanModeMenuItem != null)
             {
-                _fanModeMenuItem.Header = $"🌀 Fan Control ▶ [{mode}]";
+                _fanModeMenuItem.Header = BuildFanModeHeader();
             }
-            
-            // v2.6.1: Update checkmarks on fan menu items
-            UpdateFanModeCheckmarks(mode);
-            
+
             FanModeChangeRequested?.Invoke(mode);
-            App.Logging.Info($"Fan mode changed from tray: {mode}");
+            App.Logging.Info($"Fan mode request from tray: requested={mode}, current={_currentFanMode}");
         }
         
         /// <summary>
@@ -635,12 +633,16 @@ namespace OmenCore.Utils
         /// </summary>
         private void UpdateFanModeCheckmarks(string activeMode)
         {
+            var isAuto = FanModeNameResolver.IsAutoAlias(activeMode);
+            var isMax = FanModeNameResolver.IsMaxAlias(activeMode);
+            var isQuiet = FanModeNameResolver.IsQuietAlias(activeMode);
+
             if (_fanAutoMenuItem != null)
-                _fanAutoMenuItem.Header = (activeMode == "Auto" ? "✓" : "  ") + " ⚡ Auto — System controlled";
+                _fanAutoMenuItem.Header = (isAuto ? "✓" : "  ") + " ⚡ Auto — System controlled";
             if (_fanMaxMenuItem != null)
-                _fanMaxMenuItem.Header = (activeMode == "Max" ? "✓" : "  ") + " 🔥 Max — Maximum cooling";
+                _fanMaxMenuItem.Header = (isMax ? "✓" : "  ") + " 🔥 Max — Maximum cooling";
             if (_fanQuietMenuItem != null)
-                _fanQuietMenuItem.Header = (activeMode == "Quiet" ? "✓" : "  ") + " 🤫 Quiet — Reduced noise";
+                _fanQuietMenuItem.Header = (isQuiet ? "✓" : "  ") + " 🤫 Quiet — Reduced noise";
         }
 
         private void SetPerformanceMode(string mode)
@@ -848,13 +850,17 @@ namespace OmenCore.Utils
         public void UpdateFanMode(string mode)
         {
             _currentFanMode = mode;
+            _pendingFanModeRequest = null;
             Application.Current?.Dispatcher?.BeginInvoke(() =>
             {
+                UpdateFanModeCheckmarks(mode);
+
                 if (_fanModeMenuItem != null)
                 {
-                    var suffix = _linkFanToPerformanceMode ? " [linked]" : string.Empty;
-                    _fanModeMenuItem.Header = $"🌀 Fan Mode ▶ {mode}{suffix}";
+                    _fanModeMenuItem.Header = BuildFanModeHeader();
                 }
+
+                _quickPopup?.UpdateFanMode(mode);
             });
         }
 
@@ -886,8 +892,7 @@ namespace OmenCore.Utils
             {
                 if (_fanModeMenuItem != null)
                 {
-                    var suffix = linked ? " [linked]" : string.Empty;
-                    _fanModeMenuItem.Header = $"🌀 Fan Mode ▶ {_currentFanMode}{suffix}";
+                    _fanModeMenuItem.Header = BuildFanModeHeader();
                 }
 
                 if (_quickPopup != null)
@@ -919,6 +924,24 @@ namespace OmenCore.Utils
                     _quickPopup.UpdateMonitoringHealth(_monitoringHealth);
                 }
             });
+        }
+
+        private string BuildFanModeHeader() =>
+            BuildFanModeHeaderText(_currentFanMode, _pendingFanModeRequest, _linkFanToPerformanceMode);
+
+        /// <summary>
+        /// Pure helper — separated so it can be tested without WPF dependencies.
+        /// </summary>
+        public static string BuildFanModeHeaderText(string currentMode, string? pendingRequest, bool linked)
+        {
+            var suffix = linked ? " [linked]" : string.Empty;
+            if (!string.IsNullOrWhiteSpace(pendingRequest) &&
+                !string.Equals(pendingRequest, currentMode, StringComparison.OrdinalIgnoreCase))
+            {
+                return $"🌀 Fan Mode ▶ {currentMode}{suffix} (requested: {pendingRequest})";
+            }
+
+            return $"🌀 Fan Mode ▶ {currentMode}{suffix}";
         }
 
         /// <summary>

@@ -355,6 +355,24 @@ namespace OmenCore.Hardware
                 UserVerified = false,
                 Notes = "GitHub #112 — OMEN 16-n0xxx. Capabilities inferred from adjacent OMEN 16 generations; needs user verification."
             });
+
+            // OMEN 16 (2022) - n0xxx series (AMD) Hades board variant
+            // GitHub Issue #121 report: Product ID 8A43 was being inferred through 8A44 pattern fallback.
+            AddModel(new ModelCapabilities
+            {
+                ProductId = "8A43",
+                ModelName = "OMEN 16 (2022) n0xxx AMD",
+                ModelYear = 2022,
+                Family = OmenModelFamily.OMEN16,
+                SupportsFanControlWmi = true,
+                SupportsFanCurves = true,
+                HasMuxSwitch = true,
+                SupportsGpuPowerBoost = true,
+                SupportsUndervolt = false,
+                HasFourZoneRgb = true,
+                UserVerified = false,
+                Notes = "GitHub #121 — Hades 8A43 exact ProductId profile added to avoid model-name-pattern inference."
+            });
             
             // OMEN 16 (2023) - wf series
             AddModel(new ModelCapabilities
@@ -389,6 +407,30 @@ namespace OmenCore.Hardware
                 HasFourZoneRgb = true,
                 UserVerified = false,
                 Notes = "OMEN 16-wf1xxx (2024 Intel) — Board 8C78. Added for Issue #68. Set UserVerified=true after community confirmation."
+            });
+
+            // OMEN 16-WF1015ns / 9U8J3EA (2024 Intel) — ProductId 8C76, System SKU CND4311VNJ
+            // Discord field report + logs (2026-05-04): i9-14900HX + RTX 4080 Laptop GPU,
+            // BIOS F.19, WMI Thermal Policy V1, 2 fans, classic MaxFanLevel=55, 4-zone RGB,
+            // MUX + GPU Power Boost available. Exact ProductId entry avoids low-confidence
+            // model-name inference and prevents the wrong sibling assumptions (8BAB V2/100-level).
+            AddModel(new ModelCapabilities
+            {
+                ProductId = "8C76",
+                ModelName = "OMEN 16 (2024) wf1xxx Intel",
+                ModelNamePattern = "16-wf1",
+                ModelYear = 2024,
+                Family = OmenModelFamily.OMEN16,
+                SupportsFanControlWmi = true,
+                SupportsFanControlEc = false,
+                SupportsFanCurves = true,
+                FanZoneCount = 2,
+                MaxFanLevel = 55,
+                HasMuxSwitch = true,
+                SupportsGpuPowerBoost = true,
+                HasFourZoneRgb = true,
+                UserVerified = false,
+                Notes = "Discord HUrON / HP OMEN 16-WF1015ns 9U8J3EA — ProductId 8C76, i9-14900HX + RTX 4080, BIOS F.19, WMI V1/classic 55-level fan control. Exact entry replaces low-confidence inferred sibling match."
             });
             
             // OMEN 16 (2024) - xf series

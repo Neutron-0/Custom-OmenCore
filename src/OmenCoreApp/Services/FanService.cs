@@ -101,6 +101,13 @@ namespace OmenCore.Services
         private volatile bool _fanModeTransitioning;
         private DateTime _fanTransitionUntil = DateTime.MinValue;
         private const int FanTransitionHoldMs = 5000; // hold for up to 5 s after preset apply
+
+        // Bounded command history for diagnostics exports and field reports. This captures
+        // requested writes even when hardware readback is delayed or unavailable.
+        private const int MaxFanCommandHistoryEntries = 80;
+        private readonly object _fanCommandHistoryLock = new();
+        private readonly Queue<FanCommandHistoryEntry> _fanCommandHistory = new();
+        private bool? _lastRecordedHoldActive;
         
         // Thermal protection - override Auto mode when temps get too high
         // v2.8.0: Raised thresholds — 80°C/85°C was too aggressive for gaming laptops
@@ -183,6 +190,30 @@ namespace OmenCore.Services
                 }
             }
         }
+
+        /// <summary>
+        /// Whether the active backend is currently maintaining fan ownership (keepalive/hold)
+        /// independent of curve mode.
+        /// </summary>
+        public bool IsHoldActive
+        {
+            get
+            {
+                try
+                {
+                    return _fanController.IsHoldActive;
+                }
+                catch
+                {
+                    return false;
+                }
+            }
+        }
+
+        /// <summary>
+        /// True when either a custom curve is active or backend hold/keepalive is active.
+        /// </summary>
+        public bool IsCurveOrHoldActive => IsCurveActive || IsHoldActive;
         
         /// <summary>
         /// Whether independent CPU/GPU curves are being used.
@@ -208,6 +239,128 @@ namespace OmenCore.Services
         /// Whether diagnostic mode is active (suspends curve engine for manual testing).
         /// </summary>
         public bool IsDiagnosticModeActive => _diagnosticModeActive;
+
+        public IReadOnlyList<FanCommandHistoryEntry> GetCommandHistorySnapshot()
+        {
+            lock (_fanCommandHistoryLock)
+            {
+                return _fanCommandHistory.ToList();
+            }
+        }
+
+        public string GetFanCommandHistoryReport()
+        {
+            var entries = GetCommandHistorySnapshot();
+            var lines = new System.Text.StringBuilder();
+            lines.AppendLine("Fan Command History");
+            lines.AppendLine($"Backend: {Backend}");
+            lines.AppendLine($"Current mode: {_currentFanMode}");
+            lines.AppendLine($"Active preset: {_activePreset?.Name ?? "<none>"}");
+            lines.AppendLine($"Curve active: {IsCurveActive}");
+            lines.AppendLine($"Diagnostic mode: {_diagnosticModeActive}");
+            lines.AppendLine($"Thermal protection active: {_thermalProtectionActive}");
+            AppendOptionalMaxExternalResetStatus(lines);
+            lines.AppendLine($"Entries: {entries.Count}");
+            lines.AppendLine(new string('-', 80));
+
+            foreach (var entry in entries)
+            {
+                lines.AppendLine(
+                    $"{entry.TimestampUtc:O} | {(entry.Success ? "OK" : "FAIL"),-4} | {entry.Command,-22} | {entry.Target}");
+                lines.AppendLine(
+                    $"  backend={entry.Backend}; mode={entry.FanMode}; preset={entry.ActivePresetName ?? "<none>"}; " +
+                    $"curve={entry.CurveActive}; hold={entry.HoldActive}; curveOrHold={entry.CurveOrHoldActive}; diagnostic={entry.DiagnosticModeActive}; thermal={entry.ThermalProtectionActive}");
+                if (!string.IsNullOrWhiteSpace(entry.Details))
+                {
+                    lines.AppendLine($"  detail={entry.Details}");
+                }
+            }
+
+            return lines.ToString();
+        }
+
+        private void AppendOptionalMaxExternalResetStatus(System.Text.StringBuilder lines)
+        {
+            try
+            {
+                var controllerType = _fanController.GetType();
+                var resetUtc = controllerType.GetProperty("LastMaxModeExternalResetUtc")?.GetValue(_fanController);
+                var details = controllerType.GetProperty("LastMaxModeExternalResetDetails")?.GetValue(_fanController)?.ToString();
+
+                if (resetUtc is DateTime timestampUtc)
+                {
+                    lines.AppendLine($"Last Max external reset: {timestampUtc:O}");
+                    if (!string.IsNullOrWhiteSpace(details))
+                    {
+                        lines.AppendLine($"Last Max external reset detail: {details}");
+                    }
+                }
+                else
+                {
+                    lines.AppendLine("Last Max external reset: <none recorded>");
+                }
+            }
+            catch
+            {
+                lines.AppendLine("Last Max external reset: <unavailable>");
+            }
+        }
+
+        private void RecordFanCommand(string command, string target, bool success, string details = "")
+        {
+            var holdActive = IsHoldActive;
+            if (_lastRecordedHoldActive.HasValue && _lastRecordedHoldActive.Value != holdActive)
+            {
+                EnqueueFanCommandEntry(new FanCommandHistoryEntry
+                {
+                    TimestampUtc = DateTime.UtcNow,
+                    Command = "HoldStateTransition",
+                    Target = holdActive ? "Active" : "Inactive",
+                    Success = true,
+                    Details = $"Hold state changed: {(_lastRecordedHoldActive.Value ? "Active" : "Inactive")} -> {(holdActive ? "Active" : "Inactive")}",
+                    Backend = Backend,
+                    FanMode = _currentFanMode,
+                    ActivePresetName = _activePreset?.Name,
+                    CurveActive = IsCurveActive,
+                    HoldActive = holdActive,
+                    CurveOrHoldActive = IsCurveOrHoldActive,
+                    DiagnosticModeActive = _diagnosticModeActive,
+                    ThermalProtectionActive = _thermalProtectionActive
+                });
+            }
+            _lastRecordedHoldActive = holdActive;
+
+            var entry = new FanCommandHistoryEntry
+            {
+                TimestampUtc = DateTime.UtcNow,
+                Command = command,
+                Target = target,
+                Success = success,
+                Details = details,
+                Backend = Backend,
+                FanMode = _currentFanMode,
+                ActivePresetName = _activePreset?.Name,
+                CurveActive = IsCurveActive,
+                HoldActive = holdActive,
+                CurveOrHoldActive = IsCurveOrHoldActive,
+                DiagnosticModeActive = _diagnosticModeActive,
+                ThermalProtectionActive = _thermalProtectionActive
+            };
+
+            EnqueueFanCommandEntry(entry);
+        }
+
+        private void EnqueueFanCommandEntry(FanCommandHistoryEntry entry)
+        {
+            lock (_fanCommandHistoryLock)
+            {
+                _fanCommandHistory.Enqueue(entry);
+                while (_fanCommandHistory.Count > MaxFanCommandHistoryEntries)
+                {
+                    _fanCommandHistory.Dequeue();
+                }
+            }
+        }
 
             /// <summary>
             /// Human-readable description of the current fan control state for diagnostics/UI.
@@ -253,13 +406,15 @@ namespace OmenCore.Services
             try
             {
                 DisableCurve();
-                _fanController.RestoreAutoControl();
+                var restored = _fanController.RestoreAutoControl();
                 _activePreset = null;
                 _currentFanMode = "Auto";
+                RecordFanCommand("RestoreAutoControl", "BIOS auto", restored, restored ? "BIOS auto fan control restored" : "Controller returned false");
                 _logging.Info("✓ BIOS auto fan control restored");
             }
             catch (Exception ex)
             {
+                RecordFanCommand("RestoreAutoControl", "BIOS auto", false, ex.Message);
                 _logging.Error("Failed to restore auto control", ex);
                 throw;
             }
@@ -343,8 +498,9 @@ namespace OmenCore.Services
         }
 
         /// <summary>
-        /// Check RPM sanity: if duty > 0% but RPM = 0 for >30 seconds, raise a warning.
-        /// This indicates possible hardware fan failure or broken RPM readback.
+        /// Check RPM sanity for two mismatch classes:
+        /// 1) duty > 0% but RPM = 0 for >30s (possible sensor/hardware failure)
+        /// 2) duty = 0% but RPM stays high for >30s (likely firmware/ownership override)
         /// Called periodically from the monitoring loop after preset applies.
         /// </summary>
         public void CheckRpmSanity(int dutyPercent, int rpmReading)
@@ -378,11 +534,38 @@ namespace OmenCore.Services
                     });
                 }
             }
+            else if (dutyPercent == 0 && rpmReading >= HighRpmSanityThreshold)
+            {
+                if (_highRpmWithZeroDutyStartTime == DateTime.MinValue)
+                {
+                    _highRpmWithZeroDutyStartTime = DateTime.UtcNow;
+                    _logging.Warn($"RPM sanity check: high RPM detected with 0% duty ({rpmReading} RPM) - monitoring for firmware override/mismatch");
+                }
+
+                var elapsedSeconds = (DateTime.UtcNow - _highRpmWithZeroDutyStartTime).TotalSeconds;
+                if (elapsedSeconds >= RpmSanityCheckThresholdSeconds && !_highRpmZeroDutyWarningRaised)
+                {
+                    _highRpmZeroDutyWarningRaised = true;
+                    var message = $"Fan control mismatch detected: requested duty is 0% but RPM remains around {rpmReading} for {(int)elapsedSeconds}+ seconds. " +
+                                  "This usually means firmware or another app still owns fan control. Try toggling Max then reapply your curve, and close OMEN Gaming Hub/Light Studio if running.";
+                    _logging.Warn(message);
+
+                    RpmSanityCheckWarning?.Invoke(this, new RpmSanityCheckEventArgs
+                    {
+                        DutyPercent = dutyPercent,
+                        RpmReading = rpmReading,
+                        DurationAtZero = TimeSpan.FromSeconds(elapsedSeconds),
+                        Message = message
+                    });
+                }
+            }
             else if (dutyPercent > 0 && rpmReading > 0)
             {
                 // RPM is healthy - clear the warning state
                 _zeroRpmWithDutyStartTime = DateTime.MinValue;
                 _rpmSanityWarningRaised = false;
+                _highRpmWithZeroDutyStartTime = DateTime.MinValue;
+                _highRpmZeroDutyWarningRaised = false;
                 if (_lastFanRpm == 0)
                 {
                     _logging.Info($"RPM sanity check: recovered - RPM now reading {rpmReading} at {dutyPercent}% duty");
@@ -393,6 +576,11 @@ namespace OmenCore.Services
                 // Duty is off, reset the timer
                 _zeroRpmWithDutyStartTime = DateTime.MinValue;
                 _rpmSanityWarningRaised = false;
+                if (rpmReading < HighRpmSanityThreshold)
+                {
+                    _highRpmWithZeroDutyStartTime = DateTime.MinValue;
+                    _highRpmZeroDutyWarningRaised = false;
+                }
             }
 
             _lastFanDutyPercent = dutyPercent;
@@ -406,6 +594,8 @@ namespace OmenCore.Services
         {
             _zeroRpmWithDutyStartTime = DateTime.MinValue;
             _rpmSanityWarningRaised = false;
+            _highRpmWithZeroDutyStartTime = DateTime.MinValue;
+            _highRpmZeroDutyWarningRaised = false;
             _logging.Info("RPM sanity warning dismissed by user");
         }
         
@@ -422,10 +612,13 @@ namespace OmenCore.Services
         // RPM sanity check state - monitor for broken RPM readback after preset applies
         // If duty > 0% but RPM reads 0 for >30 seconds, likely indicates hardware issue
         private DateTime _zeroRpmWithDutyStartTime = DateTime.MinValue;
+        private DateTime _highRpmWithZeroDutyStartTime = DateTime.MinValue;
         private int _lastFanDutyPercent = -1;
         private int _lastFanRpm = -1;
         private bool _rpmSanityWarningRaised = false;
+        private bool _highRpmZeroDutyWarningRaised = false;
         private const int RpmSanityCheckThresholdSeconds = 30;
+        private const int HighRpmSanityThreshold = 1800;
         
         /// <summary>
         /// Enable/disable thermal protection override.
@@ -541,6 +734,7 @@ namespace OmenCore.Services
             if (!FanWritesAvailable)
             {
                 _logging.Warn($"Fan preset '{preset.Name}' skipped; fan control unavailable ({_fanController.Status})");
+                RecordFanCommand("ApplyPreset", preset.Name, false, $"Fan control unavailable: {_fanController.Status}");
                 return false;
             }
 
@@ -549,6 +743,7 @@ namespace OmenCore.Services
             if (_diagnosticModeActive)
             {
                 _logging.Warn($"Skipping preset '{preset.Name}' while in diagnostic mode");
+                RecordFanCommand("ApplyPreset", preset.Name, false, "Diagnostic mode active");
                 return false;
             }
 
@@ -558,7 +753,9 @@ namespace OmenCore.Services
             _fanTransitionUntil = DateTime.UtcNow.AddMilliseconds(FanTransitionHoldMs);
 
             // Apply the preset's thermal policy first
-            if (_fanController.ApplyPreset(preset))
+            var controllerAcceptedPreset = _fanController.ApplyPreset(preset);
+            RecordFanCommand("ApplyPreset.Controller", preset.Name, controllerAcceptedPreset, controllerAcceptedPreset ? "Controller returned success" : "Controller returned false");
+            if (controllerAcceptedPreset)
             {
                 _logging.Info($"Fan preset '{preset.Name}' applied via {Backend} (controller returned success) - verifying state...");
 
@@ -568,13 +765,8 @@ namespace OmenCore.Services
                 var previousActiveCurve = _activeCurve != null ? new List<FanCurvePoint>(_activeCurve) : null;
                 var previousFanMode = _currentFanMode;
 
-                // Optimistic mode mapping (used for UI/state if verification succeeds)
-                var nameLower = preset.Name.ToLowerInvariant();
-                // A preset should use VerifyMaxApplied if the name includes "max" OR if the
-                // explicit Mode is FanMode.Max.  This avoids routing names like "Turbo" through
-                // the RPM-delta verification path when they're clearly max-mode presets.
-                bool isMaxPreset = (nameLower.Contains("max") || preset.Mode == FanMode.Max)
-                                   && !nameLower.Contains("auto");
+                bool isMaxPreset = IsMaxPreset(preset);
+                bool isAutoPreset = IsAutoPreset(preset);
 
                 // Verification helper
                 bool VerificationPasses()
@@ -587,8 +779,8 @@ namespace OmenCore.Services
                             var (ok, details) = VerifyMaxApplied();
                             if (ok) return true;
 
-                            _logging.Warn($"VerifyMaxApplied failed: {details}");
-                            return false;
+                            _logging.Warn($"VerifyMaxApplied did not confirm Max immediately: {details}. Keeping Max requested because some firmware reports stale RPM/level for 10-15s after SetFanMax.");
+                            return true;
                         }
 
                         // 2) For curve-based presets: the controller returning true is sufficient.
@@ -600,8 +792,11 @@ namespace OmenCore.Services
                         if (preset.Curve != null && preset.Curve.Count > 0)
                             return true;
 
-                        // 3) For Auto/default presets, we accept controller.RestoreAutoControl above and treat as success
-                        if (nameLower.Contains("auto") || nameLower.Contains("default") || nameLower.Contains("balanced"))
+                        // 3) For policy-only presets (Auto/Performance/Quiet/etc.) where there is no
+                        // explicit curve payload, a successful controller apply is sufficient.
+                        // This prevents false rollback for startup-restored built-in presets that are
+                        // represented by Mode with an empty curve.
+                        if (IsModeOnlyPreset(preset))
                             return true;
 
                         return false;
@@ -618,6 +813,7 @@ namespace OmenCore.Services
 
                 if (!verified)
                 {
+                    RecordFanCommand("ApplyPreset.Verify", preset.Name, false, "Verification failed; attempting rollback");
                     // Attempt rollback to previous state
                     _logging.Error($"Preset '{preset.Name}' verification failed — attempting rollback to previous preset: {(previousPreset?.Name ?? "<none>")}");
                     try
@@ -626,6 +822,7 @@ namespace OmenCore.Services
                         {
                             // Reapply previous preset on controller
                             _fanController.ApplyPreset(previousPreset);
+                            RecordFanCommand("ApplyPreset.Rollback", previousPreset.Name, true, $"Rollback after failed preset '{preset.Name}'");
 
                             // Restore previous curve state as necessary
                             if (previousCurveEnabled && previousActiveCurve != null)
@@ -646,6 +843,7 @@ namespace OmenCore.Services
                             // No previous preset — restore BIOS auto control
                             DisableCurve();
                             _fanController.RestoreAutoControl();
+                            RecordFanCommand("ApplyPreset.Rollback", "BIOS auto", true, $"Rollback after failed preset '{preset.Name}'");
                             _activePreset = null;
                             _currentFanMode = "Auto";
                             _logging.Info("Rollback: restored BIOS auto control");
@@ -653,6 +851,7 @@ namespace OmenCore.Services
                     }
                     catch (Exception ex)
                     {
+                        RecordFanCommand("ApplyPreset.Rollback", previousPreset?.Name ?? "BIOS auto", false, ex.Message);
                         _logging.Error($"Rollback failed: {ex.Message}", ex);
                     }
 
@@ -662,24 +861,16 @@ namespace OmenCore.Services
 
                 // Verification succeeded — update UI-visible state and enable curve/mode as before
                 _logging.Info($"Preset '{preset.Name}' verified successfully");
+                RecordFanCommand("ApplyPreset.Verify", preset.Name, true, "Verification passed");
 
-                if (nameLower.Contains("max") && !nameLower.Contains("extreme"))
-                    _currentFanMode = "Max";
-                else if (nameLower.Contains("extreme"))
-                    _currentFanMode = "Extreme";
-                else if (nameLower.Contains("auto") || nameLower.Contains("default") || nameLower.Contains("balanced"))
-                    _currentFanMode = "Auto";
-                else if (nameLower.Contains("quiet") || nameLower.Contains("silent"))
-                    _currentFanMode = "Quiet";
-                else
-                    _currentFanMode = preset.Name; // Use preset name for custom presets
+                _currentFanMode = ResolvePresetModeLabel(preset, isMaxPreset, isAutoPreset);
 
                 if (isMaxPreset)
                 {
                     ApplyMaxCooling();
                     _activePreset = preset;
                 }
-                else if (nameLower.Contains("auto") || nameLower.Contains("default"))
+                else if (isAutoPreset)
                 {
                     DisableCurve();
                     _activePreset = preset;
@@ -718,6 +909,70 @@ namespace OmenCore.Services
             }
         }
 
+        private static bool IsMaxPreset(FanPreset preset)
+        {
+            return (preset.Mode == FanMode.Max || FanModeNameResolver.IsMaxAlias(preset.Name)) &&
+                   !FanModeNameResolver.IsAutoAlias(preset.Name);
+        }
+
+        private static bool IsAutoPreset(FanPreset preset)
+        {
+            return preset.Mode == FanMode.Auto ||
+                   FanModeNameResolver.IsAutoAlias(preset.Name);
+        }
+
+        private static bool IsModeOnlyPreset(FanPreset preset)
+        {
+            if (preset.Mode == FanMode.Auto || preset.Mode == FanMode.Performance || preset.Mode == FanMode.Quiet)
+            {
+                return true;
+            }
+
+            return FanModeNameResolver.IsAutoAlias(preset.Name) ||
+                   FanModeNameResolver.IsPerformanceAlias(preset.Name) ||
+                   FanModeNameResolver.IsQuietAlias(preset.Name);
+        }
+
+        private static string ResolvePresetModeLabel(FanPreset preset, bool isMaxPreset, bool isAutoPreset)
+        {
+            var isExtremeAlias = HasAliasToken(preset.Name, "extreme");
+            if (isMaxPreset)
+            {
+                return isExtremeAlias ? "Extreme" : "Max";
+            }
+
+            if (isAutoPreset)
+            {
+                return "Auto";
+            }
+
+            return preset.Mode switch
+            {
+                FanMode.Quiet => "Quiet",
+                FanMode.Performance when isExtremeAlias => "Extreme",
+                FanMode.Performance => "Performance",
+                _ => preset.Name
+            };
+        }
+
+        private static bool HasAliasToken(string? value, string alias)
+        {
+            if (string.IsNullOrWhiteSpace(value) || string.IsNullOrWhiteSpace(alias))
+            {
+                return false;
+            }
+
+            var normalized = value.Trim().ToLowerInvariant();
+            if (normalized == alias)
+            {
+                return true;
+            }
+
+            var tokens = normalized
+                .Split(new[] { ' ', '-', '_', '.', '(', ')', '[', ']', '/' }, StringSplitOptions.RemoveEmptyEntries);
+            return tokens.Any(token => token == alias);
+        }
+
         /// <summary>
         /// Apply a custom curve and start continuous monitoring.
         /// </summary>
@@ -726,6 +981,7 @@ namespace OmenCore.Services
             if (!FanWritesAvailable)
             {
                 _logging.Warn($"Custom fan curve skipped; fan control unavailable ({_fanController.Status})");
+                RecordFanCommand("ApplyCustomCurve", "custom curve", false, $"Fan control unavailable: {_fanController.Status}");
                 return;
             }
             
@@ -733,6 +989,7 @@ namespace OmenCore.Services
             if (!ValidateCurve(curveList, out var validationError))
             {
                 _logging.Warn($"Custom fan curve rejected: {validationError}");
+                RecordFanCommand("ApplyCustomCurve", $"{curveList.Count} point(s)", false, validationError);
                 return;
             }
             
@@ -740,6 +997,7 @@ namespace OmenCore.Services
             if (_fanController.ApplyCustomCurve(curveList))
             {
                 EnableCurve(curveList, null);
+                RecordFanCommand("ApplyCustomCurve", $"{curveList.Count} point(s)", true, "Controller returned success");
                 _logging.Info($"Custom fan curve applied and enabled with {curveList.Count} points");
 
                 if (immediate)
@@ -753,6 +1011,7 @@ namespace OmenCore.Services
             }
             else
             {
+                RecordFanCommand("ApplyCustomCurve", $"{curveList.Count} point(s)", false, "Controller returned false");
                 _logging.Warn($"Custom fan curve failed to apply via {Backend}");
             }
         }
@@ -1496,8 +1755,7 @@ namespace OmenCore.Services
                     _activePreset = _preThermalPreset;
                     
                     // If still warm and restoring to Auto/Default preset, set minimum fan floor
-                    var presetNameLower = _preThermalPreset.Name.ToLowerInvariant();
-                    if (stillWarm && (presetNameLower.Contains("auto") || presetNameLower.Contains("default")))
+                    if (stillWarm && FanModeNameResolver.IsAutoAlias(_preThermalPreset.Name))
                     {
                         _logging.Info($"Setting minimum {ThermalReleaseMinFanPercent}% fan floor (temps still {maxTemp:F0}°C)");
                         _fanController.SetFanSpeed(ThermalReleaseMinFanPercent);
@@ -1845,11 +2103,13 @@ namespace OmenCore.Services
             if (!FanWritesAvailable)
             {
                 _logging.Warn("Max cooling skipped; fan control unavailable");
+                RecordFanCommand("ApplyMaxCooling", "Max", false, $"Fan control unavailable: {_fanController.Status}");
                 return;
             }
             
             DisableCurve();
             _fanController.ApplyMaxCooling();
+            RecordFanCommand("ApplyMaxCooling.Controller", "Max", true, "ApplyMaxCooling sent");
 
             // WMI max mode is maintained by controller-level keepalive logic. Re-sending an
             // immediate SetFanSpeed(100) here can create an unnecessary re-apply pulse on
@@ -1861,10 +2121,12 @@ namespace OmenCore.Services
                     if (_fanController.SetFanSpeed(100))
                     {
                         _lastAppliedFanPercent = 100;
+                        RecordFanCommand("SetFanSpeed", "100%", true, "Defensive non-WMI Max write");
                     }
                 }
                 catch (Exception ex)
                 {
+                    RecordFanCommand("SetFanSpeed", "100%", false, ex.Message);
                     _logging.Warn($"SetFanSpeed(100) during ApplyMaxCooling threw: {ex.Message}");
                 }
             }
@@ -1874,6 +2136,7 @@ namespace OmenCore.Services
             }
 
             _currentFanMode = "Max";
+            RecordFanCommand("ApplyMaxCooling", "Max", true, "Max cooling mode active");
             _logging.Info("Max cooling mode applied");
         }
 
@@ -1885,12 +2148,14 @@ namespace OmenCore.Services
             if (!FanWritesAvailable)
             {
                 _logging.Warn("Auto mode skipped; fan control unavailable");
+                RecordFanCommand("ApplyAutoMode", "Auto", false, $"Fan control unavailable: {_fanController.Status}");
                 return;
             }
             
             DisableCurve();
             _fanController.ApplyAutoMode();
             _currentFanMode = "Auto";
+            RecordFanCommand("ApplyAutoMode", "Auto", true, "Auto fan mode applied");
             _logging.Info("Auto fan mode applied (BIOS control)");
         }
 
@@ -1902,12 +2167,14 @@ namespace OmenCore.Services
             if (!FanWritesAvailable)
             {
                 _logging.Warn("Quiet mode skipped; fan control unavailable");
+                RecordFanCommand("ApplyQuietMode", "Quiet", false, $"Fan control unavailable: {_fanController.Status}");
                 return;
             }
             
             DisableCurve();
             _fanController.ApplyQuietMode();
             _currentFanMode = "Quiet";
+            RecordFanCommand("ApplyQuietMode", "Quiet", true, "Quiet fan mode applied");
             _logging.Info("Quiet fan mode applied");
         }
 
@@ -1938,6 +2205,7 @@ namespace OmenCore.Services
             
             // Delegate to the fan controller
             var result = _fanController.ResetEcToDefaults();
+            RecordFanCommand("ResetEcToDefaults", "EC factory defaults", result, result ? "Controller returned success" : "Controller returned false");
             
             if (result)
             {
@@ -1993,16 +2261,22 @@ namespace OmenCore.Services
             if (!FanWritesAvailable)
             {
                 _logging.Warn("ForceSetFanSpeed skipped; fan control unavailable");
+                RecordFanCommand("ForceSetFanSpeed", $"{percent}%", false, $"Fan control unavailable: {_fanController.Status}");
                 return;
             }
 
             try
             {
-                _fanController.SetFanSpeed(percent);
-                _lastAppliedFanPercent = percent;
+                var success = _fanController.SetFanSpeed(percent);
+                if (success)
+                {
+                    _lastAppliedFanPercent = percent;
+                }
+                RecordFanCommand("ForceSetFanSpeed", $"{percent}%", success, success ? "Controller returned success" : "Controller returned false");
             }
             catch (Exception ex)
             {
+                RecordFanCommand("ForceSetFanSpeed", $"{percent}%", false, ex.Message);
                 _logging.Warn($"ForceSetFanSpeed({percent}) failed: {ex.Message}");
             }
         }
@@ -2015,15 +2289,19 @@ namespace OmenCore.Services
             if (!FanWritesAvailable)
             {
                 _logging.Warn("ForceSetFanSpeeds skipped; fan control unavailable");
+                RecordFanCommand("ForceSetFanSpeeds", $"CPU {cpuPercent}% / GPU {gpuPercent}%", false, $"Fan control unavailable: {_fanController.Status}");
                 return false;
             }
 
             try
             {
-                return _fanController.SetFanSpeeds(cpuPercent, gpuPercent);
+                var success = _fanController.SetFanSpeeds(cpuPercent, gpuPercent);
+                RecordFanCommand("ForceSetFanSpeeds", $"CPU {cpuPercent}% / GPU {gpuPercent}%", success, success ? "Controller returned success" : "Controller returned false");
+                return success;
             }
             catch (Exception ex)
             {
+                RecordFanCommand("ForceSetFanSpeeds", $"CPU {cpuPercent}% / GPU {gpuPercent}%", false, ex.Message);
                 _logging.Warn($"ForceSetFanSpeeds({cpuPercent}, {gpuPercent}) failed: {ex.Message}");
                 return false;
             }
@@ -2091,6 +2369,23 @@ namespace OmenCore.Services
             DisableCurve();
             Stop();
         }
+    }
+
+    public sealed class FanCommandHistoryEntry
+    {
+        public DateTime TimestampUtc { get; init; }
+        public string Command { get; init; } = string.Empty;
+        public string Target { get; init; } = string.Empty;
+        public bool Success { get; init; }
+        public string Details { get; init; } = string.Empty;
+        public string Backend { get; init; } = string.Empty;
+        public string FanMode { get; init; } = string.Empty;
+        public string? ActivePresetName { get; init; }
+        public bool CurveActive { get; init; }
+        public bool HoldActive { get; init; }
+        public bool CurveOrHoldActive { get; init; }
+        public bool DiagnosticModeActive { get; init; }
+        public bool ThermalProtectionActive { get; init; }
     }
 
     /// <summary>

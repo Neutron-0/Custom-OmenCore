@@ -204,10 +204,10 @@ namespace OmenCore.Services.BloatwareManager
                 foreach (var pkg in packages)
                 {
                     if (pkg.Name == null) continue;
-                    var matchedDynamic = TryMatchConfiguredBloatware(pkg.Name, out var category, out var description, out var risk, out var friendlyName);
+                    var matchedDynamic = TryMatchConfiguredBloatware(pkg.Name, out var category, out var description, out var risk, out var friendlyName, out var matchedSignature);
                     if (matchedDynamic || IsKnownBloatware(pkg.Name, out category, out description, out risk))
                     {
-                        _detectedApps.Add(new BloatwareApp
+                        var app = new BloatwareApp
                         {
                             Name = friendlyName ?? GetFriendlyName(pkg.Name),
                             PackageId = pkg.PackageFullName ?? pkg.Name,
@@ -218,7 +218,9 @@ namespace OmenCore.Services.BloatwareManager
                             RemovalRisk = risk,
                             CanRestore = true,
                             IsRemoved = false
-                        });
+                        };
+                        ApplySignatureMetadata(app, matchedSignature);
+                        AddDetectedApp(app);
                     }
                 }
             }
@@ -254,10 +256,10 @@ namespace OmenCore.Services.BloatwareManager
 
                         if (string.IsNullOrEmpty(displayName)) continue;
 
-                        var matchedDynamic = TryMatchConfiguredBloatware(displayName, out var category, out var description, out var risk, out var friendlyName);
+                        var matchedDynamic = TryMatchConfiguredBloatware(displayName, out var category, out var description, out var risk, out var friendlyName, out var matchedSignature);
                         if (matchedDynamic || IsKnownBloatware(displayName, out category, out description, out risk))
                         {
-                            _detectedApps.Add(new BloatwareApp
+                            var app = new BloatwareApp
                             {
                                 Name = friendlyName ?? displayName,
                                 PackageId = subKeyName,
@@ -269,7 +271,9 @@ namespace OmenCore.Services.BloatwareManager
                                 UninstallCommand = uninstallString,
                                 CanRestore = false, // Win32 apps generally can't be restored
                                 IsRemoved = false
-                            });
+                            };
+                            ApplySignatureMetadata(app, matchedSignature);
+                            AddDetectedApp(app);
                         }
                     }
                 }
@@ -304,7 +308,7 @@ namespace OmenCore.Services.BloatwareManager
 
                         if (IsKnownBloatwareStartup(valueName, value, out var category, out var description, out var risk))
                         {
-                            _detectedApps.Add(new BloatwareApp
+                            AddDetectedApp(new BloatwareApp
                             {
                                 Name = valueName,
                                 PackageId = $"{keyPath}\\{valueName}",
@@ -348,7 +352,7 @@ namespace OmenCore.Services.BloatwareManager
                         continue;
                     }
 
-                    _detectedApps.Add(new BloatwareApp
+                    AddDetectedApp(new BloatwareApp
                     {
                         Name = startupName,
                         PackageId = filePath,
@@ -384,17 +388,11 @@ namespace OmenCore.Services.BloatwareManager
                 var output = process.StandardOutput.ReadToEnd();
                 process.WaitForExit(30000);
 
-                // Parse CSV output for known bloatware tasks
-                var lines = output.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-                foreach (var line in lines.Skip(1)) // Skip header
+                foreach (var taskName in ExtractScheduledTaskNamesFromSchtasksCsv(output))
                 {
-                    var parts = line.Split(',');
-                    if (parts.Length < 2) continue;
-
-                    var taskName = parts[1].Trim('"');
                     if (IsKnownBloatwareTask(taskName, out var category, out var description, out var risk))
                     {
-                        _detectedApps.Add(new BloatwareApp
+                        AddDetectedApp(new BloatwareApp
                         {
                             Name = GetFriendlyTaskName(taskName),
                             PackageId = taskName,
@@ -413,6 +411,124 @@ namespace OmenCore.Services.BloatwareManager
             {
                 _logger.Error($"Failed to scan scheduled tasks: {ex.Message}");
             }
+        }
+
+        private void AddDetectedApp(BloatwareApp app)
+        {
+            BloatwareDependencyMetadataRules.Apply(app);
+            _detectedApps.Add(app);
+        }
+
+        private static void ApplySignatureMetadata(BloatwareApp app, BloatwareSignature? signature)
+        {
+            if (signature == null)
+            {
+                return;
+            }
+
+            app.ConflictSensitive = signature.ConflictSensitive;
+            app.RequiresOmenCoreValidation = signature.RequiresOmenCoreValidation;
+            app.DependencyNotes = signature.DependencyNotes ?? string.Empty;
+            app.DependencyTags = signature.DependencyTags?
+                .Where(tag => !string.IsNullOrWhiteSpace(tag))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList() ?? new List<string>();
+        }
+
+        public static IReadOnlyList<string> ExtractScheduledTaskNamesFromSchtasksCsv(string csv)
+        {
+            var records = ParseCsvRecords(csv);
+            if (records.Count < 2)
+            {
+                return Array.Empty<string>();
+            }
+
+            var header = records[0];
+            var taskNameIndex = header.FindIndex(field =>
+                field.Equals("TaskName", StringComparison.OrdinalIgnoreCase) ||
+                field.Equals("Task Name", StringComparison.OrdinalIgnoreCase));
+
+            if (taskNameIndex < 0 && header.Count > 1)
+            {
+                taskNameIndex = 1;
+            }
+
+            if (taskNameIndex < 0)
+            {
+                return Array.Empty<string>();
+            }
+
+            return records
+                .Skip(1)
+                .Where(record => taskNameIndex < record.Count)
+                .Select(record => record[taskNameIndex].Trim())
+                .Where(taskName => !string.IsNullOrWhiteSpace(taskName))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static List<List<string>> ParseCsvRecords(string csv)
+        {
+            var records = new List<List<string>>();
+            var record = new List<string>();
+            var field = new System.Text.StringBuilder();
+            var inQuotes = false;
+
+            for (var i = 0; i < csv.Length; i++)
+            {
+                var ch = csv[i];
+
+                if (ch == '"')
+                {
+                    if (inQuotes && i + 1 < csv.Length && csv[i + 1] == '"')
+                    {
+                        field.Append('"');
+                        i++;
+                    }
+                    else
+                    {
+                        inQuotes = !inQuotes;
+                    }
+
+                    continue;
+                }
+
+                if (ch == ',' && !inQuotes)
+                {
+                    record.Add(field.ToString());
+                    field.Clear();
+                    continue;
+                }
+
+                if ((ch == '\r' || ch == '\n') && !inQuotes)
+                {
+                    if (ch == '\r' && i + 1 < csv.Length && csv[i + 1] == '\n')
+                    {
+                        i++;
+                    }
+
+                    record.Add(field.ToString());
+                    field.Clear();
+
+                    if (record.Any(value => !string.IsNullOrWhiteSpace(value)))
+                    {
+                        records.Add(record);
+                    }
+
+                    record = new List<string>();
+                    continue;
+                }
+
+                field.Append(ch);
+            }
+
+            record.Add(field.ToString());
+            if (record.Any(value => !string.IsNullOrWhiteSpace(value)))
+            {
+                records.Add(record);
+            }
+
+            return records;
         }
 
         /// <summary>
@@ -1559,7 +1675,8 @@ namespace OmenCore.Services.BloatwareManager
             out BloatwareCategory category,
             out string description,
             out RemovalRisk risk,
-            out string? friendlyName)
+            out string? friendlyName,
+            out BloatwareSignature? matchedSignature)
         {
             foreach (var signature in _dynamicSignatures)
             {
@@ -1585,6 +1702,7 @@ namespace OmenCore.Services.BloatwareManager
                     : RemovalRisk.Unknown;
                 description = signature.Description ?? string.Empty;
                 friendlyName = string.IsNullOrWhiteSpace(signature.FriendlyName) ? null : signature.FriendlyName;
+                matchedSignature = signature;
                 return true;
             }
 
@@ -1592,6 +1710,7 @@ namespace OmenCore.Services.BloatwareManager
             description = string.Empty;
             risk = RemovalRisk.Unknown;
             friendlyName = null;
+            matchedSignature = null;
             return false;
         }
 
@@ -1772,8 +1891,17 @@ namespace OmenCore.Services.BloatwareManager
             if (name.Contains("OMEN Gaming Hub", StringComparison.OrdinalIgnoreCase))
             {
                 category = BloatwareCategory.OemSoftware;
-                description = "HP OMEN software - OmenCore replaces this";
-                risk = RemovalRisk.Low;
+                description = "HP OMEN software - conflict-sensitive until OmenCore fan, RGB, and hotkey control are verified";
+                risk = RemovalRisk.Medium;
+                return true;
+            }
+            if (name.Contains("OMEN Light Studio", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("OmenLightStudio", StringComparison.OrdinalIgnoreCase) ||
+                name.Contains("OmenCap", StringComparison.OrdinalIgnoreCase))
+            {
+                category = BloatwareCategory.OemSoftware;
+                description = "OMEN lighting/control component - remove only after OmenCore keyboard lighting and OMEN key behavior are verified";
+                risk = RemovalRisk.High;
                 return true;
             }
             if (name.Contains("HP Audio", StringComparison.OrdinalIgnoreCase))
@@ -1920,7 +2048,7 @@ namespace OmenCore.Services.BloatwareManager
                 return true;
             }
 
-            if (TryMatchConfiguredBloatware(name, out category, out description, out risk, out _))
+            if (TryMatchConfiguredBloatware(name, out category, out description, out risk, out _, out _))
             {
                 return true;
             }
@@ -2337,6 +2465,173 @@ namespace OmenCore.Services.BloatwareManager
             }
         }
 
+        /// <summary>
+        /// Exports a dry-run report for the currently detected removal candidates without changing system state.
+        /// </summary>
+        public string? ExportDryRunReport(IEnumerable<BloatwareApp> apps)
+        {
+            try
+            {
+                var candidates = apps.Where(a => !a.IsRemoved).ToList();
+                if (!candidates.Any()) return null;
+
+                var logDir = Path.Combine(
+                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                    "OmenCore", "Logs");
+                Directory.CreateDirectory(logDir);
+                var reportPath = Path.Combine(logDir, $"bloatware-dry-run-{DateTime.Now:yyyyMMdd-HHmmss}.txt");
+
+                var lines = new System.Text.StringBuilder();
+                lines.AppendLine("OmenCore Bloatware Dry Run Report");
+                lines.AppendLine($"Generated: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                lines.AppendLine($"Machine: {Environment.MachineName}");
+                lines.AppendLine($"User: {Environment.UserName}");
+                lines.AppendLine($"Administrator: {(IsRunningAsAdmin ? "Yes" : "No")}");
+                lines.AppendLine($"OS: {Environment.OSVersion}");
+                lines.AppendLine(new string('-', 70));
+                lines.AppendLine();
+
+                lines.AppendLine($"Summary: {candidates.Count} installed candidate(s)");
+                lines.AppendLine($"Risk: {candidates.Count(a => a.RemovalRisk == RemovalRisk.Low)} low, " +
+                    $"{candidates.Count(a => a.RemovalRisk == RemovalRisk.Medium)} medium, " +
+                    $"{candidates.Count(a => a.RemovalRisk == RemovalRisk.High)} high, " +
+                    $"{candidates.Count(a => a.RemovalRisk == RemovalRisk.Unknown)} unknown");
+                lines.AppendLine($"Conflict-sensitive: {candidates.Count(a => a.ConflictSensitive || a.RequiresOmenCoreValidation)}");
+                lines.AppendLine();
+
+                lines.AppendLine("INDEPENDENCE READINESS CHECKLIST:");
+                foreach (var item in BuildIndependenceReadinessChecklist(candidates))
+                {
+                    lines.AppendLine($"  - {item}");
+                }
+                lines.AppendLine();
+
+                lines.AppendLine("ITEMS:");
+                foreach (var app in candidates.OrderByDescending(a => a.RemovalRisk).ThenBy(a => a.Name, StringComparer.OrdinalIgnoreCase))
+                {
+                    lines.AppendLine($"[{app.Type}] {app.Name}");
+                    lines.AppendLine($"  Package/id: {app.PackageId}");
+                    lines.AppendLine($"  Publisher: {app.Publisher}");
+                    lines.AppendLine($"  Category: {app.Category}");
+                    lines.AppendLine($"  Risk: {app.RemovalRisk}");
+                    lines.AppendLine($"  Risk reason: {BuildRiskReason(app)}");
+                    lines.AppendLine($"  Target: {BuildRemovalTargetDescription(app)}");
+                    lines.AppendLine($"  Backup status: {BuildBackupStatus(app)}");
+                    lines.AppendLine($"  Expected restore path: {BuildExpectedRestorePath(app)}");
+
+                    if (app.DependencyTags.Any())
+                    {
+                        lines.AppendLine($"  Dependency tags: {string.Join("; ", app.DependencyTags)}");
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(app.DependencyNotes))
+                    {
+                        lines.AppendLine($"  Dependency notes: {app.DependencyNotes}");
+                    }
+
+                    lines.AppendLine();
+                }
+
+                File.WriteAllText(reportPath, lines.ToString(), System.Text.Encoding.UTF8);
+                _logger.Info($"Bloatware dry-run report exported: {reportPath}");
+                return reportPath;
+            }
+            catch (Exception ex)
+            {
+                _logger.Error($"Failed to export bloatware dry-run report: {ex.Message}");
+                return null;
+            }
+        }
+
+        public static IReadOnlyList<string> BuildIndependenceReadinessChecklist(IEnumerable<BloatwareApp> apps)
+        {
+            var selected = apps.Where(a => !a.IsRemoved).ToList();
+            var hasOmenOrHpControl = selected.Any(a =>
+                a.ConflictSensitive ||
+                a.RequiresOmenCoreValidation ||
+                ContainsAny($"{a.Name} {a.PackageId} {a.Description}", "OMEN", "OmenCap", "HPSystemEvent", "HP Hotkey"));
+
+            if (!hasOmenOrHpControl)
+            {
+                return new[] { "No HP/OMEN conflict-sensitive control components selected." };
+            }
+
+            return new[]
+            {
+                "Fan control verified in OmenCore on this hardware.",
+                "Keyboard lighting/RGB behavior verified in OmenCore on this hardware.",
+                "OMEN key and HP Fn/media hotkeys verified after OmenCore hotkey handling.",
+                "BIOS/driver/update path understood before removing HP support utilities.",
+                "Windows restore point planned before removal."
+            };
+        }
+
+        private static string BuildRiskReason(BloatwareApp app)
+        {
+            if (app.ConflictSensitive || app.RequiresOmenCoreValidation)
+            {
+                return "Conflict-sensitive hardware control component; verify OmenCore fan, RGB, and hotkey behavior first.";
+            }
+
+            if (app.DependencyTags.Any())
+            {
+                return string.Join("; ", app.DependencyTags);
+            }
+
+            if (!string.IsNullOrWhiteSpace(app.Description))
+            {
+                return app.Description;
+            }
+
+            return app.RemovalRisk switch
+            {
+                RemovalRisk.High => "High-risk removal candidate.",
+                RemovalRisk.Medium => "Medium-risk removal candidate; review before removal.",
+                RemovalRisk.Low => "Low-risk removal candidate.",
+                _ => "No risk reason available."
+            };
+        }
+
+        private static string BuildRemovalTargetDescription(BloatwareApp app)
+        {
+            return app.Type switch
+            {
+                BloatwareType.AppxPackage => $"AppX package: {app.PackageId}",
+                BloatwareType.Win32App => string.IsNullOrWhiteSpace(app.UninstallCommand)
+                    ? $"Win32 uninstall registry key: {app.PackageId}"
+                    : $"Win32 uninstall command: {app.UninstallCommand}",
+                BloatwareType.StartupItem => !string.IsNullOrWhiteSpace(app.StartupFilePath)
+                    ? $"Startup folder item: {app.StartupFilePath}"
+                    : $"Startup registry value: {app.RegistryHive}\\{app.RegistryPath}",
+                BloatwareType.ScheduledTask => $"Scheduled task: {app.PackageId}",
+                _ => app.PackageId
+            };
+        }
+
+        private static string BuildBackupStatus(BloatwareApp app)
+        {
+            return app.CanRestore
+                ? "Restorable by OmenCore when source state is still available."
+                : "No direct OmenCore restore; rely on restore point, installer, or Windows repair path.";
+        }
+
+        private static string BuildExpectedRestorePath(BloatwareApp app)
+        {
+            return app.Type switch
+            {
+                BloatwareType.AppxPackage => "Restore package for the current user/provisioning source if still available.",
+                BloatwareType.StartupItem => "Restore backed-up registry value or startup folder shortcut.",
+                BloatwareType.ScheduledTask => "Re-enable the scheduled task.",
+                BloatwareType.Win32App => "Reinstall from original vendor installer or Windows restore point.",
+                _ => "Manual restore may be required."
+            };
+        }
+
+        private static bool ContainsAny(string value, params string[] needles)
+        {
+            return needles.Any(needle => value.Contains(needle, StringComparison.OrdinalIgnoreCase));
+        }
+
         private void RecordHistory(BloatwareApp app, string action, bool success, string? details)
         {
             var entry = new BloatwareHistoryEntry
@@ -2423,6 +2718,10 @@ namespace OmenCore.Services.BloatwareManager
         public BloatwareCategory Category { get; set; }
         public string Description { get; set; } = "";
         public RemovalRisk RemovalRisk { get; set; }
+        public bool ConflictSensitive { get; set; }
+        public bool RequiresOmenCoreValidation { get; set; }
+        public List<string> DependencyTags { get; set; } = new();
+        public string DependencyNotes { get; set; } = "";
         public bool CanRestore { get; set; }
         private bool _isRemoved;
         public bool IsRemoved
@@ -2467,6 +2766,87 @@ namespace OmenCore.Services.BloatwareManager
 
             field = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+        }
+    }
+
+    public static class BloatwareDependencyMetadataRules
+    {
+        public static void Apply(BloatwareApp app)
+        {
+            var searchableText = $"{app.Name} {app.PackageId} {app.Publisher} {app.Description}";
+
+            if (ContainsAny(searchableText, "OMEN Gaming Hub", "OmenGamingHub", "OMEN Light Studio", "OmenLightStudio", "OmenCap"))
+            {
+                app.ConflictSensitive = true;
+                app.RequiresOmenCoreValidation = true;
+                RaiseRisk(app, RemovalRisk.Medium);
+                AddTags(app,
+                    "needed for OMEN key",
+                    "may affect lighting handoff",
+                    "may affect fan/performance ownership",
+                    "safe only after OmenCore hardware validation");
+
+                app.DependencyNotes = "Verify OmenCore fan control, keyboard lighting, and OMEN-key behavior before removal.";
+            }
+
+            if (ContainsAny(searchableText, "HPSystemEvent", "HP System Event", "HP Hotkey", "HP QuickDrop"))
+            {
+                RaiseRisk(app, RemovalRisk.Medium);
+                AddTags(app, "may affect HP hotkeys");
+                AppendDependencyNote(app, "May affect HP Fn/media/hotkey behavior.");
+            }
+
+            if (ContainsAny(searchableText, "Microsoft.Xbox", "Xbox", "Game Pass", "Gaming Services"))
+            {
+                RaiseRisk(app, RemovalRisk.Medium);
+                AddTags(app, "Game Pass/Xbox dependency");
+                AppendDependencyNote(app, "May affect Xbox app, Game Pass, or Gaming Services flows.");
+            }
+
+            if (ContainsAny(searchableText, "HP Sure", "McAfee", "Norton", "Defender", "Windows Security"))
+            {
+                RaiseRisk(app, RemovalRisk.Medium);
+                AddTags(app, "security component");
+                AppendDependencyNote(app, "Security-related component; verify replacement coverage before removal.");
+            }
+        }
+
+        private static bool ContainsAny(string value, params string[] needles)
+        {
+            return needles.Any(needle => value.Contains(needle, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static void RaiseRisk(BloatwareApp app, RemovalRisk minimumRisk)
+        {
+            if (app.RemovalRisk < minimumRisk)
+            {
+                app.RemovalRisk = minimumRisk;
+            }
+        }
+
+        private static void AddTags(BloatwareApp app, params string[] tags)
+        {
+            foreach (var tag in tags)
+            {
+                if (!app.DependencyTags.Any(existing => existing.Equals(tag, StringComparison.OrdinalIgnoreCase)))
+                {
+                    app.DependencyTags.Add(tag);
+                }
+            }
+        }
+
+        private static void AppendDependencyNote(BloatwareApp app, string note)
+        {
+            if (string.IsNullOrWhiteSpace(app.DependencyNotes))
+            {
+                app.DependencyNotes = note;
+                return;
+            }
+
+            if (!app.DependencyNotes.Contains(note, StringComparison.OrdinalIgnoreCase))
+            {
+                app.DependencyNotes = $"{app.DependencyNotes} {note}";
+            }
         }
     }
 
@@ -2627,6 +3007,10 @@ namespace OmenCore.Services.BloatwareManager
         public string Category { get; set; } = nameof(BloatwareCategory.Unknown);
         public string Description { get; set; } = string.Empty;
         public string Risk { get; set; } = nameof(RemovalRisk.Unknown);
+        public List<string> DependencyTags { get; set; } = new();
+        public bool ConflictSensitive { get; set; }
+        public bool RequiresOmenCoreValidation { get; set; }
+        public string DependencyNotes { get; set; } = string.Empty;
     }
 
     public sealed class BloatwareHistoryEntry

@@ -55,7 +55,7 @@ namespace OmenCore.Hardware
         /// IMPORTANT: Keyboard RGB EC addresses (0xB0-0xBE) are NOT included because
         /// they vary by model and can cause system crashes on some hardware (e.g., OMEN 17-ck2xxx).
         /// </summary>
-        private static readonly HashSet<ushort> AllowedWriteAddresses = new()
+        public static readonly IReadOnlyCollection<ushort> AllowedWriteAddresses = new HashSet<ushort>()
         {
             // Fan control registers (HP Omen typical addresses - adjust for your hardware)
             0x2C, // Fan 1 set speed % (XSS1) - OmenMon-style, newer models

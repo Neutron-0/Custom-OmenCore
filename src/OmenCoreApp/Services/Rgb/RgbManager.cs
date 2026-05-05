@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using OmenCore.Services;
 
@@ -13,6 +14,8 @@ namespace OmenCore.Services.Rgb
     public class RgbManager
     {
         private readonly List<IRgbProvider> _providers = new();
+        private readonly HashSet<string> _initializedProviderIds = new(StringComparer.OrdinalIgnoreCase);
+        private readonly SemaphoreSlim _initializeLock = new(1, 1);
         private readonly LoggingService? _logging;
 
         public RgbManager(LoggingService? logging = null)
@@ -62,8 +65,39 @@ namespace OmenCore.Services.Rgb
 
         public async Task InitializeAllAsync()
         {
-            var tasks = _providers.Select(p => SafeInitializeAsync(p));
-            await Task.WhenAll(tasks);
+            await EnsureProvidersInitializedAsync();
+        }
+
+        private async Task EnsureProvidersInitializedAsync()
+        {
+            await _initializeLock.WaitAsync();
+            try
+            {
+                var providersToInitialize = _providers
+                    .Where(p => !_initializedProviderIds.Contains(p.ProviderId))
+                    .ToList();
+
+                if (providersToInitialize.Count == 0)
+                {
+                    return;
+                }
+
+                foreach (var provider in providersToInitialize.Where(p => p.ProviderId != "system"))
+                {
+                    await SafeInitializeAsync(provider);
+                    _initializedProviderIds.Add(provider.ProviderId);
+                }
+
+                foreach (var provider in providersToInitialize.Where(p => p.ProviderId == "system"))
+                {
+                    await SafeInitializeAsync(provider);
+                    _initializedProviderIds.Add(provider.ProviderId);
+                }
+            }
+            finally
+            {
+                _initializeLock.Release();
+            }
         }
         
         private async Task SafeInitializeAsync(IRgbProvider provider)
@@ -84,6 +118,8 @@ namespace OmenCore.Services.Rgb
         /// </summary>
         public async Task ApplyEffectToAllAsync(string effectId)
         {
+            await EnsureProvidersInitializedAsync();
+
             // Exclude "system" provider to avoid infinite recursion (it delegates back to this manager)
             var available = _providers.Where(p => p.IsAvailable && p.ProviderId != "system").ToList();
 
@@ -129,6 +165,8 @@ namespace OmenCore.Services.Rgb
         /// </summary>
         public async Task SyncStaticColorAsync(Color color)
         {
+            await EnsureProvidersInitializedAsync();
+
             // Exclude "system" provider to avoid infinite recursion (it delegates back to this manager)
             var available = _providers.Where(p => p.IsAvailable && p.ProviderId != "system" && p.SupportedEffects.Contains(RgbEffectType.Static)).ToList();
 
@@ -162,6 +200,8 @@ namespace OmenCore.Services.Rgb
         /// </summary>
         public async Task SyncBreathingEffectAsync(Color color)
         {
+            await EnsureProvidersInitializedAsync();
+
             // Exclude "system" provider to avoid infinite recursion (it delegates back to this manager)
             var available = _providers.Where(p => p.IsAvailable && p.ProviderId != "system" && p.SupportedEffects.Contains(RgbEffectType.Breathing)).ToList();
             var results = await Task.WhenAll(available.Select(p => SafeSetBreathingAsync(p, color)));
@@ -188,6 +228,8 @@ namespace OmenCore.Services.Rgb
         /// </summary>
         public async Task SyncSpectrumEffectAsync()
         {
+            await EnsureProvidersInitializedAsync();
+
             // Exclude "system" provider to avoid infinite recursion (it delegates back to this manager)
             var available = _providers.Where(p => p.IsAvailable && p.ProviderId != "system" && p.SupportedEffects.Contains(RgbEffectType.Spectrum)).ToList();
             var results = await Task.WhenAll(available.Select(p => SafeSetSpectrumAsync(p)));
@@ -214,6 +256,8 @@ namespace OmenCore.Services.Rgb
         /// </summary>
         public async Task TurnOffAllAsync()
         {
+            await EnsureProvidersInitializedAsync();
+
             // Exclude "system" provider to avoid infinite recursion (it delegates back to this manager)
             var available = _providers.Where(p => p.IsAvailable && p.ProviderId != "system").ToList();
             var results = await Task.WhenAll(available.Select(p => SafeTurnOffAsync(p)));

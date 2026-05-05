@@ -23,9 +23,12 @@ namespace OmenCore.Services
         private readonly int _history;
         private readonly TimeSpan _activeCadenceInterval = TimeSpan.FromSeconds(1);
         private readonly TimeSpan _idleCadenceInterval = TimeSpan.FromSeconds(5);
+        private readonly TimeSpan _trayOnlyCadenceInterval = TimeSpan.FromSeconds(10);
         private CancellationTokenSource? _cts;
         private volatile bool _lowOverheadMode; // volatile for thread-safe reads from monitor loop
         private volatile bool _uiWindowActive = true; // Thread-safe cache updated by the UI thread via SetUiWindowActive()
+        private volatile bool _trayOnlyMode; // True when UI is hidden to tray and no active fan curve/hold requires fast updates
+        private volatile bool _overlayRealtimeMode; // True while in-game OSD overlay is visible and requires responsive telemetry cadence
         private MonitoringSample? _lastSample;
         private readonly double _changeThreshold = 0.5; // Minimum change to trigger UI update (degrees/percent)
         private readonly double _lowOverheadChangeThreshold = 3.0; // Higher threshold in low overhead mode
@@ -66,6 +69,10 @@ namespace OmenCore.Services
         private const int ZeroTempDegradedThreshold = 10;    // Mark degraded after 10 consecutive 0°C readings (~10s)
         private bool _gpuFreezeWarningLogged = false;        // v2.8.6: Only log GPU freeze warning once per freeze event
         private TimeSpan? _lastAppliedCadence;
+        private string _lastCadenceReason = "Cadence not initialized";
+        private readonly object _cadenceTransitionLock = new();
+        private readonly Queue<MonitoringCadenceTransition> _cadenceTransitions = new();
+        private const int MaxCadenceTransitions = 80;
 
         public ReadOnlyObservableCollection<MonitoringSample> Samples { get; }
         public event EventHandler<MonitoringSample>? SampleUpdated;
@@ -115,6 +122,22 @@ namespace OmenCore.Services
         /// </summary>
         public int ConsecutiveTimeouts => _consecutiveTimeouts;
 
+        /// <summary>
+        /// Human-readable reason for the currently active monitoring cadence.
+        /// </summary>
+        public string CurrentCadenceReason => _lastCadenceReason;
+
+        /// <summary>
+        /// Snapshot of recent cadence transitions with state flags for diagnostics export.
+        /// </summary>
+        public IReadOnlyList<MonitoringCadenceTransition> GetCadenceTransitionsSnapshot()
+        {
+            lock (_cadenceTransitionLock)
+            {
+                return _cadenceTransitions.ToList();
+            }
+        }
+
         public void SetLowOverheadMode(bool enabled)
         {
             _lowOverheadMode = enabled;
@@ -136,6 +159,12 @@ namespace OmenCore.Services
 
         private TimeSpan GetEffectiveCadenceInterval()
         {
+            // OSD overlay is latency-sensitive; keep active cadence while visible even in tray state.
+            if (_overlayRealtimeMode)
+            {
+                return _activeCadenceInterval;
+            }
+
             if (_lowOverheadMode)
             {
                 return _idleCadenceInterval;
@@ -145,7 +174,14 @@ namespace OmenCore.Services
             // Do NOT access Application.Current.MainWindow properties here — this method runs
             // on the background monitor-loop thread and WPF DependencyObject access from a
             // non-owner thread throws InvalidOperationException (root cause of GH-#109/#110).
-            return _uiWindowActive ? _activeCadenceInterval : _idleCadenceInterval;
+            if (_uiWindowActive)
+                return _activeCadenceInterval;
+
+            // Tray-only ultra-low cadence: no visible UI and no active fan-curve work.
+            if (_trayOnlyMode)
+                return _trayOnlyCadenceInterval;
+
+            return _idleCadenceInterval;
         }
 
         /// <summary>
@@ -158,6 +194,27 @@ namespace OmenCore.Services
             _uiWindowActive = active;
         }
 
+        /// <summary>
+        /// Enable the ultra-low (10 s) tray-only cadence. Call with <c>true</c> when the app
+        /// is hidden to the system tray and no active fan curve or hold requires fast telemetry;
+        /// call with <c>false</c> when any of those conditions change.
+        /// Has no effect when <see cref="SetUiWindowActive"/> has been called with <c>true</c>
+        /// (the UI-active cadence always takes precedence).
+        /// </summary>
+        public void SetTrayOnlyMode(bool trayOnly)
+        {
+            _trayOnlyMode = trayOnly;
+        }
+
+        /// <summary>
+        /// Forces active telemetry cadence while a realtime overlay (for example the in-game OSD)
+        /// is visible, even when the main window is hidden to tray.
+        /// </summary>
+        public void SetOverlayRealtimeMode(bool enabled)
+        {
+            _overlayRealtimeMode = enabled;
+        }
+
         private void UpdateCadenceTelemetry(TimeSpan cadence)
         {
             if (_lastAppliedCadence.HasValue && _lastAppliedCadence.Value == cadence)
@@ -165,17 +222,83 @@ namespace OmenCore.Services
                 return;
             }
 
+            var reason = BuildCadenceReason(cadence);
+            _lastCadenceReason = reason;
+
+            string description;
+            if (cadence == _activeCadenceInterval)
+                description = "Unified monitoring pipeline (active cadence)";
+            else if (cadence == _trayOnlyCadenceInterval)
+                description = "Unified monitoring pipeline (tray-only ultra-low cadence)";
+            else
+                description = "Unified monitoring pipeline (idle cadence)";
+
+            bool intervalChanged = !_lastAppliedCadence.HasValue ||
+                (int)_lastAppliedCadence.Value.TotalMilliseconds != (int)cadence.TotalMilliseconds;
+
             _lastAppliedCadence = cadence;
-            BackgroundTimerRegistry.Unregister("HardwareMonitorLoop");
-            BackgroundTimerRegistry.Register(
-                "HardwareMonitorLoop",
-                "HardwareMonitoringService",
-                cadence == _activeCadenceInterval
-                    ? "Unified monitoring pipeline (active cadence)"
-                    : "Unified monitoring pipeline (idle cadence)",
-                (int)cadence.TotalMilliseconds,
-                BackgroundTimerTier.Critical);
+
+            var transition = new MonitoringCadenceTransition
+            {
+                TimestampUtc = DateTime.UtcNow,
+                CadenceMs = (int)cadence.TotalMilliseconds,
+                Reason = reason,
+                UiWindowActive = _uiWindowActive,
+                TrayOnlyMode = _trayOnlyMode,
+                OverlayRealtimeMode = _overlayRealtimeMode,
+                LowOverheadMode = _lowOverheadMode
+            };
+
+            lock (_cadenceTransitionLock)
+            {
+                _cadenceTransitions.Enqueue(transition);
+                while (_cadenceTransitions.Count > MaxCadenceTransitions)
+                {
+                    _cadenceTransitions.Dequeue();
+                }
+            }
+
+            if (intervalChanged)
+            {
+                BackgroundTimerRegistry.Unregister("HardwareMonitorLoop");
+                BackgroundTimerRegistry.Register(
+                    "HardwareMonitorLoop",
+                    "HardwareMonitoringService",
+                    description,
+                    (int)cadence.TotalMilliseconds,
+                    BackgroundTimerTier.Critical);
+            }
+            else
+            {
+                BackgroundTimerRegistry.UpdateDescription("HardwareMonitorLoop", description);
+            }
+
             _logging.Info($"[MonitorLoop] Cadence switched to {(int)cadence.TotalMilliseconds}ms");
+        }
+
+        private string BuildCadenceReason(TimeSpan cadence)
+        {
+            if (_overlayRealtimeMode)
+            {
+                return "overlay-realtime: OSD visible forces active 1s cadence";
+            }
+
+            if (_lowOverheadMode)
+            {
+                return "low-overhead: fixed idle cadence to reduce polling overhead";
+            }
+
+            if (_uiWindowActive)
+            {
+                return "ui-active: main window visible/interactive";
+            }
+
+            if (_trayOnlyMode && cadence == _trayOnlyCadenceInterval)
+            {
+                return "tray-only: app minimized with no active fan curve/hold";
+            }
+
+            return "idle-background: window inactive but fan activity requires standard idle cadence";
         }
 
         /// <summary>
@@ -1130,6 +1253,20 @@ namespace OmenCore.Services
         
         /// <summary>Data is stale - no successful reads for extended period.</summary>
         Stale
+    }
+
+    /// <summary>
+    /// Point-in-time record of a monitoring cadence transition.
+    /// </summary>
+    public sealed class MonitoringCadenceTransition
+    {
+        public DateTime TimestampUtc { get; set; }
+        public int CadenceMs { get; set; }
+        public string Reason { get; set; } = string.Empty;
+        public bool UiWindowActive { get; set; }
+        public bool TrayOnlyMode { get; set; }
+        public bool OverlayRealtimeMode { get; set; }
+        public bool LowOverheadMode { get; set; }
     }
 
     public class HardwareSensorReading

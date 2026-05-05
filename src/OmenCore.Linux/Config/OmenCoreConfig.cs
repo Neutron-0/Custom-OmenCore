@@ -170,6 +170,14 @@ public class OmenCoreConfig
             [performance]
             # Performance mode: default, balanced, performance, cool
             mode = "balanced"
+            # Keep the selected performance mode applied from the daemon.
+            # Useful on systems where firmware/kernel resets the profile after ~30s.
+            hold_enabled = false
+            # How often the daemon verifies/reapplies held performance state.
+            hold_interval_seconds = 30
+            # Optional thermal power limit multiplier (0-5) to reapply while hold is enabled.
+            # Leave unset to avoid periodic power-limit writes.
+            # thermal_power_limit = 5
             
             [thermal]
             # Re-apply configured performance mode after CPU thermal cooldown.
@@ -275,6 +283,9 @@ public class FanCurvePoint
 public class PerformanceConfig
 {
     public string Mode { get; set; } = "balanced";
+    public bool HoldEnabled { get; set; } = false;
+    public int HoldIntervalSeconds { get; set; } = 30;
+    public int? ThermalPowerLimit { get; set; }
 }
 
 public class KeyboardConfig

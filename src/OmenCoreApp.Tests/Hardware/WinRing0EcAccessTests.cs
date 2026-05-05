@@ -4,67 +4,42 @@ using Xunit;
 
 namespace OmenCoreApp.Tests.Hardware
 {
+    /// <summary>
+    /// Validates the WinRing0 EC access allowlist via the public static property.
+    /// Tests deliberately avoid instantiating WinRing0EcAccess to prevent the class
+    /// static initializer from creating the Global\Access_EC mutex and loading
+    /// WinRing0 IOCTL codes into the process — patterns that trigger Defender heuristics
+    /// during test runs on developer machines.
+    /// </summary>
     public class WinRing0EcAccessTests
     {
         [Theory]
-        [InlineData(0x44)] // Fan 1 duty cycle
-        [InlineData(0x45)] // Fan 2 duty cycle
-        [InlineData(0x46)] // Fan control mode
-        [InlineData(0xCE)] // Performance mode register
-        public void WriteByte_AllowedAddress_DoesNotThrowException(ushort address)
+        [InlineData((ushort)0x44)] // Fan 1 duty cycle
+        [InlineData((ushort)0x45)] // Fan 2 duty cycle
+        [InlineData((ushort)0x46)] // Fan control mode
+        [InlineData((ushort)0xCE)] // Performance mode register
+        public void AllowedWriteAddresses_ContainsFanControlRegisters(ushort address)
         {
-            // Arrange
-            var ecAccess = new WinRing0EcAccess();
-            // Note: Initialize will fail without actual driver, but we're testing allowlist logic
-            
-            // Act & Assert
-            // This test validates allowlist contains expected addresses
-            // In actual usage, WriteByte would need valid driver handle
-            var allowedAddresses = new HashSet<ushort> { 0x44, 0x45, 0x46, 0x4A, 0x4B, 0x4C, 0x4D, 0xBA, 0xBB, 0xCE, 0xCF };
-            allowedAddresses.Should().Contain(address, "address should be in the safety allowlist");
+            WinRing0EcAccess.AllowedWriteAddresses.Should().Contain(address,
+                $"0x{address:X2} is a fan-control register and must be in the safety allowlist");
         }
-        
+
         [Theory]
-        [InlineData(0xFF)] // Battery charger (dangerous)
-        [InlineData(0x12)] // VRM control (dangerous)
-        [InlineData(0x00)] // System control register (dangerous)
-        [InlineData(0x99)] // Arbitrary address (unknown/dangerous)
-        public void WriteByte_DisallowedAddress_ShouldBeBlockedByAllowlist(ushort address)
+        [InlineData((ushort)0xFF)] // Battery charger (dangerous)
+        [InlineData((ushort)0x12)] // VRM control (dangerous)
+        [InlineData((ushort)0x00)] // System control register (dangerous)
+        [InlineData((ushort)0x99)] // Arbitrary unknown address
+        public void AllowedWriteAddresses_ExcludesDangerousRegisters(ushort address)
         {
-            // Arrange
-            var allowedAddresses = new HashSet<ushort> { 0x44, 0x45, 0x46, 0x4A, 0x4B, 0x4C, 0x4D, 0xBA, 0xBB, 0xCE, 0xCF };
-            
-            // Act & Assert
-            allowedAddresses.Should().NotContain(address, 
-                "dangerous addresses must not be in allowlist to prevent hardware damage");
+            WinRing0EcAccess.AllowedWriteAddresses.Should().NotContain(address,
+                $"0x{address:X2} is a dangerous register that must never be in the allowlist");
         }
 
         [Fact]
-        public void WriteByte_WithoutDriverHandle_ThrowsInvalidOperationException()
+        public void AllowedWriteAddresses_IsNonEmpty()
         {
-            // Arrange
-            var ecAccess = new WinRing0EcAccess();
-            // Don't initialize - no driver handle
-            
-            // Act
-            var act = () => ecAccess.WriteByte(0x44, 50);
-            
-            // Assert
-            act.Should().Throw<InvalidOperationException>()
-                .WithMessage("*WinRing0*not ready*");
-        }
-
-        [Fact]
-        public void IsAvailable_WithoutInitialization_ReturnsFalse()
-        {
-            // Arrange
-            var ecAccess = new WinRing0EcAccess();
-            
-            // Act
-            var available = ecAccess.IsAvailable;
-            
-            // Assert
-            available.Should().BeFalse("EC access requires successful driver initialization");
+            WinRing0EcAccess.AllowedWriteAddresses.Should().NotBeEmpty(
+                "at least the core fan duty-cycle registers must be present");
         }
     }
 }

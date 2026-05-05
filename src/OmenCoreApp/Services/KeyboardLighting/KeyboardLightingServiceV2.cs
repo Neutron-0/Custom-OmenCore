@@ -235,7 +235,13 @@ namespace OmenCore.Services.KeyboardLighting
                 }
                 
                 // Return a default based on whether it's an OMEN
-                if (systemInfo?.IsHpOmen == true || systemInfo?.IsHpVictus == true)
+                if (systemInfo?.IsHpVictus == true)
+                {
+                    _logging.Info("[KeyboardLightingV2] No specific Victus keyboard match, using conservative backlight-only config");
+                    return KeyboardModelDatabase.GetDefaultVictusConfig();
+                }
+
+                if (systemInfo?.IsHpOmen == true)
                 {
                     _logging.Info("[KeyboardLightingV2] No specific model match, using default OMEN config");
                     return KeyboardModelDatabase.GetDefaultConfig();

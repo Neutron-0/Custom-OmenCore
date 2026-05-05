@@ -41,6 +41,26 @@ namespace OmenCore.Services.Diagnostics
         }
 
         /// <summary>
+        /// Update only the description of an already-registered timer without changing
+        /// the registration timestamp or interval. No-op if the timer is not registered.
+        /// Use this to record cadence/state changes without the cost of Unregister+Register.
+        /// </summary>
+        public static void UpdateDescription(string name, string newDescription)
+        {
+            lock (_lock)
+            {
+                if (!_entries.TryGetValue(name, out var existing)) return;
+                _entries[name] = new BackgroundTimerInfo(
+                    existing.Name,
+                    existing.OwnerService,
+                    newDescription,
+                    existing.IntervalMs,
+                    existing.RegisteredUtc,
+                    existing.Tier);
+            }
+        }
+
+        /// <summary>
         /// Return a point-in-time snapshot of all currently registered timers.
         /// </summary>
         public static IReadOnlyList<BackgroundTimerInfo> GetAll()

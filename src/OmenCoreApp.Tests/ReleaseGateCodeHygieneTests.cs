@@ -45,17 +45,17 @@ namespace OmenCoreApp.Tests
         // in the same PR that edits the file, with a comment explaining the shift.
         private static readonly HashSet<string> KnownBareCatchViolations = new(StringComparer.Ordinal)
         {
-            "App.xaml.cs:596",
+            "App.xaml.cs:605", // shifted from :596
             "App.xaml.cs:1057",
             "AmdGpuService.cs:371",
             "EcAccessFactory.cs:216",
             "FanController.cs:412",
             "FanController.cs:769",
-            "FanControllerFactory.cs:151",
-            "FanControllerFactory.cs:170",
-            "FanControllerFactory.cs:1165",
-            "FanControllerFactory.cs:1197",
-            "FanControllerFactory.cs:1215",
+            "FanControllerFactory.cs:157", // shifted from :151
+            "FanControllerFactory.cs:176", // shifted from :170
+            "FanControllerFactory.cs:1168", // shifted from :1165 after WMI wrapper external-reset status properties
+            "FanControllerFactory.cs:1200", // shifted from :1197 after WMI wrapper external-reset status properties
+            "FanControllerFactory.cs:1218", // shifted from :1215 after WMI wrapper external-reset status properties
             "HardwareWorkerClient.cs:468",
             "LibreHardwareMonitorImpl.cs:2106", // shifted from :2101 after timeout-path cleanup edits
             "LibreHardwareMonitorImpl.cs:2235", // shifted from :2230 after timeout-path cleanup edits
@@ -84,9 +84,9 @@ namespace OmenCoreApp.Tests
             "WmiBiosMonitor.cs:1007",
             "WmiBiosMonitor.cs:1478",
             "WmiBiosMonitor.cs:1521",
-            "WmiFanController.cs:137", // shifted from :125 after max-mode maintenance fields
-            "WmiFanController.cs:151", // shifted from :139 after max-mode maintenance fields
-            "WmiFanController.cs:165", // shifted from :153 after max-mode maintenance fields
+            "WmiFanController.cs:157", // shifted from :149 (was :137) after alias consolidation
+            "WmiFanController.cs:171", // shifted from :163 (was :151) after alias consolidation
+            "WmiFanController.cs:185", // shifted from :177 (was :165) after alias consolidation
             "DiagnosticLoggingService.cs:97",
             "DiagnosticLoggingService.cs:333",
             "DiagnosticLoggingService.cs:336",
@@ -96,10 +96,10 @@ namespace OmenCoreApp.Tests
             "GameLibraryService.cs:392",
             "GameLibraryService.cs:495",
             "GameLibraryService.cs:540",
-            "KeyboardLightingService.cs:218",
+            "KeyboardLightingService.cs:238", // shifted from :218
             "NotificationService.cs:522",
             "OmenKeyService.cs:369",
-            "OsdService.cs:357",
+            "OsdService.cs:373", // shifted from :357
             "TemperatureRgbService.cs:270",
             "TrayIconService.cs:134",
             "LightingViewModel.cs:2010",

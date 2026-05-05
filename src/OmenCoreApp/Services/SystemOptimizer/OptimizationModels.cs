@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace OmenCore.Services.SystemOptimizer
 {
@@ -132,5 +133,76 @@ namespace OmenCore.Services.SystemOptimizer
         Low,        // Safe, no side effects
         Medium,     // May affect some functionality
         High        // Aggressive, may cause issues
+    }
+
+    /// <summary>
+    /// A single operation entry in a pre-apply preflight report.
+    /// </summary>
+    public class PreflightItem
+    {
+        public string Id { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string Category { get; set; } = "";
+        public OptimizationRisk Risk { get; set; }
+        public bool RequiresReboot { get; set; }
+        public bool IsRecommended { get; set; }
+        public string? Warning { get; set; }
+    }
+
+    /// <summary>
+    /// Pre-apply preflight report produced by SystemOptimizerService.GeneratePreflightReportAsync.
+    /// Lists every planned operation with its risk tier and any advisory warnings before any changes
+    /// are made, so callers can present a summary or gate high-risk operations.
+    /// </summary>
+    public class PreflightReport
+    {
+        public IReadOnlyList<PreflightItem> Items { get; set; } = Array.Empty<PreflightItem>();
+        public int LowRiskCount => Items.Count(i => i.Risk == OptimizationRisk.Low);
+        public int MediumRiskCount => Items.Count(i => i.Risk == OptimizationRisk.Medium);
+        public int HighRiskCount => Items.Count(i => i.Risk == OptimizationRisk.High);
+        public bool HasHighRisk => HighRiskCount > 0;
+        public bool RequiresReboot => Items.Any(i => i.RequiresReboot);
+        public IReadOnlyList<PreflightItem> HighRiskItems => Items.Where(i => i.Risk == OptimizationRisk.High).ToList();
+        public IReadOnlyList<string> Warnings => Items
+            .Where(i => i.Warning != null)
+            .Select(i => i.Warning!)
+            .Distinct()
+            .ToList();
+        public DateTime GeneratedUtc { get; set; } = DateTime.UtcNow;
+    }
+
+    /// <summary>
+    /// Describes a single optimization setting that has drifted away from the expected state.
+    /// Used by SystemOptimizerService.GetDriftExplanations to surface human-readable drift messages
+    /// such as "Windows Update restored SysMain (Superfetch)".
+    /// </summary>
+    public class OptimizationDriftItem
+    {
+        public string Id { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string Category { get; set; } = "";
+        /// <summary>Human-readable explanation of what changed and what likely caused it.</summary>
+        public string Explanation { get; set; } = "";
+        /// <summary>Short suggestion for the user: "Re-apply Balanced/Gaming profile to restore this setting."</summary>
+        public string Suggestion { get; set; } = "Re-apply the optimizer profile to restore this setting.";
+    }
+
+    /// <summary>
+    /// Summary of optimizer state drift between an expected baseline and the current live state.
+    /// </summary>
+    public class OptimizationDriftSummary
+    {
+        public IReadOnlyList<OptimizationDriftItem> DriftedItems { get; set; } = Array.Empty<OptimizationDriftItem>();
+        public bool HasDrift => DriftedItems.Count > 0;
+        public int DriftCount => DriftedItems.Count;
+        public DateTime CheckedUtc { get; set; } = DateTime.UtcNow;
+
+        /// <summary>
+        /// One-line summary suitable for a status bar or notification.
+        /// Returns empty string when there is no drift.
+        /// </summary>
+        public string OneLinerSummary => HasDrift
+            ? $"{DriftCount} optimization{(DriftCount == 1 ? "" : "s")} drifted from expected state"
+            : string.Empty;
     }
 }

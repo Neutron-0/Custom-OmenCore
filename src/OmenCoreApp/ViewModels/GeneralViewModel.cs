@@ -405,29 +405,12 @@ namespace OmenCore.ViewModels
         private void DetermineActiveProfile()
         {
             // First try to match using the saved fan preset name from config
-            var savedPreset = _configService.Config?.LastFanPresetName?.ToLowerInvariant() ?? "";
+            var savedPreset = _configService.Config?.LastFanPresetName;
             if (!string.IsNullOrEmpty(savedPreset))
             {
-                if (savedPreset.Contains("max") && !savedPreset.Contains("extreme"))
-                {
-                    SelectedProfile = "Performance";
+                SelectedProfile = FanModeNameResolver.ResolveGeneralProfileFromPresetName(savedPreset);
+                if (SelectedProfile != "Custom")
                     return;
-                }
-                else if (savedPreset.Contains("extreme"))
-                {
-                    SelectedProfile = "Performance";
-                    return;
-                }
-                else if (savedPreset.Contains("quiet") || savedPreset.Contains("silent"))
-                {
-                    SelectedProfile = "Quiet";
-                    return;
-                }
-                else if (savedPreset.Contains("auto") || savedPreset.Contains("default") || savedPreset.Contains("balanced"))
-                {
-                    SelectedProfile = "Balanced";
-                    return;
-                }
             }
             
             // Fallback: Match current state to a profile

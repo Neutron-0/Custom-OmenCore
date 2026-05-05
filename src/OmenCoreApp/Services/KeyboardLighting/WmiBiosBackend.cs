@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
+using System.Linq;
 using System.Threading.Tasks;
 using OmenCore.Hardware;
 
@@ -94,6 +95,8 @@ namespace OmenCore.Services.KeyboardLighting
                     return result;
                 }
                 
+                var originalColors = await ReadZoneColorsAsync();
+
                 // Build 12-byte color array (RGB * 4 zones)
                 var colorTable = new byte[12];
                 for (int i = 0; i < 4; i++)
@@ -120,6 +123,7 @@ namespace OmenCore.Services.KeyboardLighting
                 if (!result.BackendReportedSuccess)
                 {
                     result.FailureReason = "WMI SetColorTable returned false";
+                    await RestoreOriginalColorsAsync(originalColors, result.FailureReason);
                     return result;
                 }
                 
@@ -143,8 +147,13 @@ namespace OmenCore.Services.KeyboardLighting
                     result.VerificationPassed = colorsMatch;
                     if (!colorsMatch)
                     {
-                        _logging.Warn("[WmiBiosBackend] Color verification failed - readback doesn't match");
-                        result.FailureReason = "Color verification failed - keyboard may not support this method";
+                        var expectedHasVisibleColor = zoneColors.Any(c => c.R > 0 || c.G > 0 || c.B > 0);
+                        var readBackAllBlack = readBack != null && readBack.All(c => c.R == 0 && c.G == 0 && c.B == 0);
+                        result.FailureReason = expectedHasVisibleColor && readBackAllBlack
+                            ? "Color verification failed - readback is all black after a visible-color write"
+                            : "Color verification failed - keyboard may not support this method";
+                        _logging.Warn($"[WmiBiosBackend] {result.FailureReason}");
+                        await RestoreOriginalColorsAsync(originalColors, result.FailureReason);
                     }
                     else
                     {
@@ -171,6 +180,32 @@ namespace OmenCore.Services.KeyboardLighting
             }
             
             return result;
+        }
+
+        private async Task RestoreOriginalColorsAsync(Color[]? originalColors, string reason)
+        {
+            if (originalColors == null || _wmiBios == null)
+                return;
+
+            try
+            {
+                var restoreTable = new byte[12];
+                for (int i = 0; i < 4; i++)
+                {
+                    restoreTable[i * 3] = originalColors[i].R;
+                    restoreTable[i * 3 + 1] = originalColors[i].G;
+                    restoreTable[i * 3 + 2] = originalColors[i].B;
+                }
+
+                _wmiBios.SetBacklight(true);
+                await Task.Delay(30);
+                var restored = _wmiBios.SetColorTable(restoreTable);
+                _logging.Warn($"[WmiBiosBackend] Restored previous keyboard color table after failed apply ({reason}); restored={restored}");
+            }
+            catch (Exception restoreEx)
+            {
+                _logging.Warn($"[WmiBiosBackend] Failed to restore previous keyboard colors: {restoreEx.Message}");
+            }
         }
 
         private static bool ColorsMatch(Color[] readBack, Color[] expected)

@@ -94,6 +94,16 @@
                             <TextBlock Text="Remove Low-Risk" FontSize="11"/>
                         </StackPanel>
                     </Button>
+                    <Button Command="{Binding ExportDryRunReportCommand}"
+                            Style="{StaticResource SecondaryButton}"
+                            Margin="0,0,8,0"
+                            Padding="10,6"
+                            AutomationProperties.Name="Export Bloatware Dry Run Report">
+                        <StackPanel Orientation="Horizontal">
+                            <Path Data="{StaticResource IconExport}" Width="12" Height="12" Fill="{StaticResource TextSecondaryBrush}" Stretch="Uniform" Margin="0,0,4,0"/>
+                            <TextBlock Text="Dry Run" FontSize="11"/>
+                        </StackPanel>
+                    </Button>
                     <Button Command="{Binding CancelBulkOperationCommand}"
                             Style="{StaticResource SecondaryButton}"
                             Padding="10,6"

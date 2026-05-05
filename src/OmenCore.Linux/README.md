@@ -101,6 +101,11 @@ sudo omencore-cli perf --mode default
 sudo omencore-cli perf --mode balanced
 sudo omencore-cli perf --mode performance
 sudo omencore-cli perf --mode cool
+
+# Keep performance mode applied from the daemon
+# Useful on systems where firmware resets the profile after ~30 seconds
+sudo omencore-cli perf --mode performance --power-limit 5 --hold --hold-interval 30
+sudo omencore-cli daemon --start
 ```
 
 ### Keyboard Lighting

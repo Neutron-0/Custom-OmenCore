@@ -69,6 +69,22 @@ namespace OmenCore.Services
             _getMonitoringSample = getMonitoringSample;
             _overlayWindow?.SetMonitoringSampleSource(getMonitoringSample);
         }
+
+        /// <summary>
+        /// Fired when overlay visibility changes. Argument is true when visible.
+        /// </summary>
+        public event EventHandler<bool>? VisibilityChanged;
+
+        private void NotifyVisibilityChanged(bool visible)
+        {
+            if (_isVisible == visible)
+            {
+                return;
+            }
+
+            _isVisible = visible;
+            VisibilityChanged?.Invoke(this, visible);
+        }
         
         /// <summary>
         /// Initialize OSD if enabled in settings.
@@ -123,7 +139,7 @@ namespace OmenCore.Services
             {
                 _overlayWindow.Show();
                 _overlayWindow.StartUpdates();
-                _isVisible = true;
+                NotifyVisibilityChanged(true);
             });
             
             _logging.Info("OSD: Shown");
@@ -140,7 +156,7 @@ namespace OmenCore.Services
             {
                 _overlayWindow.StopUpdates();
                 _overlayWindow.Hide();
-                _isVisible = false;
+                NotifyVisibilityChanged(false);
             });
             
             _logging.Info("OSD: Hidden");
@@ -233,8 +249,8 @@ namespace OmenCore.Services
                 _overlayWindow?.Close();
                 _overlayWindow = null;
             });
-            
-            _isVisible = false;
+
+            NotifyVisibilityChanged(false);
             _logging.Info("OSD: Shutdown");
         }
         

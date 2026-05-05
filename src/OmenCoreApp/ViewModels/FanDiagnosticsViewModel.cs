@@ -257,7 +257,7 @@ namespace OmenCore.ViewModels
             
             var testLevels = new[] { 30, 60, 100 };
             var fanNames = new[] { "CPU", "GPU" };
-            var results = new System.Collections.Generic.List<(string fan, int target, bool passed, int rpm, double deviation, int score, string rating)>();
+            var results = new System.Collections.Generic.List<(string fan, int target, bool passed, int rpm, double deviation, int score, string rating, string evidence)>();
             
             // v2.7.1: Save current preset before diagnostic
             _preTestPreset = _fanService.ActivePreset;
@@ -281,14 +281,16 @@ namespace OmenCore.ViewModels
                         {
                             var result = await _verifier.ApplyAndVerifyFanSpeedAsync(fanIndex, targetPercent);
                             
-                            // Consider ≤15% deviation as passing
-                            var passed = Math.Abs(result.DeviationPercent) <= 15;
-                            results.Add((fanName, targetPercent, passed, result.ActualRpmAfter, result.DeviationPercent, result.VerificationScore, result.ScoreRating));
+                            // Use the verifier's adaptive decision so slow/stair-stepped fan telemetry
+                            // is judged consistently with the single-fan diagnostic.
+                            var passed = result.VerificationPassed;
+                            var evidence = string.IsNullOrWhiteSpace(result.VerificationEvidence) ? "None" : result.VerificationEvidence;
+                            results.Add((fanName, targetPercent, passed, result.ActualRpmAfter, result.DeviationPercent, result.VerificationScore, result.ScoreRating, evidence));
                             
                             // Add to history
                             History.Insert(0, result);
                             
-                            _logging.Info($"[GuidedDiagnostic] {fanName} at {targetPercent}%: RPM={result.ActualRpmAfter}, Deviation={result.DeviationPercent:F1}%, Score={result.VerificationScore}/100 ({result.ScoreRating}) → {(passed ? "PASS" : "FAIL")}");
+                            _logging.Info($"[GuidedDiagnostic] {fanName} at {targetPercent}%: RPM={result.ActualRpmAfter}, Deviation={result.DeviationPercent:F1}%, Score={result.VerificationScore}/100 ({result.ScoreRating}), Evidence={evidence} → {(passed ? "PASS" : "FAIL")}");
                             
                             // Brief delay between tests
                             await Task.Delay(1000);
@@ -296,7 +298,7 @@ namespace OmenCore.ViewModels
                         catch (Exception ex)
                         {
                             _logging.Error($"[GuidedDiagnostic] {fanName} at {targetPercent}% FAILED: {ex.Message}");
-                            results.Add((fanName, targetPercent, false, 0, 0, 0, "Failed"));
+                            results.Add((fanName, targetPercent, false, 0, 0, 0, "Failed", "None"));
                         }
                     }
                     
@@ -326,7 +328,7 @@ namespace OmenCore.ViewModels
                 foreach (var r in results)
                 {
                     var statusIcon = r.passed ? "✓" : "✗";
-                    summary.AppendLine($"{statusIcon} {r.fan} @ {r.target}%: {r.rpm} RPM ({r.deviation:+0.0;-0.0}%) - Score: {r.score}");
+                    summary.AppendLine($"{statusIcon} {r.fan} @ {r.target}%: {r.rpm} RPM ({r.deviation:+0.0;-0.0}%) - Score: {r.score} [evidence: {r.evidence}]");
                 }
                 
                 GuidedTestResult = summary.ToString();

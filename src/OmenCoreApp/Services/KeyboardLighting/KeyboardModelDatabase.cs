@@ -200,6 +200,18 @@ namespace OmenCore.Services.KeyboardLighting
                 UserVerified = false,
                 Notes = "GitHub #112 — inferred from adjacent OMEN 16 generations; verify on real hardware"
             });
+
+            AddModel(new KeyboardModelConfig
+            {
+                ProductId = "8A43",
+                ModelName = "OMEN 16-n0xxx (2022) AMD",
+                KeyboardType = KeyboardType.FourZone,
+                PreferredMethod = KeyboardMethod.ColorTable2020,
+                FallbackMethods = new[] { KeyboardMethod.NewWmi2023, KeyboardMethod.EcDirect },
+                ModelYear = 2022,
+                UserVerified = false,
+                Notes = "GitHub #121 — Hades 8A43 exact ProductId mapping to avoid Unknown keyboard fallback"
+            });
             
             // OMEN 16 (2023) - May use new interface
             AddModel(new KeyboardModelConfig
@@ -233,6 +245,22 @@ namespace OmenCore.Services.KeyboardLighting
                 FallbackMethods = new[] { KeyboardMethod.NewWmi2023, KeyboardMethod.EcDirect },
                 ModelYear = 2024,
                 Notes = "Ryzen 7 7840HS - user reported AC detection issues"
+            });
+
+            // OMEN 16-WF1015ns / 9U8J3EA (2024 Intel) — ProductId 8C76
+            // Discord field report + logs (2026-05-04): 4-zone keyboard, ColorTable read/write
+            // works on BIOS F.19. Exact entry removes Unknown-keyboard fallback in diagnostics.
+            AddModel(new KeyboardModelConfig
+            {
+                ProductId = "8C76",
+                ModelName = "OMEN 16-wf1xxx (2024) Intel",
+                ModelNamePattern = "16-wf1",
+                KeyboardType = KeyboardType.FourZone,
+                PreferredMethod = KeyboardMethod.ColorTable2020,
+                FallbackMethods = new[] { KeyboardMethod.NewWmi2023, KeyboardMethod.EcDirect },
+                ModelYear = 2024,
+                UserVerified = false,
+                Notes = "Discord HUrON / HP OMEN 16-WF1015ns 9U8J3EA — ProductId 8C76, 4-zone ColorTable keyboard on BIOS F.19."
             });
 
             // OMEN 16 (2024) - am0xxx series
@@ -686,6 +714,25 @@ namespace OmenCore.Services.KeyboardLighting
                     Notes = "Older model - may only support backlight toggle"
                 };
             }
+        }
+
+        /// <summary>
+        /// Unknown Victus notebooks are more often single-color/on-off backlight models than RGB.
+        /// Use a conservative default so the RGB page does not advertise unsupported color zones.
+        /// Known RGB Victus product IDs still resolve through exact database entries first.
+        /// </summary>
+        public static KeyboardModelConfig GetDefaultVictusConfig(int? estimatedYear = null)
+        {
+            return new KeyboardModelConfig
+            {
+                ProductId = "UNKNOWN-VICTUS",
+                ModelName = "Unknown Victus (backlight-only default)",
+                KeyboardType = KeyboardType.BacklightOnly,
+                PreferredMethod = KeyboardMethod.BacklightOnly,
+                FallbackMethods = Array.Empty<KeyboardMethod>(),
+                ModelYear = estimatedYear ?? DateTime.Now.Year,
+                Notes = "Conservative Victus default: keyboard backlight only unless product ID is known RGB"
+            };
         }
         
         /// <summary>

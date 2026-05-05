@@ -57,12 +57,18 @@ namespace OmenCore.ViewModels
         public ICommand RemoveAllLowRiskCommand { get; }
         public ICommand RestoreSelectedCommand { get; }
         public ICommand RestoreAllRemovedCommand { get; }
+        public ICommand ExportDryRunReportCommand { get; }
         public ICommand ExportResultLogCommand { get; }
         public ICommand CancelBulkOperationCommand { get; }
         public ICommand ViewLastReportCommand { get; }
         public ICommand ConfirmRemovalPreviewCommand { get; }
         public ICommand CancelRemovalPreviewCommand { get; }
         public ICommand ToggleAllPreviewItemsCommand { get; }
+
+        public ICommand ApplyTelemetryOnlyPresetCommand { get; }
+        public ICommand ApplyOmenConflictReducerPresetCommand { get; }
+        public ICommand ApplyWindowsConsumerAppsPresetCommand { get; }
+        public ICommand ApplyFullStandalonePresetCommand { get; }
 
         public bool IsScanning
         {
@@ -122,6 +128,7 @@ namespace OmenCore.ViewModels
 
         public bool CanRemoveSelected => SelectedApp != null && !SelectedApp.IsRemoved && CanInteract;
         public bool CanRestoreSelected => SelectedApp != null && SelectedApp.IsRemoved && SelectedApp.CanRestore && CanInteract;
+        public bool CanExportDryRun => AllApps.Count > 0 && CanInteract;
 
         public int TotalCount => AllApps.Count;
         public int RemovedCount => AllApps.Count(a => a.IsRemoved);
@@ -243,12 +250,19 @@ namespace OmenCore.ViewModels
             RemoveAllLowRiskCommand = new RelayCommand(async _ => await PrepareLowRiskRemovalPreviewAsync(), _ => LowRiskCount > 0 && CanInteract);
             RestoreSelectedCommand = new RelayCommand(async _ => await RestoreSelectedAsync(), _ => CanRestoreSelected);
             RestoreAllRemovedCommand = new RelayCommand(async _ => await RestoreAllRemovedAsync(), _ => RemovedCount > 0 && CanInteract);
+            ExportDryRunReportCommand = new RelayCommand(_ => ExportDryRunReport(), _ => CanExportDryRun);
             ExportResultLogCommand = new RelayCommand(_ => ExportResultLog(), _ => HasRemovalResults);
             CancelBulkOperationCommand = new RelayCommand(_ => CancelBulkOperation(), _ => CanCancelBulkOperation);
             ViewLastReportCommand = new RelayCommand(_ => ViewLastReport(), _ => HasLastReport);
             ConfirmRemovalPreviewCommand = new RelayCommand(async _ => await ConfirmRemovalPreviewAsync(), _ => IsRemovalPreviewVisible && HasRemovalPreviewSelection && CanInteract);
             CancelRemovalPreviewCommand = new RelayCommand(_ => CancelRemovalPreview(), _ => IsRemovalPreviewVisible && CanInteract);
             ToggleAllPreviewItemsCommand = new RelayCommand(_ => ToggleAllPreviewItems(), _ => IsRemovalPreviewVisible && RemovalPreviewItems.Count > 0 && CanInteract);
+
+            // Initialize preset commands
+            ApplyTelemetryOnlyPresetCommand = new RelayCommand(async _ => await ApplyTelemetryOnlyPresetAsync(), _ => AllApps.Count > 0 && CanInteract);
+            ApplyOmenConflictReducerPresetCommand = new RelayCommand(async _ => await ApplyOmenConflictReducerPresetAsync(), _ => AllApps.Count > 0 && CanInteract);
+            ApplyWindowsConsumerAppsPresetCommand = new RelayCommand(async _ => await ApplyWindowsConsumerAppsPresetAsync(), _ => AllApps.Count > 0 && CanInteract);
+            ApplyFullStandalonePresetCommand = new RelayCommand(async _ => await ApplyFullStandalonePresetAsync(), _ => AllApps.Count > 0 && CanInteract);
 
             // Initialize categories
             foreach (var cat in Enum.GetValues<BloatwareCategory>().Where(c => c != BloatwareCategory.Unknown))
@@ -507,7 +521,18 @@ namespace OmenCore.ViewModels
                 .Where(item => item.IsSelected)
                 .Sum(item => item.EstimatedSeconds);
 
+            var selectedApps = RemovalPreviewItems
+                .Where(item => item.IsSelected)
+                .Select(item => item.App)
+                .ToList();
+            var conflictSensitiveCount = selectedApps.Count(app => app.ConflictSensitive || app.RequiresOmenCoreValidation);
+
             RemovalPreviewSummary = $"Selected {selectedCount} of {totalCount} item(s).";
+            if (conflictSensitiveCount > 0)
+            {
+                RemovalPreviewSummary += $" {conflictSensitiveCount} conflict-sensitive item(s): verify fan, RGB, hotkeys, update path, and restore point before removal.";
+            }
+
             OnPropertyChanged(nameof(RemovalPreviewEstimatedText));
             OnPropertyChanged(nameof(HasRemovalPreviewSelection));
             RaiseCommandStates();
@@ -648,6 +673,16 @@ namespace OmenCore.ViewModels
 
         private string GetDependencyHint(BloatwareApp app)
         {
+            if (app.DependencyTags.Any())
+            {
+                return string.Join("; ", app.DependencyTags);
+            }
+
+            if (!string.IsNullOrWhiteSpace(app.DependencyNotes))
+            {
+                return app.DependencyNotes;
+            }
+
             var relatedCount = AllApps.Count(candidate =>
                 !ReferenceEquals(candidate, app)
                 && !candidate.IsRemoved
@@ -792,6 +827,23 @@ namespace OmenCore.ViewModels
             OnPropertyChanged(nameof(TotalCount));
             OnPropertyChanged(nameof(RemovedCount));
             OnPropertyChanged(nameof(LowRiskCount));
+            OnPropertyChanged(nameof(CanExportDryRun));
+            RaiseCommandStates();
+        }
+
+        private void ExportDryRunReport()
+        {
+            var path = _service.ExportDryRunReport(AllApps);
+            if (path == null)
+            {
+                SetStatusFailed("Nothing to export - scan first or no installed candidates are available.");
+                return;
+            }
+
+            LastReportPath = path;
+            SetStatusDone($"Dry-run report exported: {path}");
+            try { Process.Start("explorer.exe", $"/select,\"{path}\""); }
+            catch { /* non-fatal; file is still created */ }
         }
 
         private void ExportResultLog()
@@ -886,12 +938,82 @@ namespace OmenCore.ViewModels
             (RemoveAllLowRiskCommand as RelayCommand)?.RaiseCanExecuteChanged();
             (RestoreSelectedCommand as RelayCommand)?.RaiseCanExecuteChanged();
             (RestoreAllRemovedCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            (ExportDryRunReportCommand as RelayCommand)?.RaiseCanExecuteChanged();
             (ExportResultLogCommand as RelayCommand)?.RaiseCanExecuteChanged();
             (CancelBulkOperationCommand as RelayCommand)?.RaiseCanExecuteChanged();
             (ViewLastReportCommand as RelayCommand)?.RaiseCanExecuteChanged();
             (ConfirmRemovalPreviewCommand as RelayCommand)?.RaiseCanExecuteChanged();
             (CancelRemovalPreviewCommand as RelayCommand)?.RaiseCanExecuteChanged();
             (ToggleAllPreviewItemsCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            (ApplyTelemetryOnlyPresetCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            (ApplyOmenConflictReducerPresetCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            (ApplyWindowsConsumerAppsPresetCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            (ApplyFullStandalonePresetCommand as RelayCommand)?.RaiseCanExecuteChanged();
+        }
+
+        private async Task ApplyTelemetryOnlyPresetAsync()
+        {
+            var toRemove = AllApps
+                .Where(a => !a.IsRemoved && a.Category == BloatwareCategory.Telemetry)
+                .ToList();
+            if (toRemove.Count == 0)
+            {
+                SetStatusDone("No telemetry packages detected");
+                return;
+            }
+            BuildRemovalPreview("Telemetry Only Preset", toRemove);
+        }
+
+        private async Task ApplyOmenConflictReducerPresetAsync()
+        {
+            var toRemove = AllApps
+                .Where(a => !a.IsRemoved && a.Category == BloatwareCategory.OemSoftware &&
+                    (a.Name.Contains("OMEN", StringComparison.OrdinalIgnoreCase) ||
+                     a.Name.Contains("Gaming Hub", StringComparison.OrdinalIgnoreCase) ||
+                     a.Name.Contains("OMEN Hub", StringComparison.OrdinalIgnoreCase) ||
+                     a.Name.Contains("Light Studio", StringComparison.OrdinalIgnoreCase) ||
+                     a.Name.Contains("OmenCap", StringComparison.OrdinalIgnoreCase) ||
+                     a.Name.Contains("OmenInstall", StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+            if (toRemove.Count == 0)
+            {
+                SetStatusDone("No conflicting OMEN packages detected");
+                return;
+            }
+            BuildRemovalPreview("OMEN Conflict Reducer Preset", toRemove);
+        }
+
+        private async Task ApplyWindowsConsumerAppsPresetAsync()
+        {
+            var toRemove = AllApps
+                .Where(a => !a.IsRemoved && a.Category == BloatwareCategory.WindowsApps)
+                .ToList();
+            if (toRemove.Count == 0)
+            {
+                SetStatusDone("No Windows consumer apps detected");
+                return;
+            }
+            BuildRemovalPreview("Windows Consumer Apps Preset", toRemove);
+        }
+
+        private async Task ApplyFullStandalonePresetAsync()
+        {
+            var toRemove = AllApps
+                .Where(a => !a.IsRemoved &&
+                    (a.Category == BloatwareCategory.Telemetry ||
+                     a.Category == BloatwareCategory.WindowsApps ||
+                     (a.Category == BloatwareCategory.OemSoftware && 
+                      (a.Name.Contains("OMEN", StringComparison.OrdinalIgnoreCase) ||
+                       a.Name.Contains("Gaming Hub", StringComparison.OrdinalIgnoreCase) ||
+                       a.Name.Contains("Light Studio", StringComparison.OrdinalIgnoreCase) ||
+                       a.Name.Contains("OmenCap", StringComparison.OrdinalIgnoreCase)))))
+                .ToList();
+            if (toRemove.Count == 0)
+            {
+                SetStatusDone("No packages match the Full Standalone preset criteria");
+                return;
+            }
+            BuildRemovalPreview("Full Standalone Prep Preset", toRemove);
         }
 
         protected void OnPropertyChanged([CallerMemberName] string? propertyName = null)

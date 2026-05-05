@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -21,12 +22,21 @@ namespace OmenCore.Services.Diagnostics
         private readonly LoggingService _logging;
         private readonly string _logsDirectory;
         private readonly ResumeRecoveryDiagnosticsService? _resumeDiagnostics;
+        private readonly HardwareMonitoringService? _hardwareMonitoringService;
+        private readonly FanService? _fanService;
 
-        public DiagnosticExportService(LoggingService logging, string logsDirectory, ResumeRecoveryDiagnosticsService? resumeDiagnostics = null)
+        public DiagnosticExportService(
+            LoggingService logging,
+            string logsDirectory,
+            ResumeRecoveryDiagnosticsService? resumeDiagnostics = null,
+            HardwareMonitoringService? hardwareMonitoringService = null,
+            FanService? fanService = null)
         {
             _logging = logging;
             _logsDirectory = logsDirectory;
             _resumeDiagnostics = resumeDiagnostics;
+            _hardwareMonitoringService = hardwareMonitoringService;
+            _fanService = fanService;
         }
 
         /// <summary>
@@ -36,10 +46,15 @@ namespace OmenCore.Services.Diagnostics
         public async Task<string> CollectAndExportAsync(
             IEcAccess? ecAccess = null,
             LibreHardwareMonitorImpl? hwMonitor = null,
-            object? wmiController = null)
+            object? wmiController = null,
+            HardwareMonitoringService? monitoringService = null,
+            FanService? fanService = null)
         {
             try
             {
+                var effectiveMonitoringService = monitoringService ?? _hardwareMonitoringService;
+                var effectiveFanService = fanService ?? _fanService;
+
                 var exportPath = Path.Combine(
                     Path.GetTempPath(),
                     $"OmenCore-Diagnostics-{DateTime.Now:yyyyMMdd-HHmmss-fff}-{Guid.NewGuid():N}");
@@ -58,6 +73,8 @@ namespace OmenCore.Services.Diagnostics
                     CollectEcStateAsync(exportPath, ecAccess),
                     CollectHardwareInfoAsync(exportPath, hwMonitor),
                     CollectWmiCommandHistoryAsync(exportPath, wmiController),
+                    CollectTuningAndFanFocusAsync(exportPath, wmiController),
+                    CollectMonitoringCadenceAndFanHoldAsync(exportPath, effectiveMonitoringService, effectiveFanService, wmiController),
                     CollectResumeRecoveryDiagnosticsAsync(exportPath)
                 };
 
@@ -77,6 +94,80 @@ namespace OmenCore.Services.Diagnostics
                     message: "Failed to export diagnostics",
                     ex: ex);
                 throw;
+            }
+        }
+
+        private async Task CollectMonitoringCadenceAndFanHoldAsync(
+            string exportPath,
+            HardwareMonitoringService? monitoringService,
+            FanService? fanService,
+            object? wmiController)
+        {
+            try
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine("=== MONITORING CADENCE + FAN HOLD SNAPSHOT ===");
+                sb.AppendLine($"Captured: {DateTime.UtcNow:O}");
+                sb.AppendLine();
+
+                sb.AppendLine("[Monitoring Cadence]");
+                if (monitoringService == null)
+                {
+                    sb.AppendLine("Monitoring service unavailable.");
+                }
+                else
+                {
+                    sb.AppendLine($"Health: {monitoringService.HealthStatus}");
+                    sb.AppendLine($"Source: {monitoringService.MonitoringSource}");
+                    sb.AppendLine($"LastSampleAgeSeconds: {monitoringService.LastSampleAge.TotalSeconds:F1}");
+                    sb.AppendLine($"CurrentCadenceReason: {monitoringService.CurrentCadenceReason}");
+
+                    var transitions = monitoringService.GetCadenceTransitionsSnapshot();
+                    sb.AppendLine($"Cadence transitions recorded: {transitions.Count}");
+                    foreach (var transition in transitions.TakeLast(12))
+                    {
+                        sb.AppendLine($"  {transition.TimestampUtc:O} | {transition.CadenceMs}ms | {transition.Reason}");
+                        sb.AppendLine($"    flags: uiActive={transition.UiWindowActive}, trayOnly={transition.TrayOnlyMode}, overlayRealtime={transition.OverlayRealtimeMode}, lowOverhead={transition.LowOverheadMode}");
+                    }
+                }
+
+                sb.AppendLine();
+                sb.AppendLine("[Fan Hold State]");
+                if (fanService == null)
+                {
+                    sb.AppendLine("Fan service unavailable.");
+                }
+                else
+                {
+                    sb.AppendLine($"CurveActive: {fanService.IsCurveActive}");
+                    sb.AppendLine($"HoldActive: {fanService.IsHoldActive}");
+                    sb.AppendLine($"CurveOrHoldActive: {fanService.IsCurveOrHoldActive}");
+                    var history = fanService.GetCommandHistorySnapshot();
+                    var holdTransitions = history.Where(entry => entry.Command == "HoldStateTransition").ToList();
+                    sb.AppendLine($"Fan command history entries: {history.Count}");
+                    sb.AppendLine($"Hold transitions in history: {holdTransitions.Count}");
+                    foreach (var transition in holdTransitions.TakeLast(12))
+                    {
+                        sb.AppendLine($"  {transition.TimestampUtc:O} | {transition.Target} | {transition.Details}");
+                    }
+                }
+
+                if (wmiController != null)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("[WMI Keepalive Ownership]");
+                    AppendReflectedProperty(sb, wmiController, "CountdownExtensionEnabled");
+                    AppendReflectedProperty(sb, wmiController, "IsManualControlActive");
+                    AppendReflectedProperty(sb, wmiController, "LastMaxModeExternalResetUtc");
+                    AppendReflectedProperty(sb, wmiController, "LastMaxModeExternalResetDetails");
+                }
+
+                File.WriteAllText(Path.Combine(exportPath, "monitoring-cadence-hold.txt"), sb.ToString());
+                await Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                _logging.Warn($"Failed to collect monitoring cadence + hold snapshot: {ex.Message}");
             }
         }
 
@@ -525,10 +616,21 @@ namespace OmenCore.Services.Diagnostics
                     var isAvailable = wmiController.GetType().GetProperty("IsAvailable")?.GetValue(wmiController)?.ToString() ?? "Unknown";
                     var status = wmiController.GetType().GetProperty("Status")?.GetValue(wmiController)?.ToString() ?? "Unknown";
                     var fanCount = wmiController.GetType().GetProperty("FanCount")?.GetValue(wmiController)?.ToString() ?? "Unknown";
+                    var lastMaxResetUtc = wmiController.GetType().GetProperty("LastMaxModeExternalResetUtc")?.GetValue(wmiController);
+                    var lastMaxResetDetails = wmiController.GetType().GetProperty("LastMaxModeExternalResetDetails")?.GetValue(wmiController)?.ToString();
 
                     sb.AppendLine($"Available: {isAvailable}");
                     sb.AppendLine($"Status: {status}");
                     sb.AppendLine($"Fan Count: {fanCount}");
+                    if (lastMaxResetUtc is DateTime timestampUtc)
+                    {
+                        sb.AppendLine($"Last Max External Reset: {timestampUtc:O}");
+                        sb.AppendLine($"Last Max External Reset Detail: {lastMaxResetDetails ?? "Unknown"}");
+                    }
+                    else
+                    {
+                        sb.AppendLine("Last Max External Reset: <none recorded>");
+                    }
                 }
                 catch
                 {
@@ -543,6 +645,148 @@ namespace OmenCore.Services.Diagnostics
             {
                 _logging.Warn($"Failed to collect WMI command history: {ex.Message}");
             }
+        }
+
+        private async Task CollectTuningAndFanFocusAsync(string exportPath, object? wmiController)
+        {
+            try
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine("=== TUNING + FAN FOCUS SNAPSHOT ===");
+                sb.AppendLine($"Captured: {DateTime.UtcNow:O}");
+                sb.AppendLine();
+
+                ICpuUndervoltProvider? provider = null;
+                string providerBackend = "Unavailable";
+
+                try
+                {
+                    provider = CpuUndervoltProviderFactory.Create(out providerBackend);
+                }
+                catch (Exception ex)
+                {
+                    sb.AppendLine("[CPU Undervolt Provider]");
+                    sb.AppendLine($"Provider init failed: {ex.Message}");
+                    sb.AppendLine();
+                }
+
+                try
+                {
+                    sb.AppendLine("[CPU Detection]");
+                    sb.AppendLine($"Detected vendor: {CpuUndervoltProviderFactory.DetectedVendor}");
+                    sb.AppendLine($"CPU name: {CpuUndervoltProviderFactory.CpuName}");
+                    sb.AppendLine($"RyzenControl CPU name: {RyzenControl.CpuName}");
+                    sb.AppendLine($"RyzenControl CPU model: {RyzenControl.CpuModel}");
+                    sb.AppendLine($"Ryzen family: {RyzenControl.Family}");
+                    sb.AppendLine($"Ryzen AI 9 guarded path flag: {RyzenControl.IsRyzenAi9CurveOptimizerUnsupported()}");
+                    sb.AppendLine();
+
+                    sb.AppendLine("[CPU Undervolt Provider]");
+                    sb.AppendLine($"Backend info: {providerBackend}");
+                    sb.AppendLine($"Provider type: {provider?.GetType().Name ?? "<none>"}");
+
+                    if (provider is AmdUndervoltProvider amd)
+                    {
+                        sb.AppendLine($"AMD backend: {amd.ActiveBackend}");
+                        sb.AppendLine($"AMD family: {amd.Family}");
+                        sb.AppendLine($"AMD CPU: {amd.CpuName}");
+                        sb.AppendLine($"AMD IsSupported: {amd.IsSupported}");
+                        sb.AppendLine($"AMD SupportsIgpuCO: {amd.SupportsIgpu}");
+                    }
+                    else if (provider is IntelUndervoltProvider intel)
+                    {
+                        sb.AppendLine($"Intel backend: {intel.ActiveBackend}");
+                    }
+
+                    if (provider != null)
+                    {
+                        try
+                        {
+                            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+                            var status = await provider.ProbeAsync(cts.Token);
+                            sb.AppendLine("Probe status:");
+                            sb.AppendLine($"  Timestamp: {status.Timestamp:O}");
+                            sb.AppendLine($"  ControlledByOmenCore: {status.ControlledByOmenCore}");
+                            sb.AppendLine($"  CoreOffsetMv: {status.CurrentCoreOffsetMv:+0;-0;0}");
+                            sb.AppendLine($"  CacheOffsetMv: {status.CurrentCacheOffsetMv:+0;-0;0}");
+                            sb.AppendLine($"  ExternalController: {status.ExternalController ?? "<none>"}");
+                            sb.AppendLine($"  Warning: {status.Warning ?? "<none>"}");
+                            sb.AppendLine($"  Error: {status.Error ?? "<none>"}");
+                        }
+                        catch (Exception probeEx)
+                        {
+                            sb.AppendLine($"Probe failed: {probeEx.Message}");
+                        }
+                    }
+                    else
+                    {
+                        sb.AppendLine("Probe unavailable: provider not initialized.");
+                    }
+
+                    sb.AppendLine();
+                }
+                finally
+                {
+                    if (provider is IDisposable disposable)
+                    {
+                        disposable.Dispose();
+                    }
+                }
+
+                if (wmiController != null)
+                {
+                    sb.AppendLine("[WMI Fan Ownership]");
+                    AppendReflectedProperty(sb, wmiController, "IsAvailable");
+                    AppendReflectedProperty(sb, wmiController, "Status");
+                    AppendReflectedProperty(sb, wmiController, "IsManualControlActive");
+                    AppendReflectedProperty(sb, wmiController, "CountdownExtensionEnabled");
+                    AppendReflectedProperty(sb, wmiController, "CommandsIneffective");
+                    AppendReflectedProperty(sb, wmiController, "VerifyFailCount");
+                    AppendReflectedProperty(sb, wmiController, "LastMaxModeExternalResetUtc");
+                    AppendReflectedProperty(sb, wmiController, "LastMaxModeExternalResetDetails");
+
+                    try
+                    {
+                        var getHistoryMethod = wmiController.GetType().GetMethod("GetCommandHistory");
+                        if (getHistoryMethod?.Invoke(wmiController, null) is IEnumerable history)
+                        {
+                            var entries = history.Cast<object>().ToList();
+                            sb.AppendLine($"Recent WMI history entries: {entries.Count}");
+                            foreach (var entry in entries.Skip(Math.Max(0, entries.Count - 10)))
+                            {
+                                var timestamp = entry.GetType().GetProperty("Timestamp")?.GetValue(entry)?.ToString() ?? "N/A";
+                                var command = entry.GetType().GetProperty("Command")?.GetValue(entry)?.ToString() ?? "N/A";
+                                var success = entry.GetType().GetProperty("Success")?.GetValue(entry)?.ToString() ?? "N/A";
+                                var error = entry.GetType().GetProperty("Error")?.GetValue(entry)?.ToString() ?? "";
+                                sb.AppendLine($"  {timestamp} | {command} | success={success} | error={error}");
+                            }
+                        }
+                    }
+                    catch (Exception historyEx)
+                    {
+                        sb.AppendLine($"WMI history read failed: {historyEx.Message}");
+                    }
+                }
+                else
+                {
+                    sb.AppendLine("[WMI Fan Ownership]");
+                    sb.AppendLine("WMI controller unavailable.");
+                }
+
+                File.WriteAllText(Path.Combine(exportPath, "tuning-fan-focus.txt"), sb.ToString());
+                _logging.Info("Collected tuning + fan focus snapshot");
+            }
+            catch (Exception ex)
+            {
+                _logging.Warn($"Failed to collect tuning + fan focus snapshot: {ex.Message}");
+            }
+        }
+
+        private static void AppendReflectedProperty(StringBuilder sb, object source, string propertyName)
+        {
+            var property = source.GetType().GetProperty(propertyName);
+            var value = property?.GetValue(source);
+            sb.AppendLine($"{propertyName}: {value ?? "<unavailable>"}");
         }
 
         private string ZipDiagnostics(string exportPath)

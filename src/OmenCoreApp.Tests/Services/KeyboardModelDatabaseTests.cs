@@ -27,6 +27,17 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public void GetConfig_ReturnsConfig_For_ProductId_8A43()
+        {
+            var cfg = KeyboardModelDatabase.GetConfig("8A43");
+            cfg.Should().NotBeNull();
+            cfg!.ModelName.Should().Contain("OMEN 16");
+            cfg.PreferredMethod.Should().Be(KeyboardMethod.ColorTable2020);
+            cfg.KeyboardType.Should().Be(KeyboardType.FourZone);
+            cfg.UserVerified.Should().BeFalse();
+        }
+
+        [Fact]
         public void GetConfig_ReturnsConfig_For_ProductId_8A44()
         {
             var cfg = KeyboardModelDatabase.GetConfig("8A44");
@@ -60,6 +71,17 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public void GetConfig_ReturnsConfig_For_ProductId_8C76()
+        {
+            var cfg = KeyboardModelDatabase.GetConfig("8C76");
+            cfg.Should().NotBeNull();
+            cfg!.ModelName.Should().Contain("wf1xxx");
+            cfg.PreferredMethod.Should().Be(KeyboardMethod.ColorTable2020);
+            cfg.KeyboardType.Should().Be(KeyboardType.FourZone);
+            cfg.UserVerified.Should().BeFalse();
+        }
+
+        [Fact]
         public void GetConfig_ReturnsConfig_For_ProductId_8D87()
         {
             var cfg = KeyboardModelDatabase.GetConfig("8D87");
@@ -80,6 +102,17 @@ namespace OmenCoreApp.Tests.Services
             cfg.PreferredMethod.Should().Be(KeyboardMethod.ColorTable2020);
             cfg.KeyboardType.Should().Be(KeyboardType.FourZoneTkl);
             cfg.UserVerified.Should().BeFalse();
+        }
+
+        [Fact]
+        public void GetDefaultVictusConfig_IsBacklightOnly()
+        {
+            var cfg = KeyboardModelDatabase.GetDefaultVictusConfig(2024);
+
+            cfg.ModelName.Should().Contain("Victus");
+            cfg.PreferredMethod.Should().Be(KeyboardMethod.BacklightOnly);
+            cfg.KeyboardType.Should().Be(KeyboardType.BacklightOnly);
+            cfg.FallbackMethods.Should().BeEmpty();
         }
     }
 }

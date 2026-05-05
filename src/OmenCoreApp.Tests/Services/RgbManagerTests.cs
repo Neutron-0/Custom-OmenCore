@@ -50,6 +50,43 @@ namespace OmenCoreApp.Tests.Services
                 provider.StatusDetail == "4-zone keyboard connected");
         }
 
+        [Fact]
+        public async Task InitializeAllAsync_WhenCalledTwice_InitializesProvidersOnlyOnce()
+        {
+            var manager = new RgbManager();
+            var provider = new TestRgbProvider("keyboard")
+            {
+                IsAvailable = false,
+                AvailableAfterInitialize = true
+            };
+
+            manager.RegisterProvider(provider);
+
+            await manager.InitializeAllAsync();
+            await manager.InitializeAllAsync();
+
+            provider.InitializeCount.Should().Be(1);
+            provider.IsAvailable.Should().BeTrue();
+        }
+
+        [Fact]
+        public async Task SyncStaticColorAsync_LazilyInitializesProviderBeforeFirstWrite()
+        {
+            var manager = new RgbManager();
+            var provider = new TestRgbProvider("keyboard")
+            {
+                IsAvailable = false,
+                AvailableAfterInitialize = true
+            };
+
+            manager.RegisterProvider(provider);
+
+            await manager.SyncStaticColorAsync(Color.FromArgb(0xAA, 0xBB, 0xCC));
+
+            provider.InitializeCount.Should().Be(1);
+            provider.LastEffect.Should().Be("static:#AABBCC");
+        }
+
         private sealed class TestRgbProvider : IRgbProvider
         {
             public TestRgbProvider(string id)
@@ -68,11 +105,18 @@ namespace OmenCoreApp.Tests.Services
             public string StatusDetail => Detail;
             public string Detail { get; set; } = "1 device connected";
             public bool ThrowOnStaticColor { get; set; }
+            public bool AvailableAfterInitialize { get; set; } = true;
+            public int InitializeCount { get; private set; }
             public string? LastEffect { get; private set; }
             public System.Collections.Generic.IReadOnlyList<RgbEffectType> SupportedEffects { get; } =
                 new[] { RgbEffectType.Static, RgbEffectType.Breathing, RgbEffectType.Spectrum, RgbEffectType.Off };
 
-            public Task InitializeAsync() => Task.CompletedTask;
+            public Task InitializeAsync()
+            {
+                InitializeCount++;
+                IsAvailable = AvailableAfterInitialize;
+                return Task.CompletedTask;
+            }
 
             public Task ApplyEffectAsync(string effectId)
             {

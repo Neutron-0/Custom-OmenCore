@@ -38,6 +38,9 @@ public class OmenCoreDaemon : IDisposable
     // silently reset the thermal profile to Balanced when PROCHOT fires).
     private bool _thermalThrottleDetected;
     private DateTime _thermalThrottleSince = DateTime.MinValue;
+    private DateTime _lastPerformanceHoldCheck = DateTime.MinValue;
+    private int _performanceHoldTick;
+    private bool _thermalPowerUnsupportedLogged;
     
     public OmenCoreDaemon(OmenCoreConfig config)
     {
@@ -189,6 +192,8 @@ public class OmenCoreDaemon : IDisposable
                     {
                         CheckAndRestorePerformanceMode(cpuTemp);
                     }
+
+                    CheckAndHoldPerformanceMode();
                     
                     // Log periodically (less often in low-overhead mode)
                     logCounter++;
@@ -249,12 +254,7 @@ public class OmenCoreDaemon : IDisposable
             Log($"[thermal] CPU cooled to {cpuTemp}°C (throttled for {elapsed:F0}s) — " +
                 $"re-applying performance mode: {_config.Performance.Mode}");
             
-            var perfMode = _config.Performance.Mode.ToLower() switch
-            {
-                "performance" => PerformanceMode.Performance,
-                "cool"        => PerformanceMode.Cool,
-                _             => PerformanceMode.Default
-            };
+            var perfMode = ResolvePerformanceMode(_config.Performance.Mode);
             
             if (_ec.SetPerformanceMode(perfMode))
                 Log($"[thermal] ✓ Performance mode restored to: {_config.Performance.Mode}");
@@ -263,6 +263,60 @@ public class OmenCoreDaemon : IDisposable
             
             _thermalThrottleDetected = false;
             _thermalThrottleSince = DateTime.MinValue;
+        }
+    }
+
+    /// <summary>
+    /// Keeps the configured performance state applied on systems where hp-wmi/firmware
+    /// resets the active profile after a short timeout.
+    /// </summary>
+    private void CheckAndHoldPerformanceMode()
+    {
+        if (!_config.Performance.HoldEnabled)
+        {
+            return;
+        }
+
+        var intervalSeconds = Math.Clamp(_config.Performance.HoldIntervalSeconds, 10, 300);
+        if ((DateTime.UtcNow - _lastPerformanceHoldCheck).TotalSeconds < intervalSeconds)
+        {
+            return;
+        }
+
+        _lastPerformanceHoldCheck = DateTime.UtcNow;
+        _performanceHoldTick++;
+
+        var desiredMode = ResolvePerformanceMode(_config.Performance.Mode);
+        var currentMode = _ec.GetPerformanceMode();
+
+        if (currentMode != desiredMode)
+        {
+            Log($"[hold] Performance mode drift detected: current={currentMode}, desired={desiredMode}; re-applying");
+            if (_ec.SetPerformanceMode(desiredMode))
+                Log($"[hold] Performance mode restored to: {_config.Performance.Mode}");
+            else
+                Log($"[hold] Failed to restore performance mode: {_config.Performance.Mode}");
+        }
+
+        if (_config.Performance.ThermalPowerLimit.HasValue)
+        {
+            var powerLimit = Math.Clamp(_config.Performance.ThermalPowerLimit.Value, 0, 5);
+            if (!_ec.HasEcAccess)
+            {
+                if (!_thermalPowerUnsupportedLogged)
+                {
+                    Log($"[hold] Thermal power limit reapply skipped: backend '{_ec.AccessMethod}' does not support EC thermal power writes.");
+                    _thermalPowerUnsupportedLogged = true;
+                }
+            }
+            else if (!_ec.SetThermalPowerLimit(powerLimit))
+            {
+                Log($"[hold] Failed to reapply thermal power limit: {powerLimit}");
+            }
+            else if (_performanceHoldTick % 10 == 1)
+            {
+                Log($"[hold] Thermal power limit reasserted: {powerLimit}");
+            }
         }
     }
     
@@ -297,16 +351,22 @@ public class OmenCoreDaemon : IDisposable
         }
         
         // Apply performance mode
-        var perfMode = _config.Performance.Mode.ToLower() switch
-        {
-            "performance" => PerformanceMode.Performance,
-            "cool" => PerformanceMode.Cool,
-            _ => PerformanceMode.Default
-        };
+        var perfMode = ResolvePerformanceMode(_config.Performance.Mode);
         
         if (_ec.SetPerformanceMode(perfMode))
         {
             Log($"  Performance mode: {_config.Performance.Mode}");
+        }
+
+        if (_config.Performance.ThermalPowerLimit.HasValue)
+        {
+            var powerLimit = Math.Clamp(_config.Performance.ThermalPowerLimit.Value, 0, 5);
+            if (!_ec.HasEcAccess)
+                Log($"  Thermal power limit skipped: backend '{_ec.AccessMethod}' does not support EC thermal power writes");
+            else if (_ec.SetThermalPowerLimit(powerLimit))
+                Log($"  Thermal power limit: {powerLimit}");
+            else
+                Log($"  Thermal power limit failed: {powerLimit}");
         }
         
         // Apply keyboard settings
@@ -444,6 +504,17 @@ public class OmenCoreDaemon : IDisposable
         {
             return false;
         }
+    }
+
+    private static PerformanceMode ResolvePerformanceMode(string? mode)
+    {
+        return mode?.Trim().ToLowerInvariant() switch
+        {
+            "performance" => PerformanceMode.Performance,
+            "balanced" => PerformanceMode.Balanced,
+            "cool" => PerformanceMode.Cool,
+            _ => PerformanceMode.Default
+        };
     }
     
     private void Log(string message)

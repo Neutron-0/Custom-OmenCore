@@ -69,6 +69,26 @@ namespace OmenCore.Services
         public bool IsAvailable => _useV2Backend || _wmiBiosAvailable || _wmiAvailable || _ecAvailable || (_oghProxy != null && _oghProxy.IsAvailable);
 
         public bool IsPerKey => _useV2Backend && (_v2Service?.IsPerKey ?? false);
+
+        /// <summary>
+        /// True when the detected model is per-key capable, even if the active backend
+        /// cannot currently expose per-key control.
+        /// </summary>
+        public bool IsPerKeyCapableHardware
+        {
+            get
+            {
+                var modelConfig = _v2Service?.ModelConfig;
+                if (modelConfig == null)
+                {
+                    return IsPerKey;
+                }
+
+                return IsPerKey ||
+                       modelConfig.KeyboardType == KeyboardType.PerKeyRgb ||
+                       modelConfig.PreferredMethod == KeyboardMethod.HidPerKey;
+            }
+        }
         
         /// <summary>
         /// Returns the currently active backend based on user preference and availability.

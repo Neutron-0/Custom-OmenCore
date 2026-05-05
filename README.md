@@ -27,7 +27,7 @@
 
 ### ⚡ Quick Links
 
-[![Version](https://img.shields.io/badge/version-3.4.1-red.svg?style=for-the-badge)](docs/CHANGELOG_v3.4.1.md)
+[![Version](https://img.shields.io/badge/version-3.5.0-red.svg?style=for-the-badge)](docs/CHANGELOG_v3.5.0.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=for-the-badge)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8.0-purple.svg?style=for-the-badge)](https://dotnet.microsoft.com/download/dotnet/8.0)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2.svg?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/9WhJdabGk8)
@@ -83,62 +83,51 @@ This generates a timestamped folder with:
 
 Attach those files to your GitHub issue for faster triage.
 
-## 🔥 **What's New in v3.4.1**
+## 🔥 **What's New in v3.5.0**
 
-v3.4.1 is a targeted hotfix and stability release for v3.4.0 regressions, focused on fan-control correctness, profile synchronization, hotkey filtering, RGB reliability, Linux startup diagnostics, and release packaging consistency.
+v3.5.0 is the current release, focused on hardware-control correctness, reliability, and clearer requested-vs-confirmed state reporting.
 
-### Critical / High Fixes
+### v3.5.0 Highlights
 
-- **Max fan mode no longer persists a misleading Max preset** when firmware verification fails.
-- **Auto/Default fan handoff avoids explicit zero-level V1 WMI writes**, preventing avoidable transient 0 RPM dips.
-- **Balanced/Performance profile state now stays synchronized** across sidebar, Omen/System tab, tray actions, and persisted config.
-- **Fn brightness keys are filtered out of the OMEN launch path**, while Fn+F12/Fn+P support is wired for Transcend 14 validation.
-- **RGB sync reports partial failures clearly** and no longer lets one optional provider block the rest of the sync.
-- **Version metadata is consistent everywhere**: app, tray, installer, worker, and packaged `VERSION.txt` all report v3.4.1.
+- **Fan/profile wording clarity updates** now make linked-vs-independent fan policy behavior explicit.
+- **Quick tuning diagnostics panel** was added in the tuning view for screenshot-friendly status capture (CPU UV, GPU OC, conflicts, startup recovery state).
+- **Tuning safety guardrails expanded** with conflict detection and startup recovery metadata/reset flow.
+- **Requested vs confirmed status surfaces** were hardened across fan/tray/tuning paths to reduce optimistic-success confusion.
+- **Deferred scope moved out of the changelog** into the dedicated v3.6 roadmap document.
 
-### Reliability / Async
+### Release Notes
 
-- **Linux GUI startup diagnostics added** for Fedora/KDE black-screen triage.
-- **Linux hardware polling is calmer and non-overlapping**, with dashboard updates marshalled to the UI thread.
-- **Linux RGB capability detection no longer recursively scans `/sys/class/leds`** during startup.
-- **Optional OpenRGB packet I/O is bounded and timeout-protected** so peripheral sync cannot hang indefinitely.
-- **Corsair/Logitech provider startup no longer double-probes devices**, reducing startup work and log noise.
+Current stable release is **v3.5.0**.
 
-### UI and Defaults
+→ **[v3.5.0 Changelog / Validation Gate](docs/CHANGELOG_v3.5.0.md)**
 
-- **RGB page now shows active target count and last sync status** for clearer cross-device feedback.
-- **PawnIO messaging now points to the bundled installer option** instead of external downloads.
-- **Linux visible navigation/status glyphs avoid emoji font fallback** for more deterministic rendering.
+→ **[v3.6.0 Roadmap (Deferred Scope)](docs/ROADMAP_v3.6.0.md)**
 
-### Model Support
-
-- Added dedicated HP OMEN 15-en0038ur (`8787`) model and 4-zone keyboard database coverage.
-
-→ **[Full Changelog](docs/CHANGELOG_v3.4.1.md)**
+→ **[Previous Stable Changelog (v3.4.1)](docs/CHANGELOG_v3.4.1.md)**
 
 ---
 
 ## 📦 **Downloads & Artifacts**
 
-**Version:** v3.4.1 | **Status:** Released
+**Version:** v3.5.0 | **Status:** Released
 
 Release artifacts:
 
 | Download | Platform | Details |
 |----------|----------|----------|
-| **OmenCoreSetup-3.4.1.exe** | Windows | Installer (Recommended) — Includes .NET 8 runtime |
-| **OmenCore-3.4.1-win-x64.zip** | Windows | Portable — Extract and run, no installation |
-| **OmenCore-3.4.1-linux-x64.zip** | Linux | CLI + Avalonia GUI, self-contained runtime |
+| **OmenCoreSetup-3.5.0.exe** | Windows | Installer (Recommended) — Includes .NET 8 runtime |
+| **OmenCore-3.5.0-win-x64.zip** | Windows | Portable — Extract and run, no installation |
+| **OmenCore-3.5.0-linux-x64.zip** | Linux | CLI + Avalonia GUI, self-contained runtime |
 
 ### SHA256
 
 ```text
-41E54DA4A25E38496BE22C64A6B899F2645B984AF5CCB56E794C2B99584F08D2  OmenCoreSetup-3.4.1.exe
-F3E6AAC73DD44EB52B231EAF7413B98518DDAF749BFF38AE04ABC5861FFC9028  OmenCore-3.4.1-win-x64.zip
-7783DF9D0B0A877CA180D4B6FDE234646AFD355D61DD6EAB8898D39577EC019A  OmenCore-3.4.1-linux-x64.zip
+935323052D53871809E798CC5396508EC4774FE9C85B44518927642E0BD10E2B  OmenCoreSetup-3.5.0.exe
+221304F57B1866AA9B5D86369BCC745F3EDCCEF34116A3E76DCB769268960E49  OmenCore-3.5.0-win-x64.zip
+86D19E06FD0E2120F311FAF95C741E4685B8A4B66559B07463F1663F4A02E35E  OmenCore-3.5.0-linux-x64.zip
 ```
 
-> Security: release hashes are documented in [CHANGELOG_v3.4.1.md](docs/CHANGELOG_v3.4.1.md) and on the [GitHub Releases page](https://github.com/theantipopau/omencore/releases).
+> Security: release hashes are documented in [CHANGELOG_v3.5.0.md](docs/CHANGELOG_v3.5.0.md) and on the [GitHub Releases page](https://github.com/theantipopau/omencore/releases).
 
 ---
 
@@ -282,7 +271,7 @@ OmenCore/
 +-- installer/                    # Inno Setup script
 +-- config/                       # default_config.json
 +-- docs/                         # Changelogs, audit reports, guides
-+-- VERSION.txt                   # Current: 3.4.1
++-- VERSION.txt                   # Current release/version marker
 ```
 
 **Principles:** Safety-first EC write allowlist · Async by default · Telemetry change-detection (0.5°/0.5%) · Graceful per-service degradation · Out-of-process crash isolation
@@ -315,7 +304,7 @@ cd src\OmenCoreApp\bin\Release\net8.0-windows10.0.19041.0
 ```powershell
 pwsh ./build-installer.ps1
 # Optional: -Configuration Release -Runtime win-x64 (these are the defaults)
-# Outputs: artifacts/OmenCoreSetup-3.4.1.exe and artifacts/OmenCore-3.4.1-win-x64.zip
+# Outputs: artifacts/OmenCoreSetup-3.5.0.exe and artifacts/OmenCore-3.5.0-win-x64.zip
 ```
 
 ### Tests
@@ -365,6 +354,7 @@ Detailed logs are in `%LOCALAPPDATA%\OmenCore\`. On Linux, use `sudo omencore-cl
 
 | Version | Key Changes |
 |---------|------------|
+| **v3.5.0** | Reliability release: fan/tuning diagnostics clarity, requested-vs-confirmed UI hardening, conflict/recovery safety guardrails, and roadmap split for deferred scope |
 | **v3.4.1** | Hotfix for fan/profile regressions, brightness hotkeys, RGB reliability, Linux startup diagnostics, and 15-en0038ur support |
 | **v3.4.0** | Correctness and reliability sweep: fan/power fixes, update safety hardening, CI/package alignment, model/support matrix expansion |
 | **v3.3.0** | Fan curve stability, sleep recovery, OSD DPI/visual, RGB hardening, AMD power tuning, Lite Mode (74 items) |
@@ -389,7 +379,9 @@ Older release notes: [docs/](docs/)
 - [docs/ANTIVIRUS_FAQ.md](docs/ANTIVIRUS_FAQ.md) — Antivirus false positive handling
 - [docs/DEFENDER_FALSE_POSITIVE.md](docs/DEFENDER_FALSE_POSITIVE.md) — Windows Defender exclusion steps
 - [docs/WINRING0_SETUP.md](docs/WINRING0_SETUP.md) — WinRing0 driver setup
-- [docs/CHANGELOG_v3.4.1.md](docs/CHANGELOG_v3.4.1.md) — Current release notes
+- [docs/CHANGELOG_v3.5.0.md](docs/CHANGELOG_v3.5.0.md) — Active release-track changelog and validation gate
+- [docs/ROADMAP_v3.6.0.md](docs/ROADMAP_v3.6.0.md) — Deferred scope for the next release cycle
+- [docs/CHANGELOG_v3.4.1.md](docs/CHANGELOG_v3.4.1.md) — Latest stable release notes
 
 ---
 

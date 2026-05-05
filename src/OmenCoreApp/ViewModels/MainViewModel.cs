@@ -45,6 +45,9 @@ namespace OmenCore.ViewModels
         private static extern uint GetCurrentThreadId();
         
         private const int SW_RESTORE = 9;
+        private const double TelemetryTransientZeroThresholdC = 0.05;
+        private const double TelemetrySpikeDetectionDeltaC = 10.0;
+        private const double TelemetryMaxStepPerSampleC = 8.0;
         
         private readonly LoggingService _logging = App.Logging;
         private readonly ConfigurationService _configService = App.Configuration;
@@ -241,7 +244,12 @@ namespace OmenCore.ViewModels
                 {
                     // Create services required for SettingsViewModel
                     var profileExportService = new ProfileExportService(_logging, _configService);
-                    var diagnosticsExportService = new DiagnosticExportService(_logging, _logging.LogDirectory, _resumeRecoveryDiagnostics);
+                    var diagnosticsExportService = new DiagnosticExportService(
+                        _logging,
+                        _logging.LogDirectory,
+                        _resumeRecoveryDiagnostics,
+                        _hardwareMonitoringService,
+                        _fanService);
                     
                     _settings = new SettingsViewModel(_logging, _configService, _systemInfoService, 
                         _fanCleaningService, _biosUpdateService, profileExportService, diagnosticsExportService,
@@ -505,6 +513,12 @@ namespace OmenCore.ViewModels
         /// </summary>
         public string? ActiveCurvePresetName => _fanService?.ActivePresetName;
 
+        /// <summary>True while a fan curve or hold is actively running (used by cadence wiring in App.xaml.cs).</summary>
+        public bool IsFanCurveActive => _fanService?.IsCurveOrHoldActive ?? false;
+
+        // Expose the FanService reference so App.xaml.cs cadence wiring can read IsCurveActive.
+        internal FanService? FanService => _fanService;
+
         public string CurrentPerformanceMode
         {
             get => _currentPerformanceMode;
@@ -693,6 +707,13 @@ namespace OmenCore.ViewModels
                 result.CpuTemperatureC = previous.CpuTemperatureC;
             }
             result.CpuTemperatureC = SanitizeRange(result.CpuTemperatureC, previous?.CpuTemperatureC ?? 0, 0, 125);
+            result.CpuTemperatureC = StabilizeTemperatureSample(
+                result.CpuTemperatureC,
+                previous?.CpuTemperatureC ?? 0,
+                result.CpuTemperatureState,
+                previous?.CpuTemperatureState ?? TelemetryDataState.Unknown,
+                0,
+                125);
 
             bool gpuTempStateValid = result.GpuTemperatureState == TelemetryDataState.Valid ||
                                      result.GpuTemperatureState == TelemetryDataState.Stale ||
@@ -702,6 +723,16 @@ namespace OmenCore.ViewModels
                 result.GpuTemperatureC = previous.GpuTemperatureC;
             }
             result.GpuTemperatureC = SanitizeRange(result.GpuTemperatureC, previous?.GpuTemperatureC ?? 0, 0, 125);
+            if (result.GpuTemperatureState != TelemetryDataState.Inactive)
+            {
+                result.GpuTemperatureC = StabilizeTemperatureSample(
+                    result.GpuTemperatureC,
+                    previous?.GpuTemperatureC ?? 0,
+                    result.GpuTemperatureState,
+                    previous?.GpuTemperatureState ?? TelemetryDataState.Unknown,
+                    0,
+                    125);
+            }
 
             // When dGPU telemetry is marked inactive, avoid showing stale utilization/power/clock values.
             if (result.GpuTemperatureState == TelemetryDataState.Inactive)
@@ -730,6 +761,45 @@ namespace OmenCore.ViewModels
             }
 
             return Math.Max(min, Math.Min(max, candidate));
+        }
+
+        private static double StabilizeTemperatureSample(
+            double candidate,
+            double previous,
+            TelemetryDataState candidateState,
+            TelemetryDataState previousState,
+            double min,
+            double max)
+        {
+            if (previous <= 0 || !IsTemperatureStateUsable(previousState))
+            {
+                return candidate;
+            }
+
+            if (!IsTemperatureStateUsable(candidateState))
+            {
+                return previous;
+            }
+
+            // Brief one-sample zeros are common during provider handoffs; keep the last good value.
+            if (candidate <= TelemetryTransientZeroThresholdC)
+            {
+                return previous;
+            }
+
+            var delta = candidate - previous;
+            if (Math.Abs(delta) < TelemetrySpikeDetectionDeltaC)
+            {
+                return candidate;
+            }
+
+            var stepped = previous + Math.Sign(delta) * TelemetryMaxStepPerSampleC;
+            return Math.Clamp(stepped, min, max);
+        }
+
+        private static bool IsTemperatureStateUsable(TelemetryDataState state)
+        {
+            return state == TelemetryDataState.Valid || state == TelemetryDataState.Stale;
         }
 
         private static double SanitizeLoadPercent(double candidate, double fallback)
@@ -1596,6 +1666,11 @@ namespace OmenCore.ViewModels
             // Initialize OSD service (will only activate if enabled in settings)
             // Pass ThermalProvider from FanService for temperature data
             _osdService = new OsdService(_configService, _logging, _fanService?.ThermalProvider, _fanService);
+            _osdService.VisibilityChanged += (_, visible) =>
+            {
+                _hardwareMonitoringService.SetOverlayRealtimeMode(visible);
+            };
+            _hardwareMonitoringService.SetOverlayRealtimeMode(false);
             
             // Initialize conflict detection service for detecting conflicting software
             _conflictDetectionService = new ConflictDetectionService(_logging);
@@ -1829,9 +1904,11 @@ namespace OmenCore.ViewModels
 
                     var hottestComponent = Math.Max(sample.CpuTemperatureC, sample.GpuTemperatureC);
                     var peakFanRpm = Math.Max(sample.Fan1Rpm, sample.Fan2Rpm);
-                    var expectedHighFanMode = activeFanState.Contains("Max", StringComparison.OrdinalIgnoreCase)
-                        || activeFanState.Contains("Performance", StringComparison.OrdinalIgnoreCase)
-                        || activeFanState.Contains("Extreme", StringComparison.OrdinalIgnoreCase)
+                    var activeFanMode = _fanService?.GetCurrentFanMode();
+                    var expectedHighFanMode = FanModeNameResolver.IsMaxAlias(activeFanMode)
+                        || FanModeNameResolver.IsPerformanceAlias(activeFanMode)
+                        || FanModeNameResolver.IsMaxAlias(activeFanState)
+                        || FanModeNameResolver.IsPerformanceAlias(activeFanState)
                         || (_fanService?.IsCurveActive ?? false)
                         || (_fanService?.IsThermalProtectionActive ?? false);
 
@@ -1944,21 +2021,29 @@ namespace OmenCore.ViewModels
                 {
                     try
                     {
+                        string ResolveConfirmedFanModeLabel(string requested)
+                        {
+                            return _fanService.ActivePresetName
+                                ?? _fanService.GetCurrentFanMode()
+                                ?? requested;
+                        }
+
                         // Look up the saved preset from config
                         var preset = _config.FanPresets?.FirstOrDefault(p => 
                             p.Name.Equals(savedFanPreset, StringComparison.OrdinalIgnoreCase));
                         
                         if (preset != null)
                         {
-                            _fanService.ApplyPreset(preset);
-                            _logging.Info($"✓ Fan preset restored on startup: {savedFanPreset} ({preset.Curve?.Count ?? 0} curve points)");
+                            var applied = _fanService.ApplyPreset(preset);
+                            var confirmedMode = ResolveConfirmedFanModeLabel(savedFanPreset);
+                            _logging.Info($"✓ Fan preset restore {(applied ? "applied" : "failed")}: requested={savedFanPreset}, confirmed={confirmedMode} ({preset.Curve?.Count ?? 0} curve points)");
                             
                             // Sync UI with restored preset
                             System.Windows.Application.Current?.Dispatcher.Invoke(() =>
                             {
                                 FanControl?.SelectPresetByNameNoApply(savedFanPreset);
-                                CurrentFanMode = savedFanPreset;
-                                if (_dashboard != null) _dashboard.CurrentFanMode = savedFanPreset;
+                                CurrentFanMode = confirmedMode;
+                                if (_dashboard != null) _dashboard.CurrentFanMode = confirmedMode;
                             });
                         }
                         else
@@ -1967,24 +2052,19 @@ namespace OmenCore.ViewModels
                             var builtIn = new FanPreset
                             {
                                 Name = savedFanPreset,
-                                Mode = savedFanPreset.ToLowerInvariant() switch
-                                {
-                                    "max" or "maximum" => FanMode.Max,
-                                    "performance" or "turbo" => FanMode.Performance,
-                                    "quiet" or "silent" => FanMode.Quiet,
-                                    _ => FanMode.Auto
-                                },
+                                Mode = FanModeNameResolver.ResolveBuiltInFanMode(savedFanPreset),
                                 IsBuiltIn = true
                             };
-                            _fanService.ApplyPreset(builtIn);
-                            _logging.Info($"✓ Fan preset restored on startup: {savedFanPreset} (built-in)");
+                            var applied = _fanService.ApplyPreset(builtIn);
+                            var confirmedMode = ResolveConfirmedFanModeLabel(savedFanPreset);
+                            _logging.Info($"✓ Fan preset restore {(applied ? "applied" : "failed")}: requested={savedFanPreset}, confirmed={confirmedMode} (built-in)");
                             
                             // Sync UI with restored preset
                             System.Windows.Application.Current?.Dispatcher.Invoke(() =>
                             {
                                 FanControl?.SelectPresetByNameNoApply(savedFanPreset);
-                                CurrentFanMode = savedFanPreset;
-                                if (_dashboard != null) _dashboard.CurrentFanMode = savedFanPreset;
+                                CurrentFanMode = confirmedMode;
+                                if (_dashboard != null) _dashboard.CurrentFanMode = confirmedMode;
                             });
                         }
                     }
@@ -3003,23 +3083,21 @@ namespace OmenCore.ViewModels
                     // Show lighting tab if:
                     // 1. Corsair or Logitech peripheral devices are found, OR
                     // 2. HP OMEN keyboard lighting is available, OR
-                    // 3. Razer Synapse is detected, OR
-                    // 4. OpenRGB server is running (for desktop/generic RGB support)
+                    // 3. Razer Synapse has already been detected.
+                    // Optional RGB providers are registered without probing here; RgbManager
+                    // initializes them on the first RGB page action or sync request.
                     bool hasPeripherals = _corsairDeviceService.Devices.Any() || _logitechDeviceService.Devices.Any();
                     bool hasKeyboardLighting = _keyboardLightingService?.IsAvailable ?? false;
                     bool hasRazer = _razerService?.IsAvailable ?? false;
                     
-                    // Try to detect OpenRGB server (runs on port 6742 by default)
-                    var openRgbProvider = new OmenCore.Services.Rgb.OpenRgbProvider(_logging);
-                    await openRgbProvider.InitializeAsync();
-                    bool hasOpenRgb = openRgbProvider.IsAvailable;
-                    
-                    if (hasPeripherals || hasKeyboardLighting || hasRazer || hasOpenRgb)
+                    if (hasPeripherals || hasKeyboardLighting || hasRazer)
                     {
-                        // Initialize RGB manager and providers with priority: Corsair -> Logitech -> Razer -> OpenRGB -> SystemGeneric
+                        // Register RGB providers with priority: Corsair -> Logitech -> Razer -> OpenRGB -> SystemGeneric.
+                        // Provider initialization is lazy to avoid duplicate startup probes.
                         var rgbManager = new OmenCore.Services.Rgb.RgbManager(_logging);
                         var corsairProvider = new OmenCore.Services.Rgb.CorsairRgbProvider(_logging, _configService, _corsairDeviceService);
                         var logitechProvider = new OmenCore.Services.Rgb.LogitechRgbProvider(_logging, _logitechDeviceService);
+                        var openRgbProvider = new OmenCore.Services.Rgb.OpenRgbProvider(_logging);
                         rgbManager.RegisterProvider(corsairProvider);
                         rgbManager.RegisterProvider(logitechProvider);
 
@@ -3029,22 +3107,15 @@ namespace OmenCore.ViewModels
                             rgbManager.RegisterProvider(razerProvider);
                         }
                         
-                        // Register OpenRGB provider if available
-                        if (hasOpenRgb)
-                        {
-                            rgbManager.RegisterProvider(openRgbProvider);
-                            _logging.Info($"OpenRGB integration enabled with {openRgbProvider.DeviceCount} device(s)");
-                        }
+                        rgbManager.RegisterProvider(openRgbProvider);
 
                         var systemProvider = new OmenCore.Services.Rgb.SystemRgbProvider(rgbManager, _logging);
                         rgbManager.RegisterProvider(systemProvider);
 
-                        await rgbManager.InitializeAllAsync();
-
                         _screenSamplingService = new ScreenSamplingService(_logging, rgbManager, _keyboardLightingService);
                         _audioReactiveRgbService = new AudioReactiveRgbService(_logging, _keyboardLightingService);
 
-                        foreach (var provider in rgbManager.AvailableProviders.Where(p => p.ProviderId != "system"))
+                        foreach (var provider in rgbManager.Providers.Where(p => p.ProviderId != "system"))
                         {
                             _audioReactiveRgbService.RegisterProvider(provider);
                         }
@@ -3416,29 +3487,68 @@ namespace OmenCore.ViewModels
                 {
                     await dispatcher.InvokeAsync(() =>
                     {
-                        targetPreset = mode switch
+                        if (FanModeNameResolver.IsCustomAlias(mode))
                         {
-                            "Custom" => ResolveQuickAccessCurvePreset(),
-                            "Max" => FanPresets.FirstOrDefault(p => p.Name.Equals("Max", StringComparison.OrdinalIgnoreCase))
-                                     ?? FanPresets.FirstOrDefault(p => p.Name.Contains("Max", StringComparison.OrdinalIgnoreCase)),
-                            "Quiet" => FanPresets.FirstOrDefault(p => p.Name.Contains("Quiet", StringComparison.OrdinalIgnoreCase) || p.Name.Contains("Silent", StringComparison.OrdinalIgnoreCase)),
-                            _ => FanPresets.FirstOrDefault(p => p.Name.Contains("Auto", StringComparison.OrdinalIgnoreCase) || p.Name.Contains("Balanced", StringComparison.OrdinalIgnoreCase))
-                        };
+                            targetPreset = ResolveQuickAccessCurvePreset();
+                        }
+                        else if (FanModeNameResolver.IsMaxAlias(mode))
+                        {
+                            targetPreset = FanPresets.FirstOrDefault(p => p.Name.Equals("Max", StringComparison.OrdinalIgnoreCase))
+                                ?? FanPresets.FirstOrDefault(p => p.Name.Contains("Max", StringComparison.OrdinalIgnoreCase));
+                        }
+                        else if (FanModeNameResolver.IsQuietAlias(mode))
+                        {
+                            targetPreset = FanPresets.FirstOrDefault(p =>
+                                p.Name.Contains("Quiet", StringComparison.OrdinalIgnoreCase) ||
+                                p.Name.Contains("Silent", StringComparison.OrdinalIgnoreCase));
+                        }
+                        else if (FanModeNameResolver.IsPerformanceAlias(mode))
+                        {
+                            targetPreset = FanPresets.FirstOrDefault(p => p.Name.Contains("Extreme", StringComparison.OrdinalIgnoreCase))
+                                ?? FanPresets.FirstOrDefault(p => p.Name.Contains("Gaming", StringComparison.OrdinalIgnoreCase))
+                                ?? FanPresets.FirstOrDefault(p => p.Name.Contains("Performance", StringComparison.OrdinalIgnoreCase))
+                                ?? FanPresets.FirstOrDefault(p => p.Name.Contains("Turbo", StringComparison.OrdinalIgnoreCase))
+                                ?? FanPresets.FirstOrDefault(p => p.Mode == FanMode.Performance)
+                                ?? FanPresets.FirstOrDefault(p => p.Name.Equals("Max", StringComparison.OrdinalIgnoreCase));
+                        }
+                        else
+                        {
+                            targetPreset = FanPresets.FirstOrDefault(p =>
+                                p.Name.Contains("Auto", StringComparison.OrdinalIgnoreCase) ||
+                                p.Name.Contains("Balanced", StringComparison.OrdinalIgnoreCase));
+                        }
                     });
                 }
 
                 if (targetPreset != null)
                 {
-                    await Task.Run(() => _fanService.ApplyPreset(targetPreset, immediate: true));
+                    var applied = await Task.Run(() => _fanService.ApplyPreset(targetPreset, immediate: true));
+                    if (!applied)
+                    {
+                        if (dispatcher != null)
+                        {
+                            await dispatcher.InvokeAsync(() =>
+                            {
+                                var failedModeName = targetPreset.IsBuiltIn ? mode : targetPreset.Name;
+                                PushEvent($"Fan mode failed: {failedModeName}");
+                                _notificationService.ShowWarning(
+                                    "Fan Mode",
+                                    $"Could not apply {failedModeName}. Check Diagnostics for backend state.");
+                            });
+                        }
+                        return;
+                    }
+                    var confirmedModeName = _fanService.ActivePresetName
+                        ?? _fanService.GetCurrentFanMode()
+                        ?? targetPreset.Name;
                     if (dispatcher != null)
                     {
                         await dispatcher.InvokeAsync(() =>
                         {
                             SelectedPreset = targetPreset;
-                            var appliedModeName = targetPreset.IsBuiltIn ? mode : targetPreset.Name;
-                            CurrentFanMode = appliedModeName;
-                            PushEvent($"🌀 Fan mode: {appliedModeName}");
-                            _notificationService.ShowFanModeChanged(appliedModeName, "Quick Access");
+                            CurrentFanMode = confirmedModeName;
+                            PushEvent($"🌀 Fan mode: {confirmedModeName}");
+                            _notificationService.ShowFanModeChanged(confirmedModeName, "Quick Access");
                         });
                     }
                 }
@@ -3448,8 +3558,8 @@ namespace OmenCore.ViewModels
                     {
                         await dispatcher.InvokeAsync(() =>
                         {
-                            CurrentFanMode = mode;
-                            PushEvent($"🌀 Fan mode: {mode} (preset not found)");
+                            PushEvent($"⚠ Fan mode request ignored: preset not found for {mode}");
+                            _notificationService.ShowWarning("Fan Mode", $"Could not resolve preset for {mode}.");
                         });
                     }
                 }
@@ -3557,13 +3667,17 @@ namespace OmenCore.ViewModels
                 {
                     await dispatcher.InvokeAsync(() =>
                     {
+                        var confirmedFanMode = _fanService.ActivePresetName
+                            ?? _fanService.GetCurrentFanMode()
+                            ?? fanMode;
+
                         CurrentPerformanceMode = performanceMode;
-                        CurrentFanMode = fanMode;
+                        CurrentFanMode = confirmedFanMode;
                         General?.SetSystemControlViewModel(SystemControl);
                         SystemControl?.SelectModeByNameNoApply(performanceMode);
-                        FanControl?.SelectPresetByNameNoApply(fanMode);
+                        FanControl?.SelectPresetByNameNoApply(confirmedFanMode);
                         ShowHotkeyOsd("Profile", profile, "Tray");
-                        PushEvent($"🎮 Profile: {profile}");
+                        PushEvent($"🎮 Profile: {profile} (fan: {confirmedFanMode})");
                     });
                 }
             });

@@ -47,6 +47,42 @@ namespace OmenCoreApp.Tests.ViewModels
             public bool VerifyMaxApplied(out string details) { details = ""; return true; }
         }
 
+        private sealed class TestFanVerificationService : IFanVerificationService
+        {
+            public bool IsAvailable { get; set; }
+
+            public Task<FanApplyResult> ApplyAndVerifyFanSpeedAsync(int fanIndex, int targetPercent, System.Threading.CancellationToken ct = default)
+                => Task.FromResult(new FanApplyResult());
+
+            public Task<FanApplyResult> ApplyWithEnhancedVerificationAsync(int fanIndex, int targetPercent, bool autoRevertOnFailure = true, System.Threading.CancellationToken ct = default)
+                => Task.FromResult(new FanApplyResult());
+
+            public Task<FanCalibrationResult> PerformFanCalibrationAsync(int fanIndex, System.Threading.CancellationToken ct = default)
+                => Task.FromResult(new FanCalibrationResult());
+
+            public (int rpm, int level) GetCurrentFanState(int fanIndex) => (0, 0);
+
+            public (int rpm, int level, RpmSource source) GetCurrentFanStateWithSource(int fanIndex) => (0, 0, RpmSource.Estimated);
+
+            public Task<(int avg, int min, int max)> GetStableFanRpmAsync(int fanIndex, int samples = 3, System.Threading.CancellationToken ct = default)
+                => Task.FromResult((0, 0, 0));
+        }
+
+        private static OmenCore.ViewModels.FanControlViewModel CreateViewModel(IFanVerificationService? verificationService = null)
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var configService = new ConfigurationService();
+            var hwMonitor = new OmenCore.Hardware.LibreHardwareMonitorImpl();
+            var thermalProvider = new OmenCore.Hardware.ThermalSensorProvider(hwMonitor);
+            var controller = new TestFanController();
+            var notificationService = new NotificationService(logging);
+            var fanService = new FanService(controller, thermalProvider, logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService());
+
+            return new OmenCore.ViewModels.FanControlViewModel(fanService, configService, logging, verificationService);
+        }
+
         [Fact]
         public void SettingTransitionProperties_PersistsToConfig_And_AppliesToService()
         {
@@ -77,6 +113,37 @@ namespace OmenCoreApp.Tests.ViewModels
             fanService.SmoothingStepMs.Should().Be(100);
 
             logging.Dispose();
+        }
+
+        [Fact]
+        public void FanCalibrationStatusText_WhenVerificationServiceMissing_ShowsInitializationReason()
+        {
+            var vm = CreateViewModel();
+
+            vm.IsFanCalibrationAvailable.Should().BeFalse();
+            vm.FanCalibrationStatusText.Should().Contain("not initialized");
+            vm.FanCalibrationUnavailableReason.Should().Contain("not initialized");
+        }
+
+        [Fact]
+        public void FanCalibrationStatusText_WhenVerificationBackendInactive_ShowsBackendContext()
+        {
+            var verifier = new TestFanVerificationService { IsAvailable = false };
+            var vm = CreateViewModel(verifier);
+
+            vm.IsFanCalibrationAvailable.Should().BeFalse();
+            vm.FanCalibrationStatusText.Should().Contain("backend is inactive");
+            vm.FanCalibrationStatusText.Should().Contain("active fan backend");
+        }
+
+        [Fact]
+        public void FanCalibrationUnavailableReason_WhenVerificationAvailable_ReportsAvailable()
+        {
+            var verifier = new TestFanVerificationService { IsAvailable = true };
+            var vm = CreateViewModel(verifier);
+
+            vm.IsFanCalibrationAvailable.Should().BeTrue();
+            vm.FanCalibrationUnavailableReason.Should().Contain("available");
         }
     }
 }

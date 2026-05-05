@@ -635,6 +635,38 @@ namespace OmenCore.Models
         
         /// <summary>Reapply OC settings on application startup</summary>
         public bool ApplyOnStartup { get; set; } = false;
+
+        /// <summary>
+        /// True while a GPU OC Test Apply session is active.
+        /// Persisted for interrupted-session crash recovery.
+        /// </summary>
+        public bool PendingTestApply { get; set; } = false;
+
+        /// <summary>
+        /// True when the current tuning profile is pending user confirmation.
+        /// If the app exits unexpectedly while this is true, next launch performs a safe reset.
+        /// </summary>
+        public bool StartupPendingConfirmation { get; set; } = false;
+
+        /// <summary>
+        /// Set when startup recovery performed a safe reset because an unconfirmed profile was detected.
+        /// </summary>
+        public bool LastStartupHadUnconfirmedState { get; set; } = false;
+
+        /// <summary>Last confirmed GPU core clock offset in MHz.</summary>
+        public int LastConfirmedCoreClockOffsetMHz { get; set; } = 0;
+
+        /// <summary>Last confirmed GPU memory clock offset in MHz.</summary>
+        public int LastConfirmedMemoryClockOffsetMHz { get; set; } = 0;
+
+        /// <summary>Last confirmed power limit in percent.</summary>
+        public int LastConfirmedPowerLimitPercent { get; set; } = 100;
+
+        /// <summary>Last confirmed GPU voltage offset in mV.</summary>
+        public int LastConfirmedVoltageOffsetMv { get; set; } = 0;
+
+        /// <summary>UTC timestamp of last explicit user confirmation.</summary>
+        public DateTime? LastConfirmedAtUtc { get; set; }
     }
     
     /// <summary>

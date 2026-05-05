@@ -85,5 +85,110 @@ namespace OmenCoreApp.Tests.ViewModels
 
             Assert.Null(result);
         }
+
+        [Fact]
+        public void NormalizeMonitoringSample_HoldsPreviousCpuTemp_OnTransientZero()
+        {
+            var previous = new MonitoringSample
+            {
+                CpuTemperatureC = 68,
+                CpuTemperatureState = TelemetryDataState.Valid
+            };
+
+            var current = new MonitoringSample
+            {
+                CpuTemperatureC = 0,
+                CpuTemperatureState = TelemetryDataState.Valid
+            };
+
+            var normalized = InvokeNormalize(current, previous);
+
+            Assert.NotNull(normalized);
+            Assert.Equal(68, normalized!.CpuTemperatureC);
+        }
+
+        [Fact]
+        public void NormalizeMonitoringSample_ClampsLargeSingleStepCpuSpike()
+        {
+            var previous = new MonitoringSample
+            {
+                CpuTemperatureC = 60,
+                CpuTemperatureState = TelemetryDataState.Valid
+            };
+
+            var current = new MonitoringSample
+            {
+                CpuTemperatureC = 72,
+                CpuTemperatureState = TelemetryDataState.Valid
+            };
+
+            var normalized = InvokeNormalize(current, previous);
+
+            Assert.NotNull(normalized);
+            Assert.Equal(68, normalized!.CpuTemperatureC);
+        }
+
+        [Fact]
+        public void NormalizeMonitoringSample_ClampsLargeSingleStepGpuSpike_WhenGpuActive()
+        {
+            var previous = new MonitoringSample
+            {
+                GpuTemperatureC = 58,
+                GpuTemperatureState = TelemetryDataState.Valid
+            };
+
+            var current = new MonitoringSample
+            {
+                GpuTemperatureC = 70,
+                GpuTemperatureState = TelemetryDataState.Valid
+            };
+
+            var normalized = InvokeNormalize(current, previous);
+
+            Assert.NotNull(normalized);
+            Assert.Equal(66, normalized!.GpuTemperatureC);
+        }
+
+        [Fact]
+        public void NormalizeMonitoringSample_AllowsNormalCpuStepUnderSpikeThreshold()
+        {
+            var previous = new MonitoringSample
+            {
+                CpuTemperatureC = 60,
+                CpuTemperatureState = TelemetryDataState.Valid
+            };
+
+            var current = new MonitoringSample
+            {
+                CpuTemperatureC = 67,
+                CpuTemperatureState = TelemetryDataState.Valid
+            };
+
+            var normalized = InvokeNormalize(current, previous);
+
+            Assert.NotNull(normalized);
+            Assert.Equal(67, normalized!.CpuTemperatureC);
+        }
+
+        [Fact]
+        public void NormalizeMonitoringSample_DoesNotClampLargeDelta_WhenPreviousStateUnusable()
+        {
+            var previous = new MonitoringSample
+            {
+                CpuTemperatureC = 40,
+                CpuTemperatureState = TelemetryDataState.Unavailable
+            };
+
+            var current = new MonitoringSample
+            {
+                CpuTemperatureC = 70,
+                CpuTemperatureState = TelemetryDataState.Valid
+            };
+
+            var normalized = InvokeNormalize(current, previous);
+
+            Assert.NotNull(normalized);
+            Assert.Equal(70, normalized!.CpuTemperatureC);
+        }
     }
 }

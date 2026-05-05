@@ -29,9 +29,26 @@ public class SystemStatus
     public PerformanceInfo Performance { get; set; } = new();
     public string CapabilityClass { get; set; } = "unsupported-control";
     public string CapabilityReason { get; set; } = string.Empty;
+    public LinuxAccessInfo Access { get; set; } = new();
     public string GpuTelemetrySource { get; set; } = "unavailable";
     public string GpuTelemetryPath { get; set; } = string.Empty;
     public long Timestamp { get; set; }
+}
+
+public class LinuxAccessInfo
+{
+    public bool IsRoot { get; set; }
+    public string AccessMethod { get; set; } = "none";
+    public bool EcIoPathExists { get; set; }
+    public bool HpWmiPathExists { get; set; }
+    public bool HasHwmonFanAccess { get; set; }
+    public bool HasThermalProfilePath { get; set; }
+    public bool HasPlatformProfilePath { get; set; }
+    public bool HasAcpiPlatformProfilePath { get; set; }
+    public bool SupportsManualFanControl { get; set; }
+    public bool SupportsProfileControl { get; set; }
+    public bool SupportsTelemetry { get; set; }
+    public string WriteRequirementHint { get; set; } = string.Empty;
 }
 
 public class TemperatureInfo
@@ -51,4 +68,7 @@ public class FanInfo
 public class PerformanceInfo
 {
     public string Mode { get; set; } = "";
+    public bool HoldEnabled { get; set; }
+    public int HoldIntervalSeconds { get; set; }
+    public int? ThermalPowerLimit { get; set; }
 }

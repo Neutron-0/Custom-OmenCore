@@ -19,7 +19,7 @@ namespace OmenCore.Controls
     public partial class FanCalibrationControl : UserControl, INotifyPropertyChanged
     {
         private readonly LoggingService _logging;
-        private readonly IFanVerificationService _fanVerifier;
+        private readonly IFanVerificationService? _fanVerifier;
         private readonly FanCalibrationStorageService _calibrationStorage;
 
         private CancellationTokenSource? _calibrationCts;
@@ -29,15 +29,26 @@ namespace OmenCore.Controls
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
+        public FanCalibrationControl(IFanVerificationService fanVerifier, LoggingService logging)
+        {
+            InitializeComponent();
+
+            _fanVerifier = fanVerifier ?? throw new ArgumentNullException(nameof(fanVerifier));
+            _logging = logging ?? throw new ArgumentNullException(nameof(logging));
+            _calibrationStorage = new FanCalibrationStorageService(_logging);
+
+            Loaded += FanCalibrationControl_Loaded;
+        }
+
         public FanCalibrationControl()
         {
             InitializeComponent();
 
-            // Get services from dependency injection
+            // Legacy constructor for XAML designer/standalone use.
+            // Runtime wizard now injects dependencies directly from FanControlViewModel.
             var services = App.ServiceProvider;
             _logging = (services?.GetService(typeof(LoggingService)) as LoggingService) ?? App.Logging;
-            _fanVerifier = services?.GetService(typeof(IFanVerificationService)) as IFanVerificationService
-                           ?? throw new InvalidOperationException("FanVerificationService not available");
+            _fanVerifier = services?.GetService(typeof(IFanVerificationService)) as IFanVerificationService;
             _calibrationStorage = new FanCalibrationStorageService(_logging);
 
             Loaded += FanCalibrationControl_Loaded;
@@ -45,6 +56,16 @@ namespace OmenCore.Controls
 
         private async void FanCalibrationControl_Loaded(object sender, RoutedEventArgs e)
         {
+            if (_fanVerifier == null)
+            {
+                ModelInfoText.Text = "Fan calibration service is unavailable in this context.";
+                CalibrationStatusText.Text = "Calibration wizard cannot run: missing fan verification service.";
+                CalibrationStatusText.Foreground = System.Windows.Media.Brushes.OrangeRed;
+                StartCalibrationButton.IsEnabled = false;
+                LoadCalibrationButton.IsEnabled = false;
+                return;
+            }
+
             await LoadModelInformationAsync();
             UpdateCalibrationStatus();
         }
@@ -117,6 +138,12 @@ namespace OmenCore.Controls
 
         private void UpdateFanStatus()
         {
+            if (_fanVerifier == null)
+            {
+                FanStatusText.Text = "Fan verification service is unavailable.";
+                return;
+            }
+
             try
             {
                 var (rpm, level, source) = _fanVerifier.GetCurrentFanStateWithSource(_selectedFanIndex);
@@ -133,7 +160,7 @@ namespace OmenCore.Controls
 
         private async void StartCalibrationButton_Click(object sender, RoutedEventArgs e)
         {
-            if (!_fanVerifier.IsAvailable)
+            if (_fanVerifier == null || !_fanVerifier.IsAvailable)
             {
                 MessageBox.Show("Fan verification service is not available. Please check that hardware monitoring is working.",
                               "Calibration Unavailable", MessageBoxButton.OK, MessageBoxImage.Warning);
@@ -158,6 +185,11 @@ namespace OmenCore.Controls
 
         private async Task StartCalibrationAsync()
         {
+            if (_fanVerifier == null)
+            {
+                throw new InvalidOperationException("Fan verification service is unavailable.");
+            }
+
             _calibrationCts = new CancellationTokenSource();
 
             try
@@ -314,13 +346,7 @@ namespace OmenCore.Controls
 
         private static string GenerateModelId(string modelInfo)
         {
-            // Generate a consistent ID from model info
-            return modelInfo.ToLower()
-                           .Replace(" ", "_")
-                           .Replace("-", "_")
-                           .Replace(".", "")
-                           .Replace("(", "")
-                           .Replace(")", "");
+            return FanCalibrationStorageService.NormalizeModelId(modelInfo);
         }
 
         protected virtual void OnPropertyChanged([CallerMemberName] string? propertyName = null)

@@ -16,6 +16,12 @@ namespace OmenCore.Hardware
         string Status { get; }
         string Backend { get; }
 
+        /// <summary>
+        /// True when the backend is actively maintaining fan ownership (for example a
+        /// keepalive/countdown extension) even if no custom curve is running.
+        /// </summary>
+        bool IsHoldActive => false;
+
         bool ApplyPreset(FanPreset preset);
         bool ApplyCustomCurve(IEnumerable<FanCurvePoint> curve);
         bool SetFanSpeed(int percent);
@@ -625,31 +631,32 @@ namespace OmenCore.Hardware
             return fans;
         }
 
-        private OghServiceProxy.ThermalPolicy MapPresetToThermalPolicy(FanPreset preset)
+        private static OghServiceProxy.ThermalPolicy MapPresetToThermalPolicy(FanPreset preset)
         {
             if (preset == null) return OghServiceProxy.ThermalPolicy.Default;
-            
-            var nameLower = preset.Name?.ToLowerInvariant() ?? "";
-            if (nameLower.Contains("performance") || nameLower.Contains("turbo") || nameLower.Contains("max"))
+
+            if (FanModeNameResolver.IsPerformanceAlias(preset.Name) || FanModeNameResolver.IsMaxAlias(preset.Name))
                 return OghServiceProxy.ThermalPolicy.Performance;
-            if (nameLower.Contains("quiet") || nameLower.Contains("cool") || nameLower.Contains("silent"))
+            if (FanModeNameResolver.IsQuietAlias(preset.Name))
                 return OghServiceProxy.ThermalPolicy.Cool;
+            // l5p is not a standard alias — keep direct check
+            var nameLower = preset.Name?.ToLowerInvariant() ?? "";
             if (nameLower.Contains("l5p"))
                 return OghServiceProxy.ThermalPolicy.L5P;
-            
+
             return OghServiceProxy.ThermalPolicy.Default;
         }
 
-        private OghServiceProxy.ThermalPolicy MapModeNameToPolicy(string? modeName)
+        private static OghServiceProxy.ThermalPolicy MapModeNameToPolicy(string? modeName)
         {
-            var nameLower = modeName?.ToLowerInvariant() ?? "";
-            if (nameLower.Contains("performance") || nameLower.Contains("turbo"))
+            if (FanModeNameResolver.IsPerformanceAlias(modeName) || FanModeNameResolver.IsMaxAlias(modeName))
                 return OghServiceProxy.ThermalPolicy.Performance;
-            if (nameLower.Contains("quiet") || nameLower.Contains("cool"))
+            if (FanModeNameResolver.IsQuietAlias(modeName))
                 return OghServiceProxy.ThermalPolicy.Cool;
+            var nameLower = modeName?.ToLowerInvariant() ?? "";
             if (nameLower.Contains("l5p"))
                 return OghServiceProxy.ThermalPolicy.L5P;
-            
+
             return OghServiceProxy.ThermalPolicy.Default;
         }
 
@@ -731,12 +738,16 @@ namespace OmenCore.Hardware
         public bool IsAvailable => _controller.IsAvailable;
         public string Status => _controller.Status;
         public string Backend => "WMI BIOS";
+        public bool IsHoldActive => _controller.CountdownExtensionEnabled;
         
         /// <summary>
         /// Check if WMI commands are ineffective on this model.
         /// Some newer OMEN models (Transcend, 2024+) return success but don't change fan speed.
         /// </summary>
         public bool CommandsIneffective => _controller.CommandsIneffective;
+
+        public DateTime? LastMaxModeExternalResetUtc => _controller.LastMaxModeExternalResetUtc;
+        public string LastMaxModeExternalResetDetails => _controller.LastMaxModeExternalResetDetails;
         
         /// <summary>
         /// Test if WMI commands actually affect fan behavior.
@@ -912,22 +923,14 @@ namespace OmenCore.Hardware
         {
             // EC controller doesn't support BIOS performance modes
             _logging?.Info($"EC backend: Performance mode '{modeName}' not directly supported, using fan curve approximation");
-            
-            var nameLower = modeName?.ToLowerInvariant() ?? "default";
+
             int targetPercent;
-            
-            if (nameLower.Contains("performance") || nameLower.Contains("turbo"))
-            {
+            if (FanModeNameResolver.IsPerformanceAlias(modeName) || FanModeNameResolver.IsMaxAlias(modeName))
                 targetPercent = 80;
-            }
-            else if (nameLower.Contains("quiet") || nameLower.Contains("cool"))
-            {
+            else if (FanModeNameResolver.IsQuietAlias(modeName))
                 targetPercent = 40;
-            }
             else
-            {
                 targetPercent = 60;
-            }
 
             return SetFanSpeed(targetPercent);
         }

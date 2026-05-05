@@ -280,6 +280,96 @@ namespace OmenCore.ViewModels
         public System.Windows.Media.SolidColorBrush RazerStatusBrush => StatusToBrush(GetProviderStatus("razer"));
         public string RazerStatusDetail => _rgbManager?.GetProvider("razer")?.StatusDetail ?? "Razer Synapse not configured";
 
+        /// <summary>
+        /// Human-readable summary of which RGB backends are currently in control.
+        /// Shows HP keyboard backend + each connected peripheral provider.
+        /// </summary>
+        public string RgbOwnershipSummary
+        {
+            get
+            {
+                var parts = new System.Collections.Generic.List<string>();
+
+                if (IsKeyboardLightingAvailable && _keyboardLightingService != null)
+                {
+                    parts.Add($"HP Keyboard ({_keyboardLightingService.BackendType})");
+                }
+                else if (_keyboardLightingService?.IsPerKeyCapableHardware == true)
+                {
+                    parts.Add("HP Keyboard (unavailable)");
+                }
+
+                var providers = _rgbManager?.AvailableProviders
+                    .Where(p => p.ProviderId != "system" && p.IsAvailable)
+                    .ToList();
+
+                if (providers != null)
+                {
+                    foreach (var p in providers)
+                    {
+                        var deviceInfo = p.DeviceCount > 0 ? $"{p.DeviceCount} device{(p.DeviceCount == 1 ? "" : "s")}" : "no devices";
+                        parts.Add($"{p.ProviderName} ({deviceInfo})");
+                    }
+                }
+
+                if (parts.Count == 0)
+                    return "No active RGB controllers detected";
+
+                return string.Join(", ", parts);
+            }
+        }
+
+        /// <summary>
+        /// Active HP keyboard lighting backend path name (e.g. "WMI BIOS", "V2:ColorTable", "EC").
+        /// </summary>
+        public string HpKeyboardActiveBackend => _keyboardLightingService?.BackendType ?? "N/A";
+
+        /// <summary>
+        /// True when a known RGB conflict process (OMEN Light Studio, OmenCap, OGH) is detected running.
+        /// </summary>
+        public bool HasRgbConflictWarning => DetectRgbConflictProcess() != null;
+
+        /// <summary>
+        /// Conflict warning text when a known conflicting process is detected.
+        /// </summary>
+        public string RgbConflictWarningText
+        {
+            get
+            {
+                var conflict = DetectRgbConflictProcess();
+                return conflict == null
+                    ? string.Empty
+                    : $"{conflict} is running and may override OmenCore keyboard lighting. Close it to allow OmenCore full control.";
+            }
+        }
+
+        private static string? DetectRgbConflictProcess()
+        {
+            // Light-weight process check — only looks at running process names, no WMI required.
+            var conflictCandidates = new[]
+            {
+                ("OmenLightStudio",             "OMEN Light Studio"),
+                ("HPOmenLightStudio",           "OMEN Light Studio"),
+                ("OmenCommandCenterBackground", "OMEN Gaming Hub"),
+                ("HPOmenCommandCenter",         "OMEN Gaming Hub"),
+            };
+
+            foreach (var (procName, displayName) in conflictCandidates)
+            {
+                try
+                {
+                    if (System.Diagnostics.Process.GetProcessesByName(procName).Length > 0)
+                        return displayName;
+                }
+                catch
+                {
+                    // Process enumeration can fail in constrained environments; skip.
+                }
+            }
+
+            return null;
+        }
+
         public int ActiveRgbTargetCount
         {
             get
@@ -410,9 +500,25 @@ namespace OmenCore.ViewModels
 
         public bool IsPerKeyLightingAvailable => _keyboardLightingService?.IsPerKey ?? false;
 
+        public bool IsPerKeyHardwareCapable => _keyboardLightingService?.IsPerKeyCapableHardware ?? false;
+
         public string PerKeyCapabilitySummary =>
-            "Per-key RGB is available on select OMEN Max models with HID per-key keyboards. " +
-            "This keyboard does not support per-key control; the editor activates automatically when supported hardware is detected.";
+            BuildPerKeyCapabilitySummary(IsPerKeyLightingAvailable, IsPerKeyHardwareCapable);
+
+        public static string BuildPerKeyCapabilitySummary(bool isPerKeyLightingAvailable, bool isPerKeyHardwareCapable)
+        {
+            if (isPerKeyLightingAvailable)
+            {
+                return "Per-key RGB editor is active for this keyboard.";
+            }
+
+            if (isPerKeyHardwareCapable)
+            {
+                return "Per-key RGB capable hardware detected. OmenCore currently cannot open the per-key editor on this backend yet; zone lighting remains available in this build.";
+            }
+
+            return "Per-key RGB is available on select OMEN Max models with HID per-key keyboards. This keyboard does not support per-key control.";
+        }
         
         /// <summary>
         /// Backend type for keyboard lighting (WMI BIOS, WMI, EC, or None).
@@ -1119,9 +1225,6 @@ namespace OmenCore.ViewModels
             // OpenRGB Commands
             ApplyOpenRgbColorCommand = new AsyncRelayCommand(async param => await ApplyOpenRgbColorAsync(param as string));
             
-            // Initialize Razer service
-            _razerService?.Initialize();
-            
             // 4-Zone Keyboard Commands
             ApplyKeyboardColorsCommand = new AsyncRelayCommand(async _ => await ApplyKeyboardColorsAsync());
             ApplyAllZonesSameColorCommand = new AsyncRelayCommand(async _ => await ApplyAllZonesSameColorAsync());
@@ -1328,6 +1431,10 @@ namespace OmenCore.ViewModels
             OnPropertyChanged(nameof(OpenRgbStatusText));
             OnPropertyChanged(nameof(OpenRgbDeviceCount));
             OnPropertyChanged(nameof(HasOpenRgbDevices));
+            OnPropertyChanged(nameof(RgbOwnershipSummary));
+            OnPropertyChanged(nameof(HpKeyboardActiveBackend));
+            OnPropertyChanged(nameof(HasRgbConflictWarning));
+            OnPropertyChanged(nameof(RgbConflictWarningText));
         }
 
         private void OnRgbSyncCompleted(object? sender, OmenCore.Services.Rgb.RgbSyncEventArgs e)
@@ -1400,6 +1507,7 @@ namespace OmenCore.ViewModels
         {
             await ExecuteWithLoadingAsync(async () =>
             {
+                _razerService?.Initialize();
                 _razerService?.DiscoverDevices();
                 _razerDevices.Clear();
                 if (_razerService?.Devices != null)
@@ -1421,6 +1529,7 @@ namespace OmenCore.ViewModels
         {
             await ExecuteWithLoadingAsync(async () =>
             {
+                _razerService?.Initialize();
                 _razerService?.SetStaticColor((byte)_razerRedValue, (byte)_razerGreenValue, (byte)_razerBlueValue);
                 _logging.Info($"Applied Razer static color: {RazerColorHex}");
                 await Task.CompletedTask;
@@ -1431,6 +1540,7 @@ namespace OmenCore.ViewModels
         {
             await ExecuteWithLoadingAsync(async () =>
             {
+                _razerService?.Initialize();
                 _razerService?.SetBreathingEffect((byte)_razerRedValue, (byte)_razerGreenValue, (byte)_razerBlueValue);
                 _logging.Info($"Applied Razer breathing effect: {RazerColorHex}");
                 await Task.CompletedTask;
@@ -1441,6 +1551,7 @@ namespace OmenCore.ViewModels
         {
             await ExecuteWithLoadingAsync(async () =>
             {
+                _razerService?.Initialize();
                 _razerService?.SetSpectrumEffect();
                 _logging.Info("Applied Razer spectrum cycling effect");
                 await Task.CompletedTask;

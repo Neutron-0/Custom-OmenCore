@@ -26,7 +26,11 @@ namespace OmenCoreApp.Tests.Services
             public bool IsAvailable => true;
             public string Status => "Test";
             public string Backend => "Test";
+            public bool IsHoldActive { get; set; }
             public List<FanPreset> AppliedPresets { get; } = new();
+            public int ApplyMaxCoolingCount { get; private set; }
+            public DateTime? LastMaxModeExternalResetUtc { get; set; }
+            public string LastMaxModeExternalResetDetails { get; set; } = "No external Max-mode reset detected.";
 
             public bool ApplyPreset(FanPreset preset)
             {
@@ -41,7 +45,7 @@ namespace OmenCoreApp.Tests.Services
             public bool SetPerformanceMode(string modeName) => true;
             public bool RestoreAutoControl() => true;
             public virtual IEnumerable<FanTelemetry> ReadFanSpeeds() => new[] { new FanTelemetry { Name = "CPU Fan", SpeedRpm = 1000, DutyCyclePercent = 40 } };
-            public void ApplyMaxCooling() { }
+            public void ApplyMaxCooling() { ApplyMaxCoolingCount++; }
             public void ApplyAutoMode() { }
             public void ApplyQuietMode() { }
             public bool ResetEcToDefaults() => true;
@@ -71,7 +75,7 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
-        public void ApplyPreset_VerificationFails_RollsBackToPreviousPreset()
+        public void ApplyPreset_PerformanceWithoutCurve_SucceedsWithoutRollback()
         {
             var logging = new LoggingService();
             logging.Initialize();
@@ -84,21 +88,72 @@ namespace OmenCoreApp.Tests.Services
             var fanService = new FanService(controller, thermalProvider, logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService());
 
             var presetA = new FanPreset { Name = "Balanced", Mode = FanMode.Performance };
-            var presetB = new FanPreset { Name = "Turbo", Mode = FanMode.Max };
+            var presetB = new FanPreset { Name = "Turbo", Mode = FanMode.Performance };
 
             // Apply initial preset
-            fanService.ApplyPreset(presetA);
+            fanService.ApplyPreset(presetA).Should().BeTrue();
             fanService.ActivePresetName.Should().Be(presetA.Name);
 
-            // Attempt to apply presetB — controller accepts command but ReadFanSpeeds shows no change => verification fails
-            fanService.ApplyPreset(presetB);
+            // Performance-mode preset without a curve should not be rejected just because
+            // immediate RPM telemetry did not change.
+            fanService.ApplyPreset(presetB).Should().BeTrue();
 
-            // Should have rolled back to presetA
+            fanService.ActivePresetName.Should().Be(presetB.Name);
+            fanService.GetCurrentFanMode().Should().Be("Performance");
+
+            logging.Dispose();
+        }
+
+        [Fact]
+        public void ApplyPreset_UnsupportedNoCurvePreset_RollsBackToPreviousPreset()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var controller = new NoEffectController();
+            var hwMonitor = new OmenCore.Hardware.LibreHardwareMonitorImpl();
+            var thermalProvider = new OmenCore.Hardware.ThermalSensorProvider(hwMonitor);
+            var notificationService = new NotificationService(logging);
+
+            var fanService = new FanService(controller, thermalProvider, logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService());
+
+            var presetA = new FanPreset { Name = "Balanced", Mode = FanMode.Performance };
+            var presetB = new FanPreset { Name = "UnknownManualNoCurve", Mode = FanMode.Manual };
+
+            fanService.ApplyPreset(presetA).Should().BeTrue();
+            fanService.ApplyPreset(presetB).Should().BeFalse();
+
             fanService.ActivePresetName.Should().Be(presetA.Name);
 
             // Controller should have seen both the attempted preset and the rollback to previous preset
             controller.AppliedPresets.Count.Should().BeGreaterThanOrEqualTo(2);
             controller.AppliedPresets[^1].Name.Should().Be(presetA.Name);
+
+            logging.Dispose();
+        }
+
+        [Fact]
+        public void ApplyPreset_MaxVerificationStale_KeepsMaxRequestedInsteadOfRollingBack()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var controller = new NoEffectController();
+            var hwMonitor = new OmenCore.Hardware.LibreHardwareMonitorImpl();
+            var thermalProvider = new OmenCore.Hardware.ThermalSensorProvider(hwMonitor);
+            var notificationService = new NotificationService(logging);
+
+            var fanService = new FanService(controller, thermalProvider, logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService());
+
+            var presetA = new FanPreset { Name = "Balanced", Mode = FanMode.Performance };
+            var presetB = new FanPreset { Name = "Max", Mode = FanMode.Max };
+
+            fanService.ApplyPreset(presetA).Should().BeTrue();
+            fanService.ApplyPreset(presetB).Should().BeTrue("Max readback can lag behind successful SetFanMax on some firmware");
+
+            fanService.ActivePresetName.Should().Be(presetB.Name);
+            fanService.GetCurrentFanMode().Should().Be("Max");
+            controller.ApplyMaxCoolingCount.Should().Be(1);
 
             logging.Dispose();
         }
@@ -128,6 +183,130 @@ namespace OmenCoreApp.Tests.Services
 
             // New preset should remain active
             fanService.ActivePresetName.Should().Be(presetB.Name);
+
+            logging.Dispose();
+        }
+
+        [Fact]
+        public void CommandHistory_RecordsPresetApplyAndDiagnosticReport()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var controller = new ReactiveController();
+            var hwMonitor = new OmenCore.Hardware.LibreHardwareMonitorImpl();
+            var thermalProvider = new OmenCore.Hardware.ThermalSensorProvider(hwMonitor);
+            var notificationService = new NotificationService(logging);
+            var fanService = new FanService(controller, thermalProvider, logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService());
+            controller.LastMaxModeExternalResetUtc = new DateTime(2026, 5, 1, 8, 9, 54, DateTimeKind.Utc);
+            controller.LastMaxModeExternalResetDetails = "Max telemetry dropped while Max mode was active; firmware reset suspected.";
+
+            var preset = new FanPreset { Name = "Max", Mode = FanMode.Max };
+
+            fanService.ApplyPreset(preset).Should().BeTrue();
+
+            var history = fanService.GetCommandHistorySnapshot();
+            history.Should().Contain(entry => entry.Command == "ApplyPreset.Controller" && entry.Target == "Max" && entry.Success);
+            history.Should().Contain(entry => entry.Command == "ApplyPreset.Verify" && entry.Target == "Max" && entry.Success);
+            history.Should().Contain(entry => entry.Command == "ApplyMaxCooling" && entry.Target == "Max" && entry.Success);
+
+            var report = fanService.GetFanCommandHistoryReport();
+            report.Should().Contain("Fan Command History");
+            report.Should().Contain("ApplyPreset.Controller");
+            report.Should().Contain("backend=Test");
+            report.Should().Contain("Last Max external reset: 2026-05-01T08:09:54.0000000Z");
+            report.Should().Contain("firmware reset suspected");
+
+            logging.Dispose();
+        }
+
+        [Fact]
+        public void CommandHistory_IsBoundedToMostRecentEntries()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var controller = new ReactiveController();
+            var hwMonitor = new OmenCore.Hardware.LibreHardwareMonitorImpl();
+            var thermalProvider = new OmenCore.Hardware.ThermalSensorProvider(hwMonitor);
+            var notificationService = new NotificationService(logging);
+            var fanService = new FanService(controller, thermalProvider, logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService());
+
+            for (var i = 0; i < 95; i++)
+            {
+                fanService.ForceSetFanSpeed(i % 101);
+            }
+
+            var history = fanService.GetCommandHistorySnapshot();
+
+            history.Should().HaveCount(80);
+            history.First().Target.Should().Be("15%");
+            history.Last().Target.Should().Be("94%");
+            history.Should().OnlyContain(entry => entry.Command == "ForceSetFanSpeed");
+
+            logging.Dispose();
+        }
+
+        [Fact]
+        public void IsCurveOrHoldActive_True_WhenControllerHoldIsActiveWithoutCurve()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var controller = new NoEffectController { IsHoldActive = true };
+            var hwMonitor = new OmenCore.Hardware.LibreHardwareMonitorImpl();
+            var thermalProvider = new OmenCore.Hardware.ThermalSensorProvider(hwMonitor);
+            var notificationService = new NotificationService(logging);
+            var fanService = new FanService(controller, thermalProvider, logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService());
+
+            fanService.IsCurveActive.Should().BeFalse();
+            fanService.IsHoldActive.Should().BeTrue();
+            fanService.IsCurveOrHoldActive.Should().BeTrue();
+
+            logging.Dispose();
+        }
+
+        [Fact]
+        public void IsCurveOrHoldActive_False_WhenNoCurveAndNoHold()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var controller = new NoEffectController { IsHoldActive = false };
+            var hwMonitor = new OmenCore.Hardware.LibreHardwareMonitorImpl();
+            var thermalProvider = new OmenCore.Hardware.ThermalSensorProvider(hwMonitor);
+            var notificationService = new NotificationService(logging);
+            var fanService = new FanService(controller, thermalProvider, logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService());
+
+            fanService.IsCurveActive.Should().BeFalse();
+            fanService.IsHoldActive.Should().BeFalse();
+            fanService.IsCurveOrHoldActive.Should().BeFalse();
+
+            logging.Dispose();
+        }
+
+        [Fact]
+        public void CommandHistory_RecordsHoldStateTransition_WhenHoldFlagChangesBetweenCommands()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var controller = new NoEffectController { IsHoldActive = false };
+            var hwMonitor = new OmenCore.Hardware.LibreHardwareMonitorImpl();
+            var thermalProvider = new OmenCore.Hardware.ThermalSensorProvider(hwMonitor);
+            var notificationService = new NotificationService(logging);
+            var fanService = new FanService(controller, thermalProvider, logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService());
+
+            fanService.ForceSetFanSpeed(40);
+            controller.IsHoldActive = true;
+            fanService.ForceSetFanSpeed(41);
+
+            var history = fanService.GetCommandHistorySnapshot();
+            history.Should().Contain(entry => entry.Command == "HoldStateTransition" && entry.Target == "Active");
+
+            var report = fanService.GetFanCommandHistoryReport();
+            report.Should().Contain("HoldStateTransition");
+            report.Should().Contain("curveOrHold=");
 
             logging.Dispose();
         }
@@ -164,6 +343,7 @@ namespace OmenCoreApp.Tests.Services
             public bool IsAvailable => true;
             public string Status => "Stub";
             public string Backend => "Stub";
+            public bool IsHoldActive => false;
             public bool ApplyPreset(FanPreset preset) => true;
             public bool ApplyCustomCurve(IEnumerable<FanCurvePoint> curve) => true;
             public bool SetFanSpeed(int percent) => true;
@@ -301,6 +481,29 @@ namespace OmenCoreApp.Tests.Services
             fanService.CheckRpmSanity(dutyPercent: 60, rpmReading: 3200);
 
             eventCount.Should().Be(0, "warning should not re-fire after RPM has recovered");
+            logging.Dispose();
+        }
+
+        [Fact]
+        public void CheckRpmSanity_RaisesEvent_After30Seconds_Of_HighRpmWithZeroDuty()
+        {
+            var fanService = MakeFanService(out var logging);
+            OmenCore.Services.RpmSanityCheckEventArgs? capturedArgs = null;
+            fanService.RpmSanityCheckWarning += (_, args) => capturedArgs = args;
+
+            fanService.CheckRpmSanity(dutyPercent: 0, rpmReading: 3200);
+
+            var field = typeof(FanService).GetField("_highRpmWithZeroDutyStartTime",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+            field.Should().NotBeNull("_highRpmWithZeroDutyStartTime field must exist for time simulation");
+            field!.SetValue(fanService, DateTime.UtcNow.AddSeconds(-35));
+
+            fanService.CheckRpmSanity(dutyPercent: 0, rpmReading: 3200);
+
+            capturedArgs.Should().NotBeNull("warning event must fire after 30-second threshold for high RPM with 0% duty");
+            capturedArgs!.DutyPercent.Should().Be(0);
+            capturedArgs.RpmReading.Should().Be(3200);
+            capturedArgs.Message.Should().Contain("requested duty is 0%");
             logging.Dispose();
         }
     }

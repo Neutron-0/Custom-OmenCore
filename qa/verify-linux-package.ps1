@@ -21,6 +21,16 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
+function Test-IsLinuxHost {
+    # PowerShell 7 exposes $IsLinux, but Windows PowerShell 5.1 does not.
+    $isLinuxVar = Get-Variable -Name IsLinux -ErrorAction SilentlyContinue
+    if ($null -ne $isLinuxVar) {
+        return [bool]$isLinuxVar.Value
+    }
+
+    return $false
+}
+
 function Get-VersionFromOutput {
     param([string]$Text)
 
@@ -69,7 +79,7 @@ function Get-ReportedVersion {
     }
 
     # Linux host: execute directly.
-    if ($IsLinux) {
+    if (Test-IsLinuxHost) {
         $output = & $BinaryPath --version 2>&1 | Out-String
         return Get-VersionFromOutput -Text $output
     }

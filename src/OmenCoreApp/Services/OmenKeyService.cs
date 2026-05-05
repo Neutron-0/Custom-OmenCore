@@ -72,7 +72,7 @@ namespace OmenCore.Services
         // LaunchApp VK events are shared with non-OMEN Fn/media keys on many HP models.
         // Keep a narrow allow-list so brightness keys (Fn+F2/F3) cannot toggle OmenCore.
         private static readonly int[] OmenLaunchAppScanCodes = { 0xE045 };
-        private static readonly int[] BrightnessConflictScanCodes = { 0xE046, 0x0046, 0x009D };
+        private static readonly int[] BrightnessConflictScanCodes = { 0xE046, 0x0046, 0x009D, 0x002B };
         
         // Excluded scan codes (Calculator, standard media keys that conflict)
         private static readonly int[] ExcludedScanCodes = { 0x0021 }; // Calculator key scan code
@@ -743,6 +743,13 @@ namespace OmenCore.Services
             // Some OMEN models use a dedicated virtual key
             if (vkCode == VK_OEM_OMEN)
             {
+                bool strictMode = _configService?.Config?.StrictOmenKeyMode ?? true;
+                if (strictMode && !OmenScanCodes.Contains((int)scanCode))
+                {
+                    LogRejectedCandidate("keyboard-hook", vkCode, scanCode, null, "strict-mode-oem-omen-scan-mismatch");
+                    return false;
+                }
+
                 _logging.Debug($"VK_OEM_OMEN (0xFF) detected - OMEN key");
                 return true;
             }

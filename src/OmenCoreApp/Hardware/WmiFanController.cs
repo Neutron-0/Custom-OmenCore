@@ -57,8 +57,18 @@ namespace OmenCore.Hardware
         // max when readback telemetry indicates a sustained drop.
         private DateTime _lastMaxModeMaintenanceUtc = DateTime.MinValue;
         private int _maxModeLowTelemetryStreak = 0;
+        private int _maxModeTelemetryUnavailableStreak = 0;
+        private DateTime _lastManualModeReapplyUtc = DateTime.MinValue;
+        private DateTime _lastPresetModeReapplyUtc = DateTime.MinValue;
+        private int _keepaliveWriteCount = 0;
+        private const int KeepaliveLogSummaryInterval = 50; // log Info summary every 50 successful keepalive writes
+        private DateTime? _lastMaxModeExternalResetUtc;
+        private string? _lastMaxModeExternalResetDetails;
         private const int MaxModeMaintenanceIntervalMs = 8000;
         private const int MaxModeMinDropChecksBeforeReapply = 2;
+        private const int MaxModeTelemetryUnavailableReassertCycles = 3;
+        private const int ManualModeReapplyIntervalMs = 2500;
+        private const int PresetModeReapplyIntervalMs = 4000;
         private const int MaxModeHealthyRpmFloor = 2000;
         private const double MaxModeHealthyLevelRatio = 0.40;
         
@@ -90,6 +100,16 @@ namespace OmenCore.Hardware
         /// Indicates if manual fan control is currently active (vs automatic BIOS control).
         /// </summary>
         public bool IsManualControlActive { get; private set; }
+
+        /// <summary>
+        /// Last time Max mode appeared to be externally reset while OmenCore still owned the hold.
+        /// </summary>
+        public DateTime? LastMaxModeExternalResetUtc => _lastMaxModeExternalResetUtc;
+
+        /// <summary>
+        /// Human-readable details for the last suspected external Max-mode reset.
+        /// </summary>
+        public string LastMaxModeExternalResetDetails => _lastMaxModeExternalResetDetails ?? "No external Max-mode reset detected.";
         
         /// <summary>
         /// Indicates if countdown extension is enabled to prevent fan mode reverting.
@@ -219,13 +239,9 @@ namespace OmenCore.Hardware
 
             try
             {
-                var nameLower = preset.Name.ToLowerInvariant();
-                
-                // Check if this is a "Max" preset - enable full fan speed
-                bool isMaxPreset = nameLower.Contains("max") && !nameLower.Contains("auto");
-                
-                // Check if this is an "Auto" or "Default" preset - should restore automatic control
-                bool isAutoPreset = nameLower.Contains("auto") || nameLower.Contains("default");
+                // Use centralized alias resolver — avoids divergent Contains() patterns across backends
+                bool isMaxPreset = FanModeNameResolver.IsMaxAlias(preset.Name) && !FanModeNameResolver.IsAutoAlias(preset.Name);
+                bool isAutoPreset = FanModeNameResolver.IsAutoAlias(preset.Name);
                 
                 // For Max preset, we need to:
                 // 1. First set Performance mode (for aggressive thermal management)
@@ -263,6 +279,7 @@ namespace OmenCore.Hardware
                             _lastManualFanPercent = 100;
                             _lastMaxModeMaintenanceUtc = DateTime.MinValue;
                             _maxModeLowTelemetryStreak = 0;
+                            _maxModeTelemetryUnavailableStreak = 0;
                             return true;
                         }
 
@@ -290,6 +307,7 @@ namespace OmenCore.Hardware
                             _lastManualFanPercent = 100;
                             _lastMaxModeMaintenanceUtc = DateTime.MinValue;
                             _maxModeLowTelemetryStreak = 0;
+                            _maxModeTelemetryUnavailableStreak = 0;
                             return true;
                         }
 
@@ -492,8 +510,9 @@ namespace OmenCore.Hardware
                     bool success;
                     double? rpmBefore = GetCurrentFanRpm();
                     
-                    // For 100%, use SetFanMax which bypasses BIOS power limits
-                    // SetFanLevel(55) may be capped by BIOS, but SetFanMax achieves true max RPM
+                    // For 100%, use SetFanMax which bypasses BIOS power limits.
+                    // If it fails, send the protocol ceiling (100) and let BIOS clamp to
+                    // model-specific max fan level (for example 63 on OMEN 16-xd0xxx).
                     if (percent >= 100)
                     {
                         success = _wmiBios.SetFanMax(true);
@@ -505,22 +524,26 @@ namespace OmenCore.Hardware
                         else
                         {
                             // Fallback to SetFanLevel if SetFanMax fails
-                            success = _wmiBios.SetFanLevel(55, 55);
+                            success = _wmiBios.SetFanLevel((byte)MaxFanLevelCeiling, (byte)MaxFanLevelCeiling);
                             if (success)
                             {
-                                AddCommandToHistory("SetFanLevel(55, 55)", true, null, rpmBefore, null);
-                                _logging?.Info($"✓ Fan speed set to 100% via SetFanLevel(55) fallback (attempt {attempt}/{maxRetries})");
+                                AddCommandToHistory($"SetFanLevel({MaxFanLevelCeiling}, {MaxFanLevelCeiling})", true, null, rpmBefore, null);
+                                _logging?.Info($"✓ Fan speed set to 100% via SetFanLevel ceiling fallback (attempt {attempt}/{maxRetries})");
                             }
                             else
                             {
-                                AddCommandToHistory("SetFanLevel(55, 55)", false, "Command failed", rpmBefore, null);
+                                AddCommandToHistory($"SetFanLevel({MaxFanLevelCeiling}, {MaxFanLevelCeiling})", false, "Command failed", rpmBefore, null);
                             }
                         }
                     }
                     else
                     {
-                        // For <100%, disable max mode first (in case it was enabled)
-                        _wmiBios.SetFanMax(false);
+                        // For <100%, disable max mode only if we were actually in max mode.
+                        // Avoid sending redundant SetFanMax(false) on every curve tick.
+                        if (_isMaxModeActive)
+                        {
+                            _wmiBios.SetFanMax(false);
+                        }
                         
                         // Convert percentage to fan level
                         byte fanLevel = (byte)(percent * _maxFanLevel / 100);
@@ -542,6 +565,7 @@ namespace OmenCore.Hardware
                         IsManualControlActive = true;
                         _isMaxModeActive = percent >= 100;  // Track if we're at max
                         _lastManualFanPercent = percent;     // Track for re-apply
+                        _lastManualModeReapplyUtc = DateTime.UtcNow;
                         
                         // Start countdown extension to prevent BIOS from reverting
                         // HP BIOS has a 120-second timeout that resets fan control to auto
@@ -627,17 +651,21 @@ namespace OmenCore.Hardware
                     }
                     else
                     {
-                        success = _wmiBios.SetFanLevel(55, 55);
+                        success = _wmiBios.SetFanLevel((byte)MaxFanLevelCeiling, (byte)MaxFanLevelCeiling);
                         if (success)
                         {
-                            _logging?.Info($"✓ Both fans set to 100% via SetFanLevel(55,55) fallback");
+                            _logging?.Info($"✓ Both fans set to 100% via SetFanLevel ceiling fallback");
                         }
                     }
                 }
                 else
                 {
-                    // Disable max mode first
-                    _wmiBios.SetFanMax(false);
+                    // Disable max mode only if we were actually in max mode.
+                    // Avoid redundant SetFanMax(false) writes during steady-state curves.
+                    if (_isMaxModeActive)
+                    {
+                        _wmiBios.SetFanMax(false);
+                    }
 
                     // Single-fan 0% requests on percentage-scale firmware can leave the EC in an
                     // unstable manual-zero state. Keep a minimal manual duty for that channel.
@@ -673,6 +701,7 @@ namespace OmenCore.Hardware
                     IsManualControlActive = true;
                     _isMaxModeActive = cpuPercent >= 100 && gpuPercent >= 100;
                     _lastManualFanPercent = Math.Max(cpuPercent, gpuPercent);
+                    _lastManualModeReapplyUtc = DateTime.UtcNow;
                     StartCountdownExtension();
                 }
                 
@@ -710,6 +739,7 @@ namespace OmenCore.Hardware
                 _lastManualFanPercent = 100;
                 _lastMaxModeMaintenanceUtc = DateTime.MinValue;
                 _maxModeLowTelemetryStreak = 0;
+                _maxModeTelemetryUnavailableStreak = 0;
                 StartCountdownExtension();
             }
             else
@@ -717,6 +747,7 @@ namespace OmenCore.Hardware
                 _isMaxModeActive = false;
                 _lastManualFanPercent = -1;
                 _maxModeLowTelemetryStreak = 0;
+                _maxModeTelemetryUnavailableStreak = 0;
 
                 // If no other non-default mode is active, stop keepalive timer.
                 if (_lastMode == HpWmiBios.FanMode.Default || _lastMode == HpWmiBios.FanMode.LegacyDefault)
@@ -739,14 +770,12 @@ namespace OmenCore.Hardware
                 return false;
             }
 
-            var nameLower = modeName?.ToLowerInvariant() ?? "default";
-            
             HpWmiBios.FanMode fanMode;
-            if (nameLower.Contains("performance") || nameLower.Contains("turbo") || nameLower.Contains("gaming"))
+            if (FanModeNameResolver.IsPerformanceAlias(modeName) || FanModeNameResolver.IsMaxAlias(modeName))
             {
                 fanMode = HpWmiBios.FanMode.Performance;
             }
-            else if (nameLower.Contains("quiet") || nameLower.Contains("silent") || nameLower.Contains("cool") || nameLower.Contains("battery"))
+            else if (FanModeNameResolver.IsQuietAlias(modeName))
             {
                 fanMode = HpWmiBios.FanMode.Cool;
             }
@@ -759,6 +788,9 @@ namespace OmenCore.Hardware
             {
                 _lastMode = fanMode;
                 IsManualControlActive = false;
+                _isMaxModeActive = false;
+                _lastManualFanPercent = -1;
+                _lastPresetModeReapplyUtc = DateTime.UtcNow;
                 
                 // Start/stop countdown extension to prevent BIOS from reverting
                 // Performance and Cool modes need extension; Default lets BIOS take over
@@ -953,9 +985,18 @@ namespace OmenCore.Hardware
                 _wmiBios.SetFanMode(HpWmiBios.FanMode.Default);
                 System.Threading.Thread.Sleep(50);
                 
-                // Step 3: Reset fan levels to 0 (let BIOS control)
-                _logging?.Info("Step 3: Clearing manual fan levels...");
-                _wmiBios.SetFanLevel(0, 0);
+                // Step 3: Hand fan levels back to BIOS without sending a hard 0%/0 krpm write.
+                // V1 firmware has treated SetFanLevel(0,0) as a transient fan stop on some
+                // models, while V2 percentage-scale firmware treats it as manual 0% duty.
+                if (_maxFanLevel < 100)
+                {
+                    _logging?.Info("Step 3: Sending V1 fan transition hint...");
+                    _wmiBios.SetFanLevel(20, 20);
+                }
+                else
+                {
+                    _logging?.Info("Step 3: Skipping SetFanLevel during V2 auto handoff; SetFanMode(Default) restores BIOS control");
+                }
                 System.Threading.Thread.Sleep(50);
                 
                 // Step 4: Extend countdown to prevent immediate timeout
@@ -1365,19 +1406,16 @@ namespace OmenCore.Hardware
                     baseMode = HpWmiBios.FanMode.Default;
                     break;
                 default:
-                    // Check preset name for hints
-                    var nameLower = preset.Name.ToLowerInvariant();
-                    
-                    // Max preset should use Performance mode for aggressive thermal management
-                    if (nameLower.Contains("max") && !nameLower.Contains("auto"))
+                    // Map by canonical alias — resolver handles tokenized names uniformly
+                    if (FanModeNameResolver.IsMaxAlias(preset.Name) && !FanModeNameResolver.IsAutoAlias(preset.Name))
                     {
                         baseMode = HpWmiBios.FanMode.Performance;
                     }
-                    else if (nameLower.Contains("quiet") || nameLower.Contains("silent") || nameLower.Contains("cool"))
+                    else if (FanModeNameResolver.IsQuietAlias(preset.Name))
                     {
                         baseMode = HpWmiBios.FanMode.Cool;
                     }
-                    else if (nameLower.Contains("performance") || nameLower.Contains("turbo") || nameLower.Contains("gaming"))
+                    else if (FanModeNameResolver.IsPerformanceAlias(preset.Name))
                     {
                         baseMode = HpWmiBios.FanMode.Performance;
                     }
@@ -1505,6 +1543,38 @@ namespace OmenCore.Hardware
                         _lastMaxModeMaintenanceUtc = nowUtc;
 
                         var telemetryHealthy = IsMaxModeTelemetryHealthy(out var healthDetails);
+                        var telemetryUnavailable = healthDetails.Contains("telemetry unavailable", StringComparison.OrdinalIgnoreCase);
+
+                        if (telemetryUnavailable)
+                        {
+                            _maxModeTelemetryUnavailableStreak++;
+                            if (_maxModeTelemetryUnavailableStreak < MaxModeTelemetryUnavailableReassertCycles)
+                            {
+                                _maxModeLowTelemetryStreak = 0;
+                                _wmiBios.ExtendFanCountdown();
+                                _logging?.Debug($"Max mode telemetry unavailable - keepalive only ({_maxModeTelemetryUnavailableStreak}/{MaxModeTelemetryUnavailableReassertCycles})");
+                                return;
+                            }
+
+                            _maxModeTelemetryUnavailableStreak = 0;
+                            var legacyDetails = "Max telemetry unavailable across multiple maintenance cycles; applying bounded legacy SetFanMax reassert to retain ownership.";
+                            _lastMaxModeExternalResetUtc = DateTime.UtcNow;
+                            _lastMaxModeExternalResetDetails = legacyDetails;
+
+                            if (_wmiBios.SetFanMax(true))
+                            {
+                                _logging?.Warn("Max mode telemetry unavailable - periodic compatibility reassert applied");
+                                AddCommandToHistory("SetFanMax(true)", true, legacyDetails, null, GetCurrentFanRpm());
+                            }
+                            else
+                            {
+                                _logging?.Warn("Max mode telemetry unavailable - periodic compatibility reassert failed");
+                                AddCommandToHistory("SetFanMax(true)", false, legacyDetails, null, GetCurrentFanRpm());
+                            }
+                            return;
+                        }
+
+                        _maxModeTelemetryUnavailableStreak = 0;
                         if (telemetryHealthy)
                         {
                             _maxModeLowTelemetryStreak = 0;
@@ -1521,31 +1591,65 @@ namespace OmenCore.Hardware
                         }
 
                         _maxModeLowTelemetryStreak = 0;
+                        var resetDetails = $"Max telemetry dropped while Max mode was active ({healthDetails}); OGH, firmware timeout, or another controller may have reset fan state.";
+                        _lastMaxModeExternalResetUtc = DateTime.UtcNow;
+                        _lastMaxModeExternalResetDetails = resetDetails;
+
                         if (_wmiBios.SetFanMax(true))
                         {
-                            _logging?.Warn($"Fan Max mode re-applied after sustained drop ({healthDetails})");
+                            _logging?.Warn($"External fan reset suspected - Max mode re-applied after sustained drop ({healthDetails})");
+                            AddCommandToHistory("SetFanMax(true)", true, resetDetails, null, GetCurrentFanRpm());
                         }
                         else
                         {
-                            _logging?.Warn("Failed to re-apply Max mode - trying fallback");
+                            _logging?.Warn("External fan reset suspected - failed to re-apply Max mode, trying fallback");
+                            AddCommandToHistory("SetFanMax(true)", false, resetDetails, null, GetCurrentFanRpm());
                             // Fallback: send ceiling value (100) — let BIOS clamp to hardware max
-                            _wmiBios.SetFanLevel((byte)MaxFanLevelCeiling, (byte)MaxFanLevelCeiling);
+                            var fallbackSucceeded = _wmiBios.SetFanLevel((byte)MaxFanLevelCeiling, (byte)MaxFanLevelCeiling);
+                            AddCommandToHistory(
+                                $"SetFanLevel({MaxFanLevelCeiling}, {MaxFanLevelCeiling})",
+                                fallbackSucceeded,
+                                $"{resetDetails}; SetFanMax(true) failed, fallback {(fallbackSucceeded ? "sent" : "failed")}.",
+                                null,
+                                GetCurrentFanRpm());
                         }
                     }
-                    else if (_lastManualFanPercent >= 0)
+                    else if (IsManualControlActive && _lastManualFanPercent >= 0)
                     {
+                        var nowUtc = DateTime.UtcNow;
+                        if ((nowUtc - _lastManualModeReapplyUtc).TotalMilliseconds < ManualModeReapplyIntervalMs)
+                        {
+                            _wmiBios.ExtendFanCountdown();
+                            return;
+                        }
+
                         // For custom fan curves, re-apply the last set percentage
                         byte fanLevel = (byte)(_lastManualFanPercent * _maxFanLevel / 100);
                         if (_wmiBios.SetFanLevel(fanLevel, fanLevel))
                         {
-                            _logging?.Debug($"Fan level re-applied: {_lastManualFanPercent}% via countdown extension (OmenMon-style)");
+                            _lastManualModeReapplyUtc = nowUtc;
+                            var count = Interlocked.Increment(ref _keepaliveWriteCount);
+                            if (count % KeepaliveLogSummaryInterval == 1)
+                                _logging?.Info($"[FanKeepalive] Fan level keepalive active: {_lastManualFanPercent}% (write #{count})");
                         }
                     }
                     else
                     {
+                        var nowUtc = DateTime.UtcNow;
+                        if ((nowUtc - _lastPresetModeReapplyUtc).TotalMilliseconds < PresetModeReapplyIntervalMs)
+                        {
+                            _wmiBios.ExtendFanCountdown();
+                            return;
+                        }
+
                         // For preset modes, re-apply the fan mode
-                        _wmiBios.SetFanMode(_lastMode);
-                        _logging?.Debug($"Fan mode re-applied: {_lastMode} via countdown extension (OmenMon-style)");
+                        if (_wmiBios.SetFanMode(_lastMode))
+                        {
+                            _lastPresetModeReapplyUtc = nowUtc;
+                            var count = Interlocked.Increment(ref _keepaliveWriteCount);
+                            if (count % KeepaliveLogSummaryInterval == 1)
+                                _logging?.Info($"[FanKeepalive] Fan mode keepalive active: {_lastMode} (write #{count})");
+                        }
                     }
                 }
             }

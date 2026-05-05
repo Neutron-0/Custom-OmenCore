@@ -110,6 +110,8 @@ namespace OmenCore.Hardware
         {
             lock (_stateLock)
             {
+                var safeOffset = TuningGuardrails.ClampCpuUndervoltOffset(offset, amdCurveOptimizer: false);
+
                 if (_msrAccess == null || !_msrAccess.IsAvailable)
                 {
                     throw new InvalidOperationException(
@@ -120,9 +122,9 @@ namespace OmenCore.Hardware
                 
                 try
                 {
-                    _msrAccess.ApplyCoreVoltageOffset((int)offset.CoreMv);
-                    _msrAccess.ApplyCacheVoltageOffset((int)offset.CacheMv);
-                    _lastApplied = offset.Clone();
+                    _msrAccess.ApplyCoreVoltageOffset((int)safeOffset.CoreMv);
+                    _msrAccess.ApplyCacheVoltageOffset((int)safeOffset.CacheMv);
+                    _lastApplied = safeOffset.Clone();
                 }
                 catch (Exception ex)
                 {

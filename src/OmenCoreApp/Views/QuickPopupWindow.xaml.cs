@@ -191,23 +191,21 @@ namespace OmenCore.Views
             
             // Highlight active button
             var activeStyle = (Style)FindResource("ActiveModeButtonStyle");
-            switch (_currentFanMode.ToLower())
+            if (FanModeNameResolver.IsAutoAlias(_currentFanMode))
             {
-                case "auto":
-                case "default":
-                    FanAutoBtn.Style = activeStyle;
-                    break;
-                case "max":
-                case "maximum":
-                    FanMaxBtn.Style = activeStyle;
-                    break;
-                case "quiet":
-                case "silent":
-                    FanQuietBtn.Style = activeStyle;
-                    break;
-                default:
-                    FanCustomBtn.Style = activeStyle;
-                    break;
+                FanAutoBtn.Style = activeStyle;
+            }
+            else if (FanModeNameResolver.IsMaxAlias(_currentFanMode))
+            {
+                FanMaxBtn.Style = activeStyle;
+            }
+            else if (FanModeNameResolver.IsQuietAlias(_currentFanMode))
+            {
+                FanQuietBtn.Style = activeStyle;
+            }
+            else
+            {
+                FanCustomBtn.Style = activeStyle;
             }
         }
 

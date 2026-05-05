@@ -571,7 +571,7 @@ namespace OmenCore.ViewModels
             {
                 if (!IsFanCalibrationAvailable)
                 {
-                    return "Calibration unavailable: fan verification service is not active on this system.";
+                    return $"Calibration unavailable: {FanCalibrationUnavailableReason}";
                 }
 
                 var calibration = _fanCalibrationStorage.GetCalibration(_fanCalibrationModelId);
@@ -584,6 +584,24 @@ namespace OmenCore.ViewModels
             }
         }
 
+        public string FanCalibrationUnavailableReason
+        {
+            get
+            {
+                if (_fanVerificationService == null)
+                {
+                    return "fan verification service is not initialized in this runtime context.";
+                }
+
+                if (!_fanVerificationService.IsAvailable)
+                {
+                    return $"fan verification backend is inactive (active fan backend: {_fanService.Backend}).";
+                }
+
+                return "fan verification is available.";
+            }
+        }
+
         public string FanCalibrationActionText => HasFanCalibrationData ? "Recalibrate" : "Start Calibration";
 
         public string FanCalibrationMapSummary => HasFanCalibrationMap
@@ -593,12 +611,12 @@ namespace OmenCore.ViewModels
         public bool IsFanPerformanceLinked => _configService.Config.LinkFanToPerformanceMode;
 
         public string FanPerformanceLinkBadgeText => IsFanPerformanceLinked
-            ? "Fan linked to performance"
-            : "Fan independent";
+            ? "Linked: performance may change fan mode"
+            : "Independent: fan mode stays under fan controls";
 
         public string FanPerformanceLinkDescription => IsFanPerformanceLinked
-            ? "Performance-mode changes may also rewrite fan policy."
-            : "Changing performance mode will keep your current fan preset or custom curve in place.";
+            ? "When linked, selecting a performance profile can also switch the active fan mode. Use this only if you want profile-driven fan behavior."
+            : "When independent, performance profile changes do not rewrite fan policy. Your selected fan preset/curve remains active until you change fan controls directly.";
 
         public bool ShowFanPerformanceInfoBanner => !IsFanPerformanceLinked && !_configService.Config.DismissedFanPerformanceDecouplingNotice;
 
@@ -822,7 +840,7 @@ namespace OmenCore.ViewModels
         {
             if (!IsFanCalibrationAvailable)
             {
-                CurveApplyStatus = "Calibration is unavailable because fan verification is not active.";
+                CurveApplyStatus = $"Calibration is unavailable: {FanCalibrationUnavailableReason}";
                 return;
             }
 
@@ -837,7 +855,7 @@ namespace OmenCore.ViewModels
                     MinHeight = 640,
                     Owner = Application.Current?.MainWindow,
                     WindowStartupLocation = WindowStartupLocation.CenterOwner,
-                    Content = new FanCalibrationControl()
+                    Content = new FanCalibrationControl(_fanVerificationService!, _logging)
                 };
 
                 window.ShowDialog();
@@ -855,12 +873,7 @@ namespace OmenCore.ViewModels
 
         private static string GenerateFanCalibrationModelId(string modelInfo)
         {
-            return modelInfo.ToLowerInvariant()
-                .Replace(" ", "_")
-                .Replace("-", "_")
-                .Replace(".", string.Empty)
-                .Replace("(", string.Empty)
-                .Replace(")", string.Empty);
+            return FanCalibrationStorageService.NormalizeModelId(modelInfo);
         }
 
         private void DismissFanPerformanceInfoBanner()
@@ -1125,15 +1138,7 @@ namespace OmenCore.ViewModels
                 await dispatcher.InvokeAsync(() =>
                 {
                     // Update UI state
-                    ActiveFanMode = preset.Name switch
-                    {
-                        "Max" => "Max",
-                        "Extreme" => "Extreme",
-                        "Gaming" => "Gaming",
-                        "Auto" => "Auto",
-                        "Quiet" or "Silent" => "Silent",
-                        _ => preset.Mode == FanMode.Manual ? "Custom" : "Auto"
-                    };
+                    ActiveFanMode = FanModeNameResolver.ResolveCardMode(preset);
 
                     // Save last applied preset name to config for persistence across restarts
                     SaveLastPresetToConfig(preset.Name);
@@ -1689,21 +1694,21 @@ namespace OmenCore.ViewModels
 
             // Handle built-in names
             var nameLower = saved.ToLowerInvariant();
-            if (nameLower.Contains("max"))
+            if (FanModeNameResolver.IsMaxAlias(nameLower))
             {
                 await Task.Run(() => _fanService.ApplyMaxCooling());
                 _logging.Info($"Manually reapplied saved preset: {saved} (Max)");
                 return;
             }
 
-            if (nameLower == "auto" || nameLower == "default")
+            if (FanModeNameResolver.IsAutoAlias(nameLower))
             {
                 await Task.Run(() => _fanService.ApplyAutoMode());
                 _logging.Info($"Manually reapplied saved preset: {saved} (Auto)");
                 return;
             }
 
-            if (nameLower == "quiet" || nameLower == "silent")
+            if (FanModeNameResolver.IsQuietAlias(nameLower))
             {
                 await Task.Run(() => _fanService.ApplyQuietMode());
                 _logging.Info($"Manually reapplied saved preset: {saved} (Quiet)");
@@ -1795,13 +1800,31 @@ namespace OmenCore.ViewModels
             else
             {
                 // Try to match partial names
-                preset = modeName.ToLower() switch
+                if (FanModeNameResolver.IsMaxAlias(modeName))
                 {
-                    "performance" or "boost" or "max" => FanPresets.FirstOrDefault(p => p.Name == "Max"),
-                    "quiet" or "silent" => FanPresets.FirstOrDefault(p => p.Mode == FanMode.Manual) ?? FanPresets.FirstOrDefault(p => p.Name == "Auto"),
-                    "balanced" or "auto" => FanPresets.FirstOrDefault(p => p.Name == "Auto"),
-                    _ => FanPresets.FirstOrDefault(p => p.Name == "Auto")
-                };
+                    preset = FanPresets.FirstOrDefault(p => p.Name == "Max");
+                }
+                else if (FanModeNameResolver.IsQuietAlias(modeName))
+                {
+                    preset = FanPresets.FirstOrDefault(p => p.Name == "Quiet" || p.Name == "Silent")
+                        ?? FanPresets.FirstOrDefault(p => p.Mode == FanMode.Manual)
+                        ?? FanPresets.FirstOrDefault(p => p.Name == "Auto");
+                }
+                else if (FanModeNameResolver.IsAutoAlias(modeName))
+                {
+                    preset = FanPresets.FirstOrDefault(p => p.Name == "Auto")
+                        ?? FanPresets.FirstOrDefault(p => p.Name == "Balanced");
+                }
+                else if (FanModeNameResolver.IsPerformanceAlias(modeName))
+                {
+                    preset = FanPresets.FirstOrDefault(p => p.Name == "Extreme")
+                        ?? FanPresets.FirstOrDefault(p => p.Name == "Gaming")
+                        ?? FanPresets.FirstOrDefault(p => p.Name == "Max");
+                }
+                else
+                {
+                    preset = FanPresets.FirstOrDefault(p => p.Name == "Auto");
+                }
                 
                 if (preset != null)
                     SelectedPreset = preset;

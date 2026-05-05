@@ -16,11 +16,18 @@ namespace OmenCore.Services
         public string FanName { get; set; } = "";
         public int RequestedPercent { get; set; }
         public int AppliedLevel { get; set; }
+        public int ExpectedLevel { get; set; }
         public int ActualRpmBefore { get; set; }
         public int ActualRpmAfter { get; set; }
         public int ExpectedRpm { get; set; }
+        public int ActualLevelAfter { get; set; }
         public bool WmiCallSucceeded { get; set; }
         public bool VerificationPassed { get; set; }
+        public bool LevelReadbackMatched { get; set; }
+        /// <summary>
+        /// Verification evidence path used for this result: None, RPM, Level, RPM+Level.
+        /// </summary>
+        public string VerificationEvidence { get; set; } = "None";
         public string? ErrorMessage { get; set; }
         public TimeSpan Duration { get; set; }
         
@@ -44,7 +51,7 @@ namespace OmenCore.Services
         /// </summary>
         public double DeviationPercent => ExpectedRpm > 0 
             ? Math.Abs(ActualRpmAfter - ExpectedRpm) / (double)ExpectedRpm * 100 
-            : 0;
+            : (ActualRpmAfter <= 0 ? 0 : 100);
         
         /// <summary>
         /// Overall verification score 0-100 (v2.7.0).
@@ -63,6 +70,15 @@ namespace OmenCore.Services
                 // Using 30% threshold instead of 15% so budget HP Victus models
                 // (whose RPM tables differ from high-end OMEN) don't score 0.
                 double accuracyScore = Math.Max(0, 50 - (DeviationPercent / 30.0 * 50));
+
+                // If firmware confirms the requested fan level, don't let a generic shared RPM
+                // expectation curve drag the score to near-zero. This is common on V1/55-level
+                // systems where the real RPM response is more stair-stepped/nonlinear than the
+                // shared verifier baseline but the command still applied correctly.
+                if (LevelReadbackMatched)
+                {
+                    accuracyScore = Math.Max(accuracyScore, 35);
+                }
                 
                 // Stability score (0-30): Based on standard deviation of samples
                 // 0 std dev = 30 points, 200+ std dev = 0 points
@@ -78,6 +94,10 @@ namespace OmenCore.Services
                 else if (RequestedPercent == 0 && ActualRpmAfter < 1000)
                 {
                     responseScore = 20; // Correctly went to low/off
+                }
+                else if (LevelReadbackMatched && RequestedPercent > 0)
+                {
+                    responseScore = 20; // Firmware level changed even if RPM curve differs
                 }
                 
                 return (int)Math.Round(accuracyScore + stabilityScore + responseScore);
@@ -118,7 +138,7 @@ namespace OmenCore.Services
         // Verification parameters
         private const int VerificationRetries = 3;          // Retry verification up to 3 times (increased from 2)
         private const int VerificationSamples = 5;          // Take 5 RPM samples and average (increased from 3)
-        private const int SampleDelayMs = 200;              // Wait 200ms between samples (reduced for faster verification)
+        private const int SampleDelayMs = 300;              // Wait 300ms between samples; avoids racing slow RPM telemetry
         // MaxRpm calibrated to 6000 RPM � covers high-end OMEN 16/17 models (5500-6500 RPM peaks).
         // Victus and mid-range HP fans (3800-4500 RPM peak) still pass because the absolute 500 RPM
         // floor tolerance in VerifyRpm() keeps low-step-count fans within range regardless.
@@ -127,8 +147,11 @@ namespace OmenCore.Services
         private const int MaxRpm = 6000;  // Covers high-end OMEN fans (5500-6500 RPM); Victus-class handled by 500 RPM floor tolerance
         
         // Verification timing
-        private const int FanResponseDelayMs = 2000;  // Reduced from 2500ms for faster response
-        private const int RetryDelayMs = 1500;        // Reduced from 2000ms
+        // Some 2024/2025 OMEN/Transcend ECs can take 10-15s before RPM telemetry catches
+        // up with a successful duty/max command. Keep diagnostics patient so they measure
+        // hardware response instead of the first stale telemetry window.
+        private const int FanResponseDelayMs = 6000;
+        private const int RetryDelayMs = 2500;
         // 30% base tolerance accommodates HP Victus-class fans that have fewer RPM steps
         // and whose actual response curves don't match expected RPM tables.
         private const double RpmTolerance = 0.30;     // Base tolerance — adaptive scaling applied at low speeds
@@ -191,7 +214,8 @@ namespace OmenCore.Services
                 FanIndex = fanIndex,
                 FanName = GetFanName(fanIndex),
                 RequestedPercent = targetPercent,
-                ExpectedRpm = PercentToExpectedRpm(targetPercent)
+                ExpectedRpm = PercentToExpectedRpm(targetPercent),
+                ExpectedLevel = PercentToLevel(targetPercent)
             };
             
             if (_wmiBios == null || !_wmiBios.IsAvailable)
@@ -215,7 +239,7 @@ namespace OmenCore.Services
                 _logging.Info($"Fan {fanIndex} ({result.FanName}) before: {result.ActualRpmBefore} RPM");
                 
                 // Convert percent to level
-                result.AppliedLevel = PercentToLevel(targetPercent);
+                result.AppliedLevel = result.ExpectedLevel;
                 
                 // For 100%, use SetFanMax which achieves true maximum RPM
                 // SetFanLevel(55) may be capped by BIOS on some models
@@ -290,6 +314,8 @@ namespace OmenCore.Services
                     // Use average RPM for verification
                     result.ActualRpmAfter = (int)rpmSamples.Average();
                     result.SampleCount = VerificationSamples;
+                    result.ActualLevelAfter = ReadCurrentLevel(fanIndex);
+                    result.LevelReadbackMatched = IsLevelReadbackMatch(result);
                     
                     // Calculate standard deviation for stability scoring (v2.7.0)
                     double mean = rpmSamples.Average();
@@ -298,17 +324,25 @@ namespace OmenCore.Services
                     
                     _logging.Info($"Fan {fanIndex} RPM samples: [{string.Join(", ", rpmSamples)}], Average: {result.ActualRpmAfter} RPM, StdDev: {result.RpmStandardDeviation:F1}");
                     
-                    // Verify the change
-                    result.VerificationPassed = VerifyRpm(result);
-                    
+                    // Verify the change with explicit evidence path
+                    var rpmMatched = VerifyRpm(result);
+                    result.VerificationEvidence = DetermineVerificationEvidence(rpmMatched, result.LevelReadbackMatched);
+                    result.VerificationPassed = rpmMatched || result.LevelReadbackMatched;
+
                     if (result.VerificationPassed)
                     {
-                        _logging.Info($"✓ Fan {fanIndex} verified: {result.ActualRpmAfter} RPM (expected ~{result.ExpectedRpm}, deviation {result.DeviationPercent:F1}%, score {result.VerificationScore}/100 {result.ScoreRating})");
+                        var verificationBasis = result.VerificationEvidence switch
+                        {
+                            "Level" => $"level readback matched ({result.ActualLevelAfter}/{result.ExpectedLevel})",
+                            "RPM+Level" => $"RPM + level matched (~{result.ExpectedRpm}, {result.ActualLevelAfter}/{result.ExpectedLevel})",
+                            _ => $"RPM matched (expected ~{result.ExpectedRpm})"
+                        };
+                        _logging.Info($"✓ Fan {fanIndex} verified: {result.ActualRpmAfter} RPM, level {result.ActualLevelAfter} ({verificationBasis}, deviation {result.DeviationPercent:F1}%, score {result.VerificationScore}/100 {result.ScoreRating})");
                         break;
                     }
                     else if (attempt < VerificationRetries)
                     {
-                        _logging.Warn($"Fan {fanIndex} verification attempt {attempt + 1} failed: Expected ~{result.ExpectedRpm} RPM, got {result.ActualRpmAfter} RPM ({result.DeviationPercent:F1}% deviation). Retrying...");
+                        _logging.Warn($"Fan {fanIndex} verification attempt {attempt + 1} failed: Expected ~{result.ExpectedRpm} RPM / level {result.ExpectedLevel}, got {result.ActualRpmAfter} RPM / level {result.ActualLevelAfter} ({result.DeviationPercent:F1}% deviation). Retrying...");
                         await Task.Delay(RetryDelayMs, ct);
                     }
                 }
@@ -317,7 +351,7 @@ namespace OmenCore.Services
                 if (!result.VerificationPassed)
                 {
                     _logging.Error($"Fan {fanIndex} verification failed after {totalAttempts} attempts: expected ~{result.ExpectedRpm} RPM, got {result.ActualRpmAfter} RPM");
-                    result.ErrorMessage = $"RPM verification failed after {totalAttempts} attempts: expected ~{result.ExpectedRpm}, got {result.ActualRpmAfter}";
+                    result.ErrorMessage = $"Fan verification failed after {totalAttempts} attempts: expected ~{result.ExpectedRpm} RPM / level {result.ExpectedLevel}, got {result.ActualRpmAfter} RPM / level {result.ActualLevelAfter}";
                     
                     // Track failure for diagnostics — report only, do NOT change fan state.
                     // Previously this called SetFanMode(Default) which would kill any active
@@ -351,7 +385,8 @@ namespace OmenCore.Services
                 FanIndex = fanIndex,
                 FanName = GetFanName(fanIndex),
                 RequestedPercent = targetPercent,
-                ExpectedRpm = PercentToExpectedRpm(targetPercent)
+                ExpectedRpm = PercentToExpectedRpm(targetPercent),
+                ExpectedLevel = PercentToLevel(targetPercent)
             };
 
             try
@@ -415,6 +450,8 @@ namespace OmenCore.Services
                     // Use average RPM
                     result.ActualRpmAfter = (int)rpmSamples.Average();
                     result.SampleCount = VerificationSamples;
+                    result.ActualLevelAfter = ReadCurrentLevel(fanIndex);
+                    result.LevelReadbackMatched = IsLevelReadbackMatch(result);
                     
                     // Calculate standard deviation for stability scoring (v2.7.0)
                     double mean = rpmSamples.Average();
@@ -423,17 +460,25 @@ namespace OmenCore.Services
 
                     _logging.Info($"Fan {fanIndex} RPM samples: [{string.Join(", ", rpmSamples)}], Average: {result.ActualRpmAfter} RPM, StdDev: {result.RpmStandardDeviation:F1}");
 
-                    // Verify
-                    result.VerificationPassed = VerifyRpm(result);
+                    // Verify with explicit evidence path
+                    var rpmMatched = VerifyRpm(result);
+                    result.VerificationEvidence = DetermineVerificationEvidence(rpmMatched, result.LevelReadbackMatched);
+                    result.VerificationPassed = rpmMatched || result.LevelReadbackMatched;
 
                     if (result.VerificationPassed)
                     {
-                        _logging.Info($"✓ Fan {fanIndex} verified: {result.ActualRpmAfter} RPM (expected ~{result.ExpectedRpm}, deviation {result.DeviationPercent:F1}%, score {result.VerificationScore}/100 {result.ScoreRating})");
+                        var verificationBasis = result.VerificationEvidence switch
+                        {
+                            "Level" => $"level readback matched ({result.ActualLevelAfter}/{result.ExpectedLevel})",
+                            "RPM+Level" => $"RPM + level matched (~{result.ExpectedRpm}, {result.ActualLevelAfter}/{result.ExpectedLevel})",
+                            _ => $"RPM matched (expected ~{result.ExpectedRpm})"
+                        };
+                        _logging.Info($"✓ Fan {fanIndex} verified: {result.ActualRpmAfter} RPM, level {result.ActualLevelAfter} ({verificationBasis}, deviation {result.DeviationPercent:F1}%, score {result.VerificationScore}/100 {result.ScoreRating})");
                         break;
                     }
                     else if (attempt < VerificationRetries)
                     {
-                        _logging.Warn($"Fan {fanIndex} verification attempt {attempt + 1} failed: Expected ~{result.ExpectedRpm} RPM, got {result.ActualRpmAfter} RPM ({result.DeviationPercent:F1}% deviation). Retrying...");
+                        _logging.Warn($"Fan {fanIndex} verification attempt {attempt + 1} failed: Expected ~{result.ExpectedRpm} RPM / level {result.ExpectedLevel}, got {result.ActualRpmAfter} RPM / level {result.ActualLevelAfter} ({result.DeviationPercent:F1}% deviation). Retrying...");
                         await Task.Delay(RetryDelayMs, ct);
                     }
                 }
@@ -442,7 +487,7 @@ namespace OmenCore.Services
                 if (!result.VerificationPassed)
                 {
                     _logging.Error($"Fan {fanIndex} verification failed after {totalAttempts} attempts: expected ~{result.ExpectedRpm} RPM, got {result.ActualRpmAfter} RPM");
-                    result.ErrorMessage = $"RPM verification failed after {totalAttempts} attempts: expected ~{result.ExpectedRpm}, got {result.ActualRpmAfter}";
+                    result.ErrorMessage = $"Fan verification failed after {totalAttempts} attempts: expected ~{result.ExpectedRpm} RPM / level {result.ExpectedLevel}, got {result.ActualRpmAfter} RPM / level {result.ActualLevelAfter}";
                 }
             }
             catch (Exception ex)
@@ -461,22 +506,7 @@ namespace OmenCore.Services
         public (int rpm, int level) GetCurrentFanState(int fanIndex)
         {
             var rpm = GetCurrentRpm(fanIndex);
-            
-            // Get level from WMI BIOS if available
-            int level = 0;
-            if (_wmiBios?.IsAvailable == true)
-            {
-                var levels = _wmiBios.GetFanLevel();
-                if (levels.HasValue)
-                {
-                    level = fanIndex == 0 ? levels.Value.fan1 : levels.Value.fan2;
-                }
-            }
-            else
-            {
-                // Estimate from RPM
-                level = RpmToLevel(rpm);
-            }
+            var level = ReadCurrentLevel(fanIndex);
             
             return (rpm, level);
         }
@@ -574,6 +604,32 @@ namespace OmenCore.Services
             if (rpm <= 0) return 0;
             return (int)Math.Min(100, (rpm / (double)MaxRpm) * 100);
         }
+
+        private int ReadCurrentLevel(int fanIndex)
+        {
+            if (_wmiBios?.IsAvailable == true)
+            {
+                var levels = _wmiBios.GetFanLevel();
+                if (levels.HasValue)
+                {
+                    return fanIndex == 0 ? levels.Value.fan1 : levels.Value.fan2;
+                }
+            }
+
+            var rpm = GetCurrentRpm(fanIndex);
+            return RpmToLevel(rpm);
+        }
+
+        private static bool IsLevelReadbackMatch(FanApplyResult result)
+        {
+            if (result.ExpectedLevel <= 0)
+            {
+                return result.ActualLevelAfter <= 2;
+            }
+
+            var tolerance = result.RequestedPercent >= 100 ? 3 : 2;
+            return Math.Abs(result.ActualLevelAfter - result.ExpectedLevel) <= tolerance;
+        }
         
         /// <summary>
         /// Check if the actual RPM is within tolerance of expected.
@@ -603,6 +659,19 @@ namespace OmenCore.Services
             tolerance = Math.Max(tolerance, 500);
             
             return Math.Abs(result.ActualRpmAfter - result.ExpectedRpm) <= tolerance;
+        }
+
+        private static string DetermineVerificationEvidence(bool rpmMatched, bool levelMatched)
+        {
+            if (rpmMatched && levelMatched) return "RPM+Level";
+            if (rpmMatched) return "RPM";
+            if (levelMatched) return "Level";
+            return "None";
+        }
+
+        private bool VerifyAppliedState(FanApplyResult result)
+        {
+            return VerifyRpm(result) || result.LevelReadbackMatched;
         }
 
         #endregion
@@ -877,7 +946,7 @@ namespace OmenCore.Services
         /// </summary>
         public double DeviationPercent => ExpectedRpm > 0 
             ? Math.Abs(MeasuredRpm - ExpectedRpm) / (double)ExpectedRpm * 100 
-            : 0;
+            : (MeasuredRpm <= 0 ? 0 : 100);
         
         /// <summary>
         /// Score for this calibration point (0-100).

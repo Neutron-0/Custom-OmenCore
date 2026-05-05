@@ -125,6 +125,22 @@ namespace OmenCoreApp.Tests.Services
             result.Should().BeTrue("Fn+F12 is the dedicated OMEN launch chord on Transcend 14-style keyboards");
         }
 
+        [Fact]
+        public void IsOmenKey_RejectsOemOmenVkWithBrightnessFalsePositiveScan()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var svc = new OmenKeyService(logging);
+            var isOmenKeyMethod = typeof(OmenKeyService).GetMethod("IsOmenKey", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            isOmenKeyMethod.Should().NotBeNull();
+
+            var result = (bool)isOmenKeyMethod!.Invoke(svc, new object[] { 0xFFu, 0x002Bu })!;
+
+            result.Should().BeFalse("Transcend 14 Fn+F2/F3 can emit VK=0xFF scan=0x002B and must not toggle OmenCore");
+        }
+
         [Theory]
         [InlineData(0x71u)]
         [InlineData(0x72u)]
@@ -257,6 +273,73 @@ namespace OmenCoreApp.Tests.Services
             var result = (bool)shouldMethod!.Invoke(svc, new object[] { newSample })!;
 
             result.Should().BeFalse("UI should not refresh for sub-threshold power changes when no other metrics changed");
+        }
+
+        [Fact]
+        public void GetEffectiveCadenceInterval_UsesActiveCadence_WhenOverlayRealtimeModeEnabledInTray()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var bridge = new LibreHardwareMonitorBridge();
+            var prefs = new MonitoringPreferences { LowOverheadMode = false };
+            var svc = new HardwareMonitoringService(bridge, logging, prefs, new ResumeRecoveryDiagnosticsService());
+
+            svc.SetUiWindowActive(false);
+            svc.SetTrayOnlyMode(true);
+            svc.SetOverlayRealtimeMode(true);
+
+            var method = typeof(HardwareMonitoringService).GetMethod("GetEffectiveCadenceInterval", BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+            var cadence = (TimeSpan)method!.Invoke(svc, null)!;
+
+            cadence.Should().Be(TimeSpan.FromSeconds(1));
+        }
+
+        [Fact]
+        public void GetEffectiveCadenceInterval_UsesTrayCadence_WhenOverlayRealtimeModeDisabledInTray()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var bridge = new LibreHardwareMonitorBridge();
+            var prefs = new MonitoringPreferences { LowOverheadMode = false };
+            var svc = new HardwareMonitoringService(bridge, logging, prefs, new ResumeRecoveryDiagnosticsService());
+
+            svc.SetUiWindowActive(false);
+            svc.SetTrayOnlyMode(true);
+            svc.SetOverlayRealtimeMode(false);
+
+            var method = typeof(HardwareMonitoringService).GetMethod("GetEffectiveCadenceInterval", BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+            var cadence = (TimeSpan)method!.Invoke(svc, null)!;
+
+            cadence.Should().Be(TimeSpan.FromSeconds(10));
+        }
+
+        [Fact]
+        public void UpdateCadenceTelemetry_RecordsReasonAndTransitionSnapshot()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var bridge = new LibreHardwareMonitorBridge();
+            var prefs = new MonitoringPreferences { LowOverheadMode = false };
+            var svc = new HardwareMonitoringService(bridge, logging, prefs, new ResumeRecoveryDiagnosticsService());
+
+            svc.SetUiWindowActive(false);
+            svc.SetTrayOnlyMode(true);
+            svc.SetOverlayRealtimeMode(false);
+
+            var updateMethod = typeof(HardwareMonitoringService).GetMethod("UpdateCadenceTelemetry", BindingFlags.Instance | BindingFlags.NonPublic);
+            updateMethod.Should().NotBeNull();
+            updateMethod!.Invoke(svc, new object[] { TimeSpan.FromSeconds(10) });
+
+            svc.CurrentCadenceReason.Should().Contain("tray-only");
+            var transitions = svc.GetCadenceTransitionsSnapshot();
+            transitions.Should().NotBeEmpty();
+            transitions[^1].CadenceMs.Should().Be(10000);
+            transitions[^1].Reason.Should().Contain("tray-only");
         }
 
         [Fact]

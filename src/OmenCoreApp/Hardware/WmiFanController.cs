@@ -342,8 +342,20 @@ namespace OmenCore.Hardware
                     ResetFromMaxMode();
                 }
 
-                // Map preset to fan mode
-                var mode = MapPresetToFanMode(preset);
+                // Map preset to fan mode.
+                // Hotfix v3.5.0: when a preset carries an explicit fan curve payload,
+                // keep the current thermal policy mode so fan tuning does not silently
+                // toggle GPU power behavior (e.g. 80W/175W swings on some OMEN models).
+                // Max and Auto are special cases and retain their existing semantics.
+                bool hasCurvePayload = preset.Curve != null && preset.Curve.Count > 0;
+                var mode = (!isMaxPreset && !isAutoPreset && hasCurvePayload)
+                    ? _lastMode
+                    : MapPresetToFanMode(preset);
+
+                if (!isMaxPreset && !isAutoPreset && hasCurvePayload)
+                {
+                    _logging?.Info($"Preset '{preset.Name}' carries a fan curve; preserving thermal policy mode: {_lastMode}");
+                }
                 
                 if (_wmiBios.SetFanMode(mode))
                 {

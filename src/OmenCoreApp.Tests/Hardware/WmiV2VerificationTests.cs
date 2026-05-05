@@ -385,6 +385,56 @@ namespace OmenCoreApp.Tests.Hardware
                 "EC reset must not reintroduce the transient 0 RPM handoff risk");
         }
 
+        [Fact]
+        public void ApplyPreset_CurvePayload_PreservesCurrentPerformancePolicy()
+        {
+            var fake = new ModeCaptureFakeWmiBios();
+            var controller = new WmiFanController(null, null, 0, injectedWmiBios: fake);
+
+            controller.SetPerformanceMode("Performance").Should().BeTrue();
+            fake.LastSetFanMode.Should().Be(HpWmiBios.FanMode.Performance);
+
+            var preset = new FanPreset
+            {
+                Name = "Quiet",
+                Mode = OmenCore.Models.FanMode.Manual,
+                Curve = new List<FanCurvePoint>
+                {
+                    new() { TemperatureC = 40, FanPercent = 35 },
+                    new() { TemperatureC = 70, FanPercent = 70 }
+                }
+            };
+
+            controller.ApplyPreset(preset).Should().BeTrue();
+            fake.LastSetFanMode.Should().Be(HpWmiBios.FanMode.Performance,
+                "curve-based fan presets should not change the active thermal policy mode");
+        }
+
+        [Fact]
+        public void ApplyPreset_CurvePayload_DoesNotForcePerformanceAliasMode()
+        {
+            var fake = new ModeCaptureFakeWmiBios();
+            var controller = new WmiFanController(null, null, 0, injectedWmiBios: fake);
+
+            controller.SetPerformanceMode("Default").Should().BeTrue();
+            fake.LastSetFanMode.Should().Be(HpWmiBios.FanMode.Default);
+
+            var preset = new FanPreset
+            {
+                Name = "Extreme",
+                Mode = OmenCore.Models.FanMode.Performance,
+                Curve = new List<FanCurvePoint>
+                {
+                    new() { TemperatureC = 40, FanPercent = 45 },
+                    new() { TemperatureC = 70, FanPercent = 100 }
+                }
+            };
+
+            controller.ApplyPreset(preset).Should().BeTrue();
+            fake.LastSetFanMode.Should().Be(HpWmiBios.FanMode.Default,
+                "curve presets should preserve current policy even when preset metadata uses Performance");
+        }
+
         // Fake implementation to simulate V2 BIOS that does not expose RPM but reports fan levels.
         private class FallbackFakeWmiBios : IHpWmiBios
         {
@@ -402,6 +452,45 @@ namespace OmenCoreApp.Tests.Hardware
 
             public double? GetTemperature() => 50.0;
             public double? GetGpuTemperature() => 50.0;
+            public void ExtendFanCountdown() { }
+            public (bool customTgp, bool ppab, int dState)? GetGpuPower() => null;
+            public bool SetGpuPower(HpWmiBios.GpuPowerLevel level) => true;
+            public HpWmiBios.GpuMode? GetGpuMode() => null;
+            public void Dispose() { }
+        }
+
+        private class ModeCaptureFakeWmiBios : IHpWmiBios
+        {
+            private bool _maxEnabled;
+
+            public HpWmiBios.FanMode LastSetFanMode { get; private set; } = HpWmiBios.FanMode.Default;
+
+            public bool IsAvailable => true;
+            public string Status => "ModeCaptureFake";
+            public HpWmiBios.ThermalPolicyVersion ThermalPolicy => HpWmiBios.ThermalPolicyVersion.V2;
+            public int FanCount => 2;
+            public int MaxFanLevel => 100;
+
+            public (int fan1Rpm, int fan2Rpm)? GetFanRpmDirect() => _maxEnabled ? (4200, 4100) : (900, 850);
+            public (byte fan1, byte fan2)? GetFanLevel() => _maxEnabled ? ((byte)100, (byte)100) : ((byte)35, (byte)35);
+
+            public bool SetFanMax(bool enabled)
+            {
+                _maxEnabled = enabled;
+                return true;
+            }
+
+            public bool SetFanLevel(byte fan1, byte fan2) => true;
+
+            public bool SetFanMode(HpWmiBios.FanMode mode)
+            {
+                LastSetFanMode = mode;
+                _maxEnabled = false;
+                return true;
+            }
+
+            public double? GetTemperature() => 50.0;
+            public double? GetGpuTemperature() => 52.0;
             public void ExtendFanCountdown() { }
             public (bool customTgp, bool ppab, int dState)? GetGpuPower() => null;
             public bool SetGpuPower(HpWmiBios.GpuPowerLevel level) => true;

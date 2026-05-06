@@ -3259,6 +3259,48 @@ namespace OmenCore.ViewModels
             }
         }
         
+        /// <summary>
+        /// Read back GPU power bits from BIOS and check if they match the requested level.
+        /// Returns false if the BIOS accepted the command but the hardware state didn't change,
+        /// which indicates the BIOS silently ignores the command on this hardware.
+        /// </summary>
+        private bool VerifyGpuPowerReadback(HpWmiBios.GpuPowerLevel requestedLevel)
+        {
+            try
+            {
+                var current = _wmiBios?.GetGpuPower();
+                if (!current.HasValue)
+                {
+                    // Cannot read back — assume success to avoid false negatives
+                    _logging.Debug("GPU power readback: GetGpuPower returned null — skipping verification");
+                    return true;
+                }
+
+                bool expectedCustomTgp = requestedLevel != HpWmiBios.GpuPowerLevel.Minimum;
+                bool expectedPpab = requestedLevel == HpWmiBios.GpuPowerLevel.Maximum
+                                 || requestedLevel == HpWmiBios.GpuPowerLevel.Extended3
+                                 || requestedLevel == HpWmiBios.GpuPowerLevel.Extended4;
+
+                bool customTgpOk = current.Value.customTgp == expectedCustomTgp;
+                bool ppabOk = current.Value.ppab == expectedPpab;
+
+                _logging.Info($"GPU power readback: customTgp={current.Value.customTgp} (expected={expectedCustomTgp}), ppab={current.Value.ppab} (expected={expectedPpab}), dState={current.Value.dState}");
+
+                if (!customTgpOk || !ppabOk)
+                {
+                    _logging.Warn($"GPU power readback mismatch: customTgp match={customTgpOk}, ppab match={ppabOk}");
+                    return false;
+                }
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logging.Warn($"GPU power readback check failed: {ex.Message}");
+                return true; // Assume success on exception — don't false-alarm
+            }
+        }
+
         private void ApplyGpuPowerBoost()
         {
             // Try WMI BIOS first (preferred)
@@ -3275,6 +3317,10 @@ namespace OmenCore.ViewModels
 
                 if (_wmiBios.SetGpuPower(level))
                 {
+                    // Post-success readback: BIOS may accept the command (return code 0) but silently
+                    // ignore it on some hardware. Verify the bits actually changed.
+                    bool readbackMatch = VerifyGpuPowerReadback(level);
+
                     var baseStatus = GpuPowerBoostLevel switch
                     {
                         "Minimum" => "✓ Minimum (Base TGP only)",
@@ -3283,6 +3329,16 @@ namespace OmenCore.ViewModels
                         "Extended" => "✓ Extended (PPAB+ for RTX 5080, +25W if supported)",
                         _ => "Applied"
                     };
+
+                    if (!readbackMatch)
+                    {
+                        // BIOS accepted the command but hardware state didn't change — surface this clearly.
+                        _logging.Warn($"⚠️ GPU power command accepted by BIOS but readback shows no change. This BIOS may not support WMI GPU power control (BIOS WMI reliability may be degraded).");
+                        GpuPowerBoostStatus = "⚠️ Command sent but GPU power may not have changed (BIOS WMI degraded)";
+                        // Still save so it re-attempts on next launch
+                        SaveGpuPowerBoostToConfig();
+                        return;
+                    }
 
                     // If NVAPI is available, suggest using power limits for fine-tuning
                     if (GpuNvapiAvailable && GpuPowerLimitPercent != 100)
@@ -3471,20 +3527,23 @@ namespace OmenCore.ViewModels
 
                 if (_wmiBios.SetGpuPower(level))
                 {
-                    _logging.Info($"✓ GPU Power Boost reapplied on startup: {savedLevel} via WMI BIOS");
+                    bool readbackOk = VerifyGpuPowerReadback(level);
+                    _logging.Info($"✓ GPU Power Boost reapplied on startup: {savedLevel} via WMI BIOS (readback={readbackOk})");
                     
                     // Update status on UI thread
                     App.Current?.Dispatcher?.BeginInvoke(() =>
                     {
                         GpuPowerBoostAvailable = true;
                         GpuPowerBoostLevel = savedLevel;
-                        GpuPowerBoostStatus = savedLevel switch
-                        {
-                            "Minimum" => "✓ Minimum (Base TGP only) - Restored",
-                            "Medium" => "✓ Medium (Custom TGP) - Restored",
-                            "Maximum" => "✓ Maximum (Dynamic Boost) - Restored",
-                            _ => $"✓ {savedLevel} - Restored"
-                        };
+                        GpuPowerBoostStatus = readbackOk
+                            ? savedLevel switch
+                            {
+                                "Minimum" => "✓ Minimum (Base TGP only) - Restored",
+                                "Medium" => "✓ Medium (Custom TGP) - Restored",
+                                "Maximum" => "✓ Maximum (Dynamic Boost) - Restored",
+                                _ => $"✓ {savedLevel} - Restored"
+                            }
+                            : "⚠️ GPU power restore attempted but BIOS readback shows no change";
                     });
                     return;
                 }

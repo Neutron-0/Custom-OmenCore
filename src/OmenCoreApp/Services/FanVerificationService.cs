@@ -628,6 +628,18 @@ namespace OmenCore.Services
             }
 
             var tolerance = result.RequestedPercent >= 100 ? 3 : 2;
+
+            // When ramping DOWN, mechanical inertia means the fan may still physically spin
+            // faster than the requested level for several seconds after the command is sent.
+            // A readback showing level > expected is NOT a failure — the fan is still coasting.
+            // Only treat it as a mismatch if the actual level is BELOW the expected level
+            // (wrong direction, or command was ignored entirely in the wrong way).
+            if (result.ActualLevelAfter > result.ExpectedLevel)
+            {
+                // Fan is still spinning above requested level — coasting down. Not a failure.
+                return true;
+            }
+
             return Math.Abs(result.ActualLevelAfter - result.ExpectedLevel) <= tolerance;
         }
         

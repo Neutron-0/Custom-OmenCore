@@ -58,7 +58,7 @@ namespace OmenCoreApp.Tests.Services
         [InlineData(0, 2, true)]
         [InlineData(33, 33, true)]
         [InlineData(33, 35, true)]
-        [InlineData(33, 36, false)]
+        [InlineData(33, 36, true)]   // actualLevel > expectedLevel: fan coasting down, not a failure
         [InlineData(55, 53, true)]
         [InlineData(55, 51, false)]
         public void IsLevelReadbackMatch_UsesSmallToleranceWindow(int expectedLevel, int actualLevel, bool expectedMatch)

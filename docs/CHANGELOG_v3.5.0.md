@@ -1,8 +1,8 @@
-# OmenCore v3.5.0 - Draft Changelog and Preparation Notes
+# OmenCore v3.5.0 - Release Changelog and Validation Notes
 
 **Version:** 3.5.0
-**Release Date:** TBD
-**Release Status:** Active development / investigation
+**Release Date:** 2026-05-05
+**Release Status:** Released; post-release hotfix snapshot refreshed 2026-05-07
 **Previous Release:** v3.4.1 (2026-04-30)
 **Type:** Reliability, hardware-control correctness, resource optimization, and UI polish release
 
@@ -10,15 +10,17 @@
 
 ## Overview
 
-v3.5.0 is being prepared as a larger stabilization pass after v3.4.1. The priority is to turn the remaining fan and RGB reports into explicit, testable fixes instead of continuing to stack narrow hotfixes around symptoms.
+v3.5.0 was prepared as a larger stabilization pass after v3.4.1. The priority was to turn the remaining fan and RGB reports into explicit, testable fixes instead of continuing to stack narrow hotfixes around symptoms.
 
 Forward-looking scope has been moved to `docs/ROADMAP_v3.6.0.md` so this document stays focused on v3.5.0 implementation and validation status.
+
+This changelog is now a release record rather than a planning draft. Code-level fixes and package artifacts are complete for v3.5.0, while hardware-specific fan/RGB/Linux validation caveats remain explicitly called out below.
 
 OmenCore should remain an independent complete package. External OMEN/Linux projects are research inputs for hardware behavior, sysfs paths, daemon/watchdog patterns, and UX lessons only. OmenCore should not depend on, wrap, vendor, or require those projects at runtime.
 
 The only accepted third-party-style exception remains the bundled PawnIO driver path for Windows EC/MSR access. Longer term, the cleaner alternative would be an OmenCore-owned, signed, minimal hardware-access driver or deeper use of native HP WMI BIOS paths where supported, but that is a larger driver/signing project and should not block 3.5.0.
 
-The first 3.5.0 targets are:
+The v3.5.0 targets were:
 
 - Keep Max fan mode genuinely held at maximum cooling, or fail visibly with precise diagnostics.
 - Stop fan/profile UI state from reporting a different mode than the firmware/app backend is actually holding.
@@ -90,6 +92,8 @@ The first 3.5.0 targets are:
 - 3.5.0 hotfix (post-release): `PerformanceModeService` now ignores non-positive model-override TDP values and skips EC power-limit writes when both resolved limits are non-positive, preventing accidental `0W` policy writes that can hard-cap dGPU power.
 - 3.5.0 hotfix (post-release): Quick fan-mode actions now no-op cleanly while fan diagnostics mode is active, preventing misleading "Applied Gaming/Quiet" UI/log state when diagnostics intentionally block preset changes.
 - 3.5.0 hotfix (post-release): `WmiFanController` preset keepalive now yields while any fan diagnostic session is active, so diagnostic fan-level verification is not overwritten by background preset mode reassertion.
+- 3.5.0 hotfix (post-release): GPU power `SetGpuPower` now performs a post-success read-back via `GetGpuPower()` and surfaces a clear UI warning when the BIOS accepts the command (return code 0) but the hardware power-limit bits do not change — this addresses a field-reported case where WMI reliability was degraded (49% success rate) and BIOS silently ignored GPU power commands while logging false success.
+- 3.5.0 hotfix (post-release): Fan speed verification (`IsLevelReadbackMatch`) no longer treats over-spinning as a failure when ramping down — a level readback showing higher than requested is normal mechanical inertia on slow-ramping hardware; only a readback below the requested level (wrong direction) is now counted as a mismatch. This resolves false verification failures on the Quiet preset when transitioning from higher fan speeds.
 - 3.5.0 regression coverage: Added targeted tests for Auto curve preset policy preservation and non-positive TDP override guarding to lock in the above fixes.
 
 ---
@@ -125,7 +129,7 @@ Max should remain audibly/telemetrically high for at least 2 minutes on affected
 **Issue:** https://github.com/theantipopau/omencore/issues/114#issuecomment-4356627831
 **Reporter:** PizzaCaviar
 **Platform:** Arch Linux, KDE Plasma Wayland, OMEN 16 Slim Gaming Laptop, board `8D40`
-**Status:** Open investigation
+**Status:** Code-level hold workflow implemented; target-host field validation pending
 
 **Symptom:**
 In v3.4.1, the original Wayland GUI rendering issue is reported as resolved, but GUI performance-mode changes do not appear to work reliably. CLI performance/fan settings reset after roughly 30 seconds.
@@ -161,7 +165,7 @@ On board `8D40`, performance mode should remain applied for at least 10 minutes 
 **Severity:** High
 **Affects:** Windows quick profile, tray, sidebar, and OMEN/Fan tabs
 **Reported:** OMEN MAX 16t-ah000 community tester and ZeroMentu, 2026-05-01 v3.4.1 reports
-**Status:** Reopened for 3.5.0
+**Status:** Code-level requested/confirmed state fixes implemented; cross-surface hardware validation pending
 
 **Symptom:**
 The left side can show Max fans while the OMEN tab still shows default/auto, or a profile apply can appear successful even when fan policy was intentionally left unchanged.
@@ -255,7 +259,7 @@ On affected 4-zone systems, selecting a static color should visibly update the k
 - CPU undervolt/Curve Optimizer changes do not appear to apply on HX 375 hardware, even though comparable controls are visible in OMEN Gaming Hub.
 - Fans were observed around ~4000 RPM at low temperature, then later dropped without manual intervention.
 
-**Initial fix/work in progress:**
+**Initial code-level fix:**
 - Removed the hard "Ryzen AI 9 not yet supported" software block in OmenCore's AMD Curve Optimizer path so HX 375 can attempt provider-level SMU apply/verify instead of being rejected preemptively.
 - Ryzen AI 9 is now treated as experimental in status messaging rather than unsupported, while keeping guardrails/clamps in place.
 - Added a focused diagnostics export snapshot (`tuning-fan-focus.txt`) that captures CPU/undervolt provider status, probe readback, and WMI fan ownership/reset markers for faster HX 375 triage.
@@ -284,7 +288,7 @@ All deferred and forward-looking items previously tracked here (resource optimiz
 - [ ] Linux board `8D40` performance mode can be held by OmenCore daemon without external shell scripts.
 - [ ] Linux GUI reports missing root/write access clearly when performance/fan writes cannot persist.
 - [ ] 4-zone RGB static color visibly applies on product `8BCD` with OMEN Light Studio closed.
-- [x] Failed WMI ColorTable RGB applies in restore the prior lighting state at the code level; physical hardware validation remains pending.
+- [x] Failed WMI ColorTable RGB applies restore the prior lighting state at the code level; physical hardware validation remains pending.
 - [x] Optional RGB/peripheral providers do not probe twice during startup.
 - [x] Bloatware Manager flags OMEN Gaming Hub, OMEN Light Studio, and OmenCap as conflict-sensitive before removal decisions.
 - [x] Bloatware Manager dry-run export includes package/uninstall/startup/task targets, risk reasons, dependency notes, backup status, and expected restore paths.
@@ -298,7 +302,7 @@ All deferred and forward-looking items previously tracked here (resource optimiz
 
 ## 3.5.0 Release Gate (Current Snapshot)
 
-This section is the strict ship gate for "code complete except physical validation." Status labels are intentionally binary.
+This section records the state used for the v3.5.0 release and the remaining evidence needed before claiming broad hardware confidence. Status labels are intentionally binary.
 
 ### Gate A - Code and Regression Safety
 
@@ -330,10 +334,10 @@ This section is the strict ship gate for "code complete except physical validati
 	- Validate board `8D40` long-hold behavior in target distro/kernel environments.
 	- Validate Linux package/service flow end-to-end on target systems.
 
-### Gate D - Physical Hardware Validation
+### Gate D - Physical Hardware Confidence
 
-- Status: BLOCKED (expected before release candidate signoff)
-- Blocking checks:
+- Status: PENDING FIELD EVIDENCE
+- Checks still needed for broad targeted-hardware confidence:
 	- Max fan hold duration validation on `8BCD` class systems.
 	- Physical 4-zone RGB apply/restore validation on affected OMEN hardware with OMEN Light Studio closed.
 	- Tray/minimized cadence impact measurement (before/after CPU and RAM telemetry) on real systems.
@@ -343,16 +347,16 @@ Evidence workflow and reusable template:
 - Use `docs/HARDWARE_VALIDATION_EVIDENCE_v3.5.0.md` for every physical run.
 - Keep one completed evidence section per device/OS combination and attach command outputs verbatim.
 
-### Gate E - Final Release Candidate Signoff
+### Gate E - Next Maintenance Signoff
 
-- Status: BLOCKED (depends on Gate D)
-- Required for "all scoped 3.5.0 code fixes implemented" claim:
-	- Refresh full-solution test run for release branch cut.
+- Status: PENDING FIELD EVIDENCE (depends on Gate D)
+- Required before claiming "release-ready for all targeted hardware":
+	- Refresh full-solution test run for any maintenance branch cut.
 	- Attach physical validation evidence for Gate D items.
 	- Mark all checklist blockers above as PASS.
 
 Definition of done for release note wording:
-- "All scoped 3.5.0 code fixes implemented" can be claimed now.
+- "All scoped 3.5.0 code fixes implemented" can be claimed for the released packages.
 - "Release-ready for all targeted hardware" cannot be claimed until Gate D evidence is complete.
 
 ### Current Verification Evidence Snapshot (2026-05-05)
@@ -398,12 +402,14 @@ Scope caveats:
 
 ## Release Artifact SHA256 (v3.5.0)
 
+These hashes correspond to the refreshed 2026-05-07 v3.5.0 artifact snapshot after all post-release hotfixes listed above.
+
 - `OmenCoreSetup-3.5.0.exe`  
-	`8821890923D1C4A59C300FEE8B1F8415AE2B92F4063F71D1FF8A8EA009533E14`
+	`262A2FC7E4E48C63A862284D0620633B396501A84391210F0EBCB097CB4817A1`
 - `OmenCore-3.5.0-win-x64.zip`  
-	`16DF5B0FD818A5BF358AD82489B49980C5EBA7B987E697E2044F2ED51C3ABC9F`
+	`6A1E801831D8AC69151678463152E1325AE75FB462E40127CD9FA5191F90E016`
 - `OmenCore-3.5.0-linux-x64.zip`  
-	`B3892F2BAC699DB3C07EAF6D8A2C5412663711D44DC2AE1076299B3CF77C6744`
+	`E7C064122F8227FAF7177D18A918A82BF2503DA61F55182BC40A1A4CC258E7D2`
 
 Packaging notes:
 - Windows installer + portable package built successfully via `build-installer.ps1`.

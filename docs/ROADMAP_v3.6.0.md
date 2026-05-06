@@ -63,6 +63,7 @@ This roadmap captures all forward-looking and deferred items moved out of the v3
 - [~] M4 - Worker and cache policy: keep one authoritative hardware sample pipeline, but allow lower-frequency or suspended expensive sensors when only static tray status is needed.
   - Started by adding an adaptive bridge sampling policy: in low-overhead tray-only mode (without OSD), `HardwareMonitoringService` now requests static-tray sampling and `WmiBiosMonitor` reduces expensive GPU telemetry refreshes to a slower interval while keeping unified sample flow and fan/temperature telemetry alive.
   - Continued by deleting obsolete polling-interval runtime code paths (`SetPollingInterval` no-op and Settings call sites) so cadence ownership is now explicitly centralized in the unified active/idle/tray/overlay cadence policy.
+  - Continued by removing the old polling-profile / polling-interval settings UX and normalizing legacy config values on save, so Settings now reflects the real automatic cadence model instead of exposing controls that no longer affect runtime behavior.
 - [ ] M5 - Regression guardrails: add tests for cadence blockers and diagnostic evidence, plus a release checklist row for CPU/RAM before/after measurements.
   - Started by adding cadence guardrails for low-overhead + tray-only precedence and diagnostic reason text.
 

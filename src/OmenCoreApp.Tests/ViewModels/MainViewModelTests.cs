@@ -100,5 +100,29 @@ namespace OmenCoreApp.Tests.ViewModels
             vm.IsLightingLoaded.Should().BeFalse(
                 because: "RGB/peripheral SDK and provider setup should wait for the RGB page or an explicit lighting action");
         }
+
+        [Fact]
+        public void Constructor_DoesNotStartConflictMonitoringScan()
+        {
+            using var vm = new MainViewModel();
+
+            var field = typeof(MainViewModel).GetField("_conflictMonitoringStarted", BindingFlags.Instance | BindingFlags.NonPublic);
+            field.Should().NotBeNull();
+            field!.GetValue(vm).Should().Be(0,
+                because: "conflict detection scans should be deferred until Monitoring/OMEN/Tuning/Optimizer is opened");
+        }
+
+        [Fact]
+        public void SelectingTuningTab_StartsConflictMonitoringScan()
+        {
+            using var vm = new MainViewModel();
+
+            vm.SelectedTabIndex = 3;
+
+            var field = typeof(MainViewModel).GetField("_conflictMonitoringStarted", BindingFlags.Instance | BindingFlags.NonPublic);
+            field.Should().NotBeNull();
+            field!.GetValue(vm).Should().Be(1,
+                because: "tuning-related conflict scans should start when the user opens a relevant tab, not at app startup");
+        }
     }
 }

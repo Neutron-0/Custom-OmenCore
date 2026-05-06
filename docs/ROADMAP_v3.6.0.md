@@ -59,7 +59,9 @@ This roadmap captures all forward-looking and deferred items moved out of the v3
   - Continued by letting low-overhead tray-only mode reach the 10s ultra-low cadence when no OSD/fan blockers are active, instead of pinning hidden-to-tray sessions at the 5s low-overhead idle cadence.
 - [~] M3 - Provider laziness: ensure optional RGB, tuning, optimizer, and peripheral integrations do not probe until the user opens or invokes those areas.
   - Started by moving Corsair/Logitech/Razer/OpenRGB lighting setup behind the RGB tab or explicit lighting actions, and by removing startup Corsair discovery from `MainWindow_Loaded`.
-- [ ] M4 - Worker and cache policy: keep one authoritative hardware sample pipeline, but allow lower-frequency or suspended expensive sensors when only static tray status is needed.
+  - Continued by deferring conflict/tuning software scan loops (Afterburner/RTSS/XTU/FanControl detection monitor) until Monitoring/OMEN/Tuning/Optimizer tabs are opened instead of running unconditionally during app startup.
+- [~] M4 - Worker and cache policy: keep one authoritative hardware sample pipeline, but allow lower-frequency or suspended expensive sensors when only static tray status is needed.
+  - Started by adding an adaptive bridge sampling policy: in low-overhead tray-only mode (without OSD), `HardwareMonitoringService` now requests static-tray sampling and `WmiBiosMonitor` reduces expensive GPU telemetry refreshes to a slower interval while keeping unified sample flow and fan/temperature telemetry alive.
 - [ ] M5 - Regression guardrails: add tests for cadence blockers and diagnostic evidence, plus a release checklist row for CPU/RAM before/after measurements.
   - Started by adding cadence guardrails for low-overhead + tray-only precedence and diagnostic reason text.
 

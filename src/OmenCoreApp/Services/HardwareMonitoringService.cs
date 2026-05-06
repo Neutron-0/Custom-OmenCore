@@ -96,6 +96,8 @@ namespace OmenCore.Services
             {
                 lhwm.SetLowOverheadMode(_lowOverheadMode);
             }
+
+            UpdateBridgeSamplingPolicy();
         }
 
         public bool LowOverheadMode => _lowOverheadMode;
@@ -148,6 +150,8 @@ namespace OmenCore.Services
             {
                 lhwm.SetLowOverheadMode(enabled);
             }
+
+            UpdateBridgeSamplingPolicy();
         }
 
         public void SetPollingInterval(int intervalMs)
@@ -197,6 +201,7 @@ namespace OmenCore.Services
         public void SetUiWindowActive(bool active)
         {
             _uiWindowActive = active;
+            UpdateBridgeSamplingPolicy();
         }
 
         /// <summary>
@@ -209,6 +214,7 @@ namespace OmenCore.Services
         public void SetTrayOnlyMode(bool trayOnly)
         {
             _trayOnlyMode = trayOnly;
+            UpdateBridgeSamplingPolicy();
         }
 
         /// <summary>
@@ -218,6 +224,18 @@ namespace OmenCore.Services
         public void SetOverlayRealtimeMode(bool enabled)
         {
             _overlayRealtimeMode = enabled;
+            UpdateBridgeSamplingPolicy();
+        }
+
+        private void UpdateBridgeSamplingPolicy()
+        {
+            if (_bridge is not IAdaptiveSamplingBridge adaptiveBridge)
+            {
+                return;
+            }
+
+            bool staticTrayMode = _lowOverheadMode && !_uiWindowActive && _trayOnlyMode && !_overlayRealtimeMode;
+            adaptiveBridge.SetStaticTraySamplingMode(staticTrayMode);
         }
 
         private void UpdateCadenceTelemetry(TimeSpan cadence)

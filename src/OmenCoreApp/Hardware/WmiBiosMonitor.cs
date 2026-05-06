@@ -29,7 +29,7 @@ namespace OmenCore.Hardware
     ///
     /// PawnIO is used ONLY for MSR-based throttling detection - NOT for core monitoring.
     /// </summary>
-    public class WmiBiosMonitor : IHardwareMonitorBridge, IDisposable
+    public class WmiBiosMonitor : IHardwareMonitorBridge, IAdaptiveSamplingBridge, IDisposable
     {
         private readonly LoggingService? _logging;
         private readonly HpWmiBios _wmiBios;
@@ -153,6 +153,9 @@ namespace OmenCore.Hardware
         // MSI Afterburner coexistence — read GPU metrics from shared memory instead of NVAPI polling
         private ConflictDetectionService? _afterburnerService;
         private bool _afterburnerCoexistenceActive;
+        private volatile bool _staticTraySamplingMode;
+        private DateTime _lastExpensiveGpuTelemetryUtc = DateTime.MinValue;
+        private static readonly TimeSpan StaticTrayGpuTelemetryInterval = TimeSpan.FromSeconds(30);
 
         // CPU PerformanceCounter — persistent instance avoids 100ms sleep + allocation every poll
         private System.Diagnostics.PerformanceCounter? _cpuPerfCounter;
@@ -265,6 +268,24 @@ namespace OmenCore.Hardware
         {
             _afterburnerService = conflictService;
             _logging?.Info("[WmiBiosMonitor] Afterburner coexistence configured — will auto-activate when shared memory is available");
+        }
+
+        public void SetStaticTraySamplingMode(bool enabled)
+        {
+            if (_staticTraySamplingMode == enabled)
+            {
+                return;
+            }
+
+            _staticTraySamplingMode = enabled;
+            if (!enabled)
+            {
+                _lastExpensiveGpuTelemetryUtc = DateTime.MinValue;
+            }
+
+            _logging?.Info(enabled
+                ? "[WmiBiosMonitor] Static tray sampling enabled — expensive GPU telemetry refresh reduced"
+                : "[WmiBiosMonitor] Static tray sampling disabled — full GPU telemetry cadence restored");
         }
         
         public async Task<MonitoringSample> ReadSampleAsync(CancellationToken token)
@@ -467,11 +488,15 @@ namespace OmenCore.Hardware
                 // When Afterburner is running, read temp/clocks/power from its
                 // shared memory (zero contention). NVAPI reduced to load+VRAM only.
                 // ═══════════════════════════════════════════════════════════════
+
+                bool shouldRefreshExpensiveGpuTelemetry =
+                    !_staticTraySamplingMode ||
+                    (DateTime.UtcNow - _lastExpensiveGpuTelemetryUtc) >= StaticTrayGpuTelemetryInterval;
                 
                 bool afterburnerProvidedData = false;
                 
                 // Try Afterburner shared memory first (eliminates NVAPI contention)
-                if (_afterburnerService?.IsMsiAfterburnerSharedMemoryAvailable == true)
+                if (shouldRefreshExpensiveGpuTelemetry && _afterburnerService?.IsMsiAfterburnerSharedMemoryAvailable == true)
                 {
                     try
                     {
@@ -581,14 +606,14 @@ namespace OmenCore.Hardware
                 
                 // Full NVAPI monitoring when Afterburner is NOT providing data
                 // Auto-recover after cooldown period (RC-1 fix: no longer permanently disabled)
-                if (_nvapiMonitoringDisabled && DateTime.Now >= _nvapiDisabledUntil)
+                if (shouldRefreshExpensiveGpuTelemetry && _nvapiMonitoringDisabled && DateTime.Now >= _nvapiDisabledUntil)
                 {
                     _nvapiMonitoringDisabled = false;
                     _nvapiConsecutiveFailures = 0;
                     _logging?.Info($"[WmiBiosMonitor] NVAPI monitoring re-enabled after {NvapiRecoveryCooldownSeconds}s cooldown");
                 }
 
-                if (!afterburnerProvidedData && _nvapi?.IsAvailable == true && !_nvapiMonitoringDisabled)
+                if (shouldRefreshExpensiveGpuTelemetry && !afterburnerProvidedData && _nvapi?.IsAvailable == true && !_nvapiMonitoringDisabled)
                 {
                     try
                     {
@@ -626,6 +651,11 @@ namespace OmenCore.Hardware
                             _logging?.Warn($"[WmiBiosMonitor] NVAPI monitoring suspended for {NvapiRecoveryCooldownSeconds}s after {MaxNvapiFailuresBeforeDisable} consecutive failures: {ex.Message}");
                         }
                     }
+                }
+
+                if (shouldRefreshExpensiveGpuTelemetry)
+                {
+                    _lastExpensiveGpuTelemetryUtc = DateTime.UtcNow;
                 }
                 
                 // ═══════════════════════════════════════════════════════════════

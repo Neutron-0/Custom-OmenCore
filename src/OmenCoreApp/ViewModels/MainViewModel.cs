@@ -87,6 +87,8 @@ namespace OmenCore.ViewModels
         private volatile AmdGpuService? _amdGpuService;
         private OsdService? _osdService;
         private ConflictDetectionService? _conflictDetectionService;
+        private readonly CancellationTokenSource _conflictMonitorCts = new();
+        private int _conflictMonitoringStarted;
         private HpWmiBios? _wmiBios;
         private WmiBiosMonitor? _wmiBiosMonitor;
         private OghServiceProxy? _oghProxy;
@@ -227,7 +229,15 @@ namespace OmenCore.ViewModels
         public int SelectedTabIndex
         {
             get => _selectedTabIndex;
-            set { if (_selectedTabIndex != value) { _selectedTabIndex = value; OnPropertyChanged(nameof(SelectedTabIndex)); } }
+            set
+            {
+                if (_selectedTabIndex != value)
+                {
+                    _selectedTabIndex = value;
+                    OnPropertyChanged(nameof(SelectedTabIndex));
+                    EnsureConflictMonitoringStartedForTab(value);
+                }
+            }
         }
 
         private bool _showAdvancedControls = true;
@@ -1702,16 +1712,7 @@ namespace OmenCore.ViewModels
                     _logging.Warn($"Detected {conflicts.Count} conflicting application(s): {_conflictDetectionService.GetConflictSummary()}");
                 }
             };
-            _ = Task.Run(async () =>
-            {
-                try
-                {
-                    await _conflictDetectionService.ScanForConflictsAsync();
-                    // Monitor every 60 seconds in the background
-                    await _conflictDetectionService.MonitorConflictsAsync(TimeSpan.FromSeconds(60), CancellationToken.None);
-                }
-                catch (Exception ex) { _logging.Warn($"Conflict detection failed: {ex.Message}"); }
-            });
+            _logging.Info("Conflict detection monitor deferred until Monitoring/OMEN/Tuning/Optimizer is opened");
             
             _autoUpdateService.DownloadProgressChanged += OnUpdateDownloadProgressChanged;
             _autoUpdateService.UpdateCheckCompleted += OnBackgroundUpdateCheckCompleted;
@@ -4048,6 +4049,53 @@ namespace OmenCore.ViewModels
             tabIndex == 7 ||
             tabIndex == 8;
 
+        private static bool ShouldStartConflictMonitoringForTab(int tabIndex) =>
+            tabIndex == 2 || // OMEN
+            tabIndex == 3 || // Tuning
+            tabIndex == 4 || // Monitoring
+            tabIndex == 5;   // Optimizer
+
+        private void EnsureConflictMonitoringStartedForTab(int tabIndex)
+        {
+            if (!ShouldStartConflictMonitoringForTab(tabIndex))
+            {
+                return;
+            }
+
+            EnsureConflictMonitoringStarted($"tab-index-{tabIndex}");
+        }
+
+        private void EnsureConflictMonitoringStarted(string reason)
+        {
+            if (_conflictDetectionService == null)
+            {
+                return;
+            }
+
+            if (Interlocked.CompareExchange(ref _conflictMonitoringStarted, 1, 0) != 0)
+            {
+                return;
+            }
+
+            _logging.Info($"Starting conflict detection monitor ({reason})");
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await _conflictDetectionService.ScanForConflictsAsync();
+                    await _conflictDetectionService.MonitorConflictsAsync(TimeSpan.FromSeconds(60), _conflictMonitorCts.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    _logging.Debug("Conflict detection monitor stopped");
+                }
+                catch (Exception ex)
+                {
+                    _logging.Warn($"Conflict detection failed: {ex.Message}");
+                }
+            });
+        }
+
         /// <summary>
         /// Handle fan preset changes from FanService (e.g., power automation).
         /// Updates all UI indicators: sidebar, tray, dashboard.
@@ -4309,6 +4357,9 @@ namespace OmenCore.ViewModels
             // Cancel any pending tray worker actions for clean shutdown
             _trayWorkerCts.Cancel();
             _trayWorkerCts.Dispose();
+
+            _conflictMonitorCts.Cancel();
+            _conflictMonitorCts.Dispose();
             
             _safeModeResetTimer?.Dispose();
             _safeModeResetTimer = null;
@@ -4398,6 +4449,7 @@ namespace OmenCore.ViewModels
             _screenSamplingService?.Dispose();
             _audioReactiveRgbService?.Dispose();
             _rgbSceneService?.Dispose();
+            _conflictDetectionService?.Dispose();
 
             // Dispose thermal monitoring and hardware watchdog
             _thermalMonitoringService = null;

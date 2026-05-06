@@ -1,5 +1,7 @@
 using System;
 using System.Reflection;
+using System.Threading;
+using System.Threading.Tasks;
 using FluentAssertions;
 using OmenCore.Hardware;
 using OmenCore.Models;
@@ -11,6 +13,31 @@ namespace OmenCoreApp.Tests.Services
 {
     public class HotkeyAndMonitoringTests
     {
+        private sealed class AdaptiveBridgeStub : IHardwareMonitorBridge, IAdaptiveSamplingBridge
+        {
+            public bool StaticTraySamplingEnabled { get; private set; }
+            public string MonitoringSource => "AdaptiveBridgeStub";
+
+            public Task<MonitoringSample> ReadSampleAsync(CancellationToken token)
+            {
+                token.ThrowIfCancellationRequested();
+                return Task.FromResult(new MonitoringSample
+                {
+                    CpuTemperatureC = 50,
+                    GpuTemperatureC = 55,
+                    CpuLoadPercent = 20,
+                    GpuLoadPercent = 25
+                });
+            }
+
+            public Task<bool> TryRestartAsync() => Task.FromResult(true);
+
+            public void SetStaticTraySamplingMode(bool enabled)
+            {
+                StaticTraySamplingEnabled = enabled;
+            }
+        }
+
         [Fact]
         public void StartWmiEventWatcher_IsSkipped_When_HookActive()
         {
@@ -387,6 +414,46 @@ namespace OmenCoreApp.Tests.Services
             transitions[^1].CadenceMs.Should().Be(10000);
             transitions[^1].LowOverheadMode.Should().BeTrue();
             transitions[^1].TrayOnlyMode.Should().BeTrue();
+        }
+
+        [Fact]
+        public void AdaptiveSamplingPolicy_EnablesStaticTrayMode_WhenLowOverheadTrayOnlyWithoutOverlay()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var bridge = new AdaptiveBridgeStub();
+            var prefs = new MonitoringPreferences { LowOverheadMode = false };
+            var svc = new HardwareMonitoringService(bridge, logging, prefs, new ResumeRecoveryDiagnosticsService());
+
+            bridge.StaticTraySamplingEnabled.Should().BeFalse();
+
+            svc.SetUiWindowActive(false);
+            svc.SetTrayOnlyMode(true);
+            svc.SetOverlayRealtimeMode(false);
+            svc.SetLowOverheadMode(true);
+
+            bridge.StaticTraySamplingEnabled.Should().BeTrue();
+        }
+
+        [Fact]
+        public void AdaptiveSamplingPolicy_DisablesStaticTrayMode_WhenOverlayRealtimeIsEnabled()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var bridge = new AdaptiveBridgeStub();
+            var prefs = new MonitoringPreferences { LowOverheadMode = true };
+            var svc = new HardwareMonitoringService(bridge, logging, prefs, new ResumeRecoveryDiagnosticsService());
+
+            svc.SetUiWindowActive(false);
+            svc.SetTrayOnlyMode(true);
+            svc.SetOverlayRealtimeMode(false);
+            bridge.StaticTraySamplingEnabled.Should().BeTrue();
+
+            svc.SetOverlayRealtimeMode(true);
+
+            bridge.StaticTraySamplingEnabled.Should().BeFalse();
         }
 
         [Fact]

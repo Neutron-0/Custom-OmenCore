@@ -435,6 +435,31 @@ namespace OmenCoreApp.Tests.Hardware
                 "curve presets should preserve current policy even when preset metadata uses Performance");
         }
 
+        [Fact]
+        public void ApplyPreset_AutoCurvePayload_PreservesCurrentPolicyMode()
+        {
+            var fake = new ModeCaptureFakeWmiBios();
+            var controller = new WmiFanController(null, null, 0, injectedWmiBios: fake);
+
+            controller.SetPerformanceMode("Performance").Should().BeTrue();
+            fake.LastSetFanMode.Should().Be(HpWmiBios.FanMode.Performance);
+
+            var preset = new FanPreset
+            {
+                Name = "Auto",
+                Mode = OmenCore.Models.FanMode.Auto,
+                Curve = new List<FanCurvePoint>
+                {
+                    new() { TemperatureC = 40, FanPercent = 35 },
+                    new() { TemperatureC = 80, FanPercent = 80 }
+                }
+            };
+
+            controller.ApplyPreset(preset).Should().BeTrue();
+            fake.LastSetFanMode.Should().Be(HpWmiBios.FanMode.Performance,
+                "Auto presets with explicit curve payload should preserve active thermal policy mode");
+        }
+
         // Fake implementation to simulate V2 BIOS that does not expose RPM but reports fan levels.
         private class FallbackFakeWmiBios : IHpWmiBios
         {

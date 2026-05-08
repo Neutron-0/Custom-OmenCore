@@ -58,6 +58,7 @@ This roadmap captures all forward-looking and deferred items moved out of the v3
   - Continued by registering the main tray icon 2s refresh loop, with diagnostics text that distinguishes live temperature-badge redraws from static-icon tooltip/menu refreshes.
   - Continued by registering OSD overlay stats and network refresh timers as visible-only work, so OSD-visible benchmark exports show the overlay's 1s stats loop and optional 5s network polling explicitly.
   - Continued by registering tuning safety loops for CPU undervolt status polling and EDP throttling mitigation, making page-loaded tuning monitors visible in resource exports.
+  - Continued by registering temperature-reactive RGB polling as optional background work and tightening its cancellation-token disposal on stop.
 - Expand provider lazy-load boundaries. RGB/peripheral providers, OpenRGB/Razer/Logitech/Corsair process checks, NVAPI/Afterburner telemetry, optimizer verification, and tuning conflict scans should run on page entry, explicit action, or scheduled low-frequency refresh rather than unconditional startup.
 - Reduce steady-state allocations. Cap in-memory event/log/chart buffers by count and age, reuse monitoring sample DTOs where safe, and avoid repeated LINQ-heavy projections in high-cadence paths.
 - Make "low overhead mode" visible and testable: show the current cadence tier, active blockers that prevent ultra-low cadence, and last reason a subsystem woke up.
@@ -89,6 +90,7 @@ This roadmap captures all forward-looking and deferred items moved out of the v3
   - Continued by surfacing the main tray icon refresh loop in `BackgroundTimerRegistry`, so `resource-footprint.txt` can account for tray tooltip/menu and live badge redraw work.
   - Continued by surfacing OSD overlay stats/network timers in `BackgroundTimerRegistry` and replacing silent OSD update catches with debug logging.
   - Continued by adding `BackgroundTimerRegistryTests` coverage for undervolt status polling and EDP throttling mitigation timer registration.
+  - Continued by adding `BackgroundTimerRegistryTests` coverage for temperature-reactive RGB timer registration and by removing the stale bare catch in hex-color parsing.
 
 ### Fan and Performance Reliability
 - Expand readback-first verification for fan and power-limit paths.
@@ -104,6 +106,7 @@ This roadmap captures all forward-looking and deferred items moved out of the v3
 - Add per-backend control-path diagnostics in UI/export. Initial diagnostics export coverage is implemented via `rgb-control-path.txt` without forcing lazy provider initialization.
 - Continue provider lazy-load and startup probe minimization.
 - Expand ownership visibility for HP keyboard and external RGB controllers. Initial Lighting header panel now shows active RGB ownership, HP keyboard backend, provider status details, and OMEN Light Studio/Gaming Hub conflict warnings.
+- Continue RGB loop/resource visibility. Temperature-reactive RGB polling is now registered in diagnostics while enabled and stops/disposes its cancellation token cleanly.
 
 ## Optimizer and Cleanup Tracks
 

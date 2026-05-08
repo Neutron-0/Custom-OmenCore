@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OSD overlay stats and network refresh timers now register as visible-only work in diagnostics, and OSD update failures are debug-logged instead of silently swallowed.
 - CPU undervolt status polling and EDP throttling mitigation loops now register with diagnostics so tuning page activation and resource exports show those active safety/readback monitors.
 - Temperature-reactive keyboard RGB polling now registers with diagnostics while enabled, unregisters/disposes cleanly on stop, and no longer uses a bare catch for hex-color parsing.
+- Dashboard hardware metrics history is now capped by both age and count, and the monitor-loop power trend calculation avoids a per-sample `TakeLast().ToList()` allocation.
 - Memory Optimizer visible refreshes do less repeated work by reusing the current memory snapshot and resolving process executable paths only when the user opens a process location.
 - Memory Optimizer Auto Clean now exposes a persisted minimum-gap override, with `0` preserving the selected profile default cooldown.
 - Memory Optimizer top-process rows can be added directly to working-set exclusions from the context menu.

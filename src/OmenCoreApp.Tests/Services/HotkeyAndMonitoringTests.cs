@@ -457,6 +457,81 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public void UpdateDashboardMetrics_CapsMetricHistoryByCount()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var bridge = new AdaptiveBridgeStub();
+            var prefs = new MonitoringPreferences();
+            var svc = new HardwareMonitoringService(bridge, logging, prefs, new ResumeRecoveryDiagnosticsService());
+            var updateMethod = typeof(HardwareMonitoringService).GetMethod("UpdateDashboardMetrics", BindingFlags.Instance | BindingFlags.NonPublic);
+            var historyField = typeof(HardwareMonitoringService).GetField("_metricsHistory", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            updateMethod.Should().NotBeNull();
+            historyField.Should().NotBeNull();
+
+            var history = (System.Collections.Generic.List<HardwareMetrics>)historyField!.GetValue(svc)!;
+            for (var i = 0; i < 7210; i++)
+            {
+                history.Add(new HardwareMetrics
+                {
+                    Timestamp = DateTime.Now,
+                    PowerConsumption = 40 + (i % 5)
+                });
+            }
+
+            updateMethod!.Invoke(svc, new object[]
+            {
+                new MonitoringSample
+                {
+                    CpuTemperatureC = 50,
+                    GpuTemperatureC = 55,
+                    CpuLoadPercent = 20,
+                    GpuLoadPercent = 25
+                }
+            });
+
+            history.Count.Should().Be(7200, "dashboard metrics should be count-capped even at active 1s cadence");
+        }
+
+        [Fact]
+        public void UpdateDashboardMetrics_PrunesMetricHistoryByAge()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var bridge = new AdaptiveBridgeStub();
+            var prefs = new MonitoringPreferences();
+            var svc = new HardwareMonitoringService(bridge, logging, prefs, new ResumeRecoveryDiagnosticsService());
+            var updateMethod = typeof(HardwareMonitoringService).GetMethod("UpdateDashboardMetrics", BindingFlags.Instance | BindingFlags.NonPublic);
+            var historyField = typeof(HardwareMonitoringService).GetField("_metricsHistory", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            updateMethod.Should().NotBeNull();
+            historyField.Should().NotBeNull();
+
+            var history = (System.Collections.Generic.List<HardwareMetrics>)historyField!.GetValue(svc)!;
+            history.Add(new HardwareMetrics
+            {
+                Timestamp = DateTime.Now.AddHours(-25),
+                PowerConsumption = 42
+            });
+
+            updateMethod!.Invoke(svc, new object[]
+            {
+                new MonitoringSample
+                {
+                    CpuTemperatureC = 50,
+                    GpuTemperatureC = 55,
+                    CpuLoadPercent = 20,
+                    GpuLoadPercent = 25
+                }
+            });
+
+            history.Should().OnlyContain(metric => metric.Timestamp >= DateTime.Now.AddHours(-24));
+        }
+
+        [Fact]
         public void HardwareWorkerClient_FormatsLogs_WithSessionAndCorrelationContext()
         {
             var client = new HardwareWorkerClient();

@@ -77,8 +77,10 @@ The first rule for this release is measurement before claims. Resource improveme
 - 3.6.0 optimization: OSD overlay stats and network refresh timers now register as visible-only work while the overlay is active. OSD-visible resource exports now show the 1s stats refresh and optional 5s network polling separately, and OSD update failures are debug-logged instead of silently swallowed.
 - 3.6.0 tuning diagnostics: CPU undervolt status polling and EDP throttling mitigation loops now register with `BackgroundTimerRegistry`, so tuning page activation/resource exports show those active safety/readback monitors instead of hiding them behind untracked `Task.Delay` loops.
 - 3.6.0 RGB optimization: Temperature-reactive keyboard RGB polling now registers with `BackgroundTimerRegistry` while enabled, unregisters and disposes its cancellation token on stop, and uses exception-free hex parsing instead of a stale bare catch.
+- 3.6.0 optimization: Dashboard hardware metrics history is now capped by both age and count, and the monitor-loop power trend calculation no longer allocates a temporary `TakeLast().ToList()` snapshot on every sample.
 - 3.6.0 regression coverage: Added/expanded tests across WMI verification, fan preset/Auto handoff behavior, fan smoothing/diagnostic mode state cleanup, fan command UI command-state requery, GPU power semantics, fan-level mapping, and monitoring cadence telemetry.
 - 3.6.0 regression coverage: Added tests for deferred conflict monitoring startup, Memory/Settings timer lifecycle, adaptive static-tray sampling policy, compatibility persistence for legacy monitoring config values after the settings cleanup, and the new live cadence tier/blocker summaries in Settings.
+- 3.6.0 regression coverage: Added hardware monitoring tests that verify dashboard metric history is pruned by count and age.
 
 ---
 

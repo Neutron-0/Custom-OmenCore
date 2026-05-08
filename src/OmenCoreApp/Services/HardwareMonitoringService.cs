@@ -45,6 +45,9 @@ namespace OmenCore.Services
         private HardwareMetrics? _lastMetrics;
         private const int ReadSampleTimeoutMs = 10000; // 10 second timeout for sample reads
         private int _consecutiveTimeouts = 0; // Track consecutive timeouts for diagnostics
+        private static readonly TimeSpan DashboardMetricsRetention = TimeSpan.FromHours(24);
+        private const int MaxDashboardMetricsHistory = 7200; // Keeps at least 2h at active 1s cadence.
+        private const int PowerTrendSampleCount = 5;
         
         // Monitoring health tracking (v2.7.0)
         private DateTime _lastSuccessfulSampleTime = DateTime.MinValue;
@@ -868,28 +871,49 @@ namespace OmenCore.Services
 
             _logging.Debug($"UpdateDashboardMetrics: Created metrics - CPU: {metrics.CpuTemperature}°C, GPU: {metrics.GpuTemperature}°C, Power: {metrics.PowerConsumption}W");
 
-            // Calculate trend
-            if (_metricsHistory.Count >= 2)
-            {
-                var recentMetrics = _metricsHistory.TakeLast(5).ToList();
-                var avgPower = recentMetrics.Average(m => m.PowerConsumption);
-                metrics.PowerConsumptionTrend = metrics.PowerConsumption - avgPower;
-            }
-
             lock (_dashboardLock)
             {
+                PruneDashboardMetricHistory(metrics.Timestamp);
+
+                // Calculate trend without per-sample LINQ/list allocations in the monitor loop.
+                if (_metricsHistory.Count >= 2)
+                {
+                    var sumPower = 0.0;
+                    var count = 0;
+                    for (var i = _metricsHistory.Count - 1; i >= 0 && count < PowerTrendSampleCount; i--)
+                    {
+                        sumPower += _metricsHistory[i].PowerConsumption;
+                        count++;
+                    }
+
+                    if (count > 0)
+                    {
+                        metrics.PowerConsumptionTrend = metrics.PowerConsumption - (sumPower / count);
+                    }
+                }
+
                 _lastMetrics = metrics;
                 _metricsHistory.Add(metrics);
 
-                // Keep only last 24 hours of data
-                var cutoffTime = DateTime.Now.AddHours(-24);
-                _metricsHistory.RemoveAll(m => m.Timestamp < cutoffTime);
+                PruneDashboardMetricHistory(metrics.Timestamp);
 
                 // Check for alerts
                 CheckForAlerts(metrics);
             }
 
             _logging.Debug("UpdateDashboardMetrics: _lastMetrics updated successfully");
+        }
+
+        private void PruneDashboardMetricHistory(DateTime now)
+        {
+            var cutoffTime = now - DashboardMetricsRetention;
+            _metricsHistory.RemoveAll(m => m.Timestamp < cutoffTime);
+
+            var excessCount = _metricsHistory.Count - MaxDashboardMetricsHistory;
+            if (excessCount > 0)
+            {
+                _metricsHistory.RemoveRange(0, excessCount);
+            }
         }
 
         private double CalculateEstimatedPowerConsumption(MonitoringSample sample)

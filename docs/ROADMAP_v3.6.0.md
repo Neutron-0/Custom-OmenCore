@@ -61,6 +61,7 @@ This roadmap captures all forward-looking and deferred items moved out of the v3
   - Continued by registering temperature-reactive RGB polling as optional background work and tightening its cancellation-token disposal on stop.
 - Expand provider lazy-load boundaries. RGB/peripheral providers, OpenRGB/Razer/Logitech/Corsair process checks, NVAPI/Afterburner telemetry, optimizer verification, and tuning conflict scans should run on page entry, explicit action, or scheduled low-frequency refresh rather than unconditional startup.
 - Reduce steady-state allocations. Cap in-memory event/log/chart buffers by count and age, reuse monitoring sample DTOs where safe, and avoid repeated LINQ-heavy projections in high-cadence paths.
+  - Started by count-capping dashboard hardware metrics history at 7,200 entries while retaining the existing 24h age cap, and replacing the per-sample power-trend `TakeLast().ToList().Average()` allocation with a bounded reverse loop.
 - Make "low overhead mode" visible and testable: show the current cadence tier, active blockers that prevent ultra-low cadence, and last reason a subsystem woke up.
 
 ### 3.6 Lightweight Milestones
@@ -91,6 +92,7 @@ This roadmap captures all forward-looking and deferred items moved out of the v3
   - Continued by surfacing OSD overlay stats/network timers in `BackgroundTimerRegistry` and replacing silent OSD update catches with debug logging.
   - Continued by adding `BackgroundTimerRegistryTests` coverage for undervolt status polling and EDP throttling mitigation timer registration.
   - Continued by adding `BackgroundTimerRegistryTests` coverage for temperature-reactive RGB timer registration and by removing the stale bare catch in hex-color parsing.
+  - Continued by adding hardware monitoring guardrails that verify dashboard metric history is capped by count and age.
 
 ### Fan and Performance Reliability
 - Expand readback-first verification for fan and power-limit paths.

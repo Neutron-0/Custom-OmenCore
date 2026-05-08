@@ -350,7 +350,11 @@ namespace OmenCore.Hardware
             // to the newly-started worker on the next poll cycle.
             if (_tempFallbackMonitor != null)
             {
-                try { _tempFallbackMonitor.Dispose(); } catch { } // Intentional: dispose-path cleanup; swallowing prevents masking the outer exception
+                try { _tempFallbackMonitor.Dispose(); }
+                catch (Exception ex)
+                {
+                    _logging?.Debug($"[WmiBiosMonitor] Temp fallback dispose during restart failed: {ex.Message}");
+                }
                 _tempFallbackMonitor = null;
                 _tempFallbackInitAttempted = false;
                 _modelCpuTempPreferenceLogged = false;
@@ -585,7 +589,10 @@ namespace OmenCore.Hardware
 
                                     _nvapiConsecutiveFailures = 0;
                                 }
-                                catch { } // Non-critical
+                                catch (Exception ex)
+                                {
+                                    _logging?.Debug($"[WmiBiosMonitor] GPU cache update from Afterburner failed: {ex.Message}");
+                                }
                             }
                         }
                     }
@@ -1034,7 +1041,7 @@ namespace OmenCore.Hardware
                     }
                 }
             }
-            catch
+            catch (Exception)
             {
             }
 

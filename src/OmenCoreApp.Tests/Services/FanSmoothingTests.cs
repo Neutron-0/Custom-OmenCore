@@ -92,6 +92,133 @@ namespace OmenCoreApp.Tests.Services
             logging.Dispose();
         }
 
+        [Fact]
+        public async Task ExtremePreset_FollowsCurveInsteadOfForcingMaxAtModerateThermals()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var controller = new RecordingFanController();
+            var hwMonitor = new OmenCore.Hardware.LibreHardwareMonitorImpl();
+            var thermalProvider = new OmenCore.Hardware.ThermalSensorProvider(hwMonitor);
+            var notificationService = new NotificationService(logging);
+
+            var fanService = new FanService(controller, thermalProvider, logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService());
+
+            var extremePreset = new FanPreset
+            {
+                Name = "Extreme",
+                Mode = FanMode.Performance,
+                Curve = new List<FanCurvePoint>
+                {
+                    new FanCurvePoint { TemperatureC = 70, FanPercent = 82 },
+                    new FanCurvePoint { TemperatureC = 80, FanPercent = 94 },
+                    new FanCurvePoint { TemperatureC = 88, FanPercent = 100 }
+                }
+            };
+
+            fanService.ApplyPreset(extremePreset).Should().BeTrue();
+            await fanService.ForceApplyCurveNowAsync(cpuTemp: 76, gpuTemp: 0, immediate: true);
+
+            controller.SetCalls.Should().NotBeEmpty();
+            controller.SetCalls[^1].Should().BeLessThan(100,
+                "Extreme should follow its curve at moderate 70-80C temperatures; Max is the explicit 100% mode");
+
+            logging.Dispose();
+        }
+
+        [Fact]
+        public async Task CurveEngine_SendsWakeKick_WhenPositiveCurveCommandLeavesFanAtZeroRpm()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var controller = new RecordingFanController();
+            var hwMonitor = new OmenCore.Hardware.LibreHardwareMonitorImpl();
+            var thermalProvider = new OmenCore.Hardware.ThermalSensorProvider(hwMonitor);
+            var notificationService = new NotificationService(logging);
+
+            var fanService = new FanService(controller, thermalProvider, logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService());
+            fanService.SetHysteresis(new FanHysteresisSettings { Enabled = false });
+
+            var curve = new List<FanCurvePoint>
+            {
+                new FanCurvePoint { TemperatureC = 40, FanPercent = 14 },
+                new FanCurvePoint { TemperatureC = 60, FanPercent = 20 },
+                new FanCurvePoint { TemperatureC = 70, FanPercent = 34 }
+            };
+
+            fanService.ApplyCustomCurve(curve, immediate: false);
+            await fanService.ForceApplyCurveNowAsync(cpuTemp: 63, gpuTemp: 0, immediate: true);
+
+            SetPrivateField(fanService, "_lastRawPrimaryFanRpm", 0);
+            SetPrivateField(fanService, "_lastReportedPrimaryFanDutyPercent", 0);
+            SetPrivateField(fanService, "_zeroRpmCurveCommandSince", DateTime.Now.AddSeconds(-15));
+            SetPrivateField(fanService, "_lastCurveUpdate", DateTime.Now.AddSeconds(-10));
+            SetPrivateField(fanService, "_lastCurveForceRefresh", DateTime.Now.AddSeconds(-40));
+
+            controller.SetCalls.Clear();
+
+            await fanService.ForceApplyCurveNowAsync(cpuTemp: 63, gpuTemp: 0, immediate: false);
+
+            controller.SetCalls.Should().ContainSingle();
+            controller.SetCalls[0].Should().Be(35,
+                "the curve engine should issue one bounded wake pulse when positive curve writes leave RPM at zero");
+
+            logging.Dispose();
+        }
+
+        [Fact]
+        public async Task CurveEngine_DoesNotWakeKick_WhenZeroRpmOccursAtCoolIdle()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var controller = new RecordingFanController();
+            var hwMonitor = new OmenCore.Hardware.LibreHardwareMonitorImpl();
+            var thermalProvider = new OmenCore.Hardware.ThermalSensorProvider(hwMonitor);
+            var notificationService = new NotificationService(logging);
+
+            var fanService = new FanService(controller, thermalProvider, logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService());
+            fanService.SetHysteresis(new FanHysteresisSettings { Enabled = false });
+
+            var curve = new List<FanCurvePoint>
+            {
+                new FanCurvePoint { TemperatureC = 30, FanPercent = 10 },
+                new FanCurvePoint { TemperatureC = 50, FanPercent = 20 },
+                new FanCurvePoint { TemperatureC = 70, FanPercent = 40 }
+            };
+
+            fanService.ApplyCustomCurve(curve, immediate: false);
+            await fanService.ForceApplyCurveNowAsync(cpuTemp: 50, gpuTemp: 0, immediate: true);
+
+            SetPrivateField(fanService, "_lastRawPrimaryFanRpm", 0);
+            SetPrivateField(fanService, "_lastReportedPrimaryFanDutyPercent", 0);
+            SetPrivateField(fanService, "_zeroRpmCurveCommandSince", DateTime.Now.AddSeconds(-15));
+            SetPrivateField(fanService, "_lastCurveUpdate", DateTime.Now.AddSeconds(-10));
+            SetPrivateField(fanService, "_lastCurveForceRefresh", DateTime.Now.AddSeconds(-40));
+
+            controller.SetCalls.Clear();
+
+            await fanService.ForceApplyCurveNowAsync(cpuTemp: 50, gpuTemp: 0, immediate: false);
+
+            controller.SetCalls.Should().ContainSingle();
+            controller.SetCalls[0].Should().BeLessThan(35,
+                "cool idle zero-RPM readings should follow the curve target instead of triggering the warm wake pulse");
+
+            logging.Dispose();
+        }
+
+        private static void SetPrivateField<T>(object target, string fieldName, T value)
+        {
+            var field = target.GetType().GetField(
+                fieldName,
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+
+            field.Should().NotBeNull($"test setup requires private field {fieldName}");
+            field!.SetValue(target, value);
+        }
+
         private class SequenceFanController : OmenCore.Hardware.IFanController
         {
             private readonly IList<IEnumerable<FanTelemetry>> _sequence;

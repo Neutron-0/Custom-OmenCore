@@ -4,6 +4,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Threading.Tasks;
 using FluentAssertions;
+using OmenCore.Models;
 using OmenCore.Services;
 using OmenCore.Services.Diagnostics;
 using Xunit;
@@ -81,6 +82,50 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public async Task RgbControlPathFile_IsIncludedInExport()
+        {
+            var svc = new DiagnosticExportService(_logging, _tempDir);
+            var zipPath = await svc.CollectAndExportAsync();
+
+            zipPath.Should().NotBeNullOrEmpty();
+
+            if (File.Exists(zipPath))
+            {
+                using var archive = ZipFile.OpenRead(zipPath);
+                var entry = archive.Entries
+                    .FirstOrDefault(e => e.Name.Equals("rgb-control-path.txt", StringComparison.OrdinalIgnoreCase));
+                entry.Should().NotBeNull("rgb-control-path.txt must be present in the diagnostic bundle");
+            }
+            else
+            {
+                var txtPath = Path.Combine(zipPath, "rgb-control-path.txt");
+                File.Exists(txtPath).Should().BeTrue("rgb-control-path.txt must be written to the export folder");
+            }
+        }
+
+        [Fact]
+        public async Task TuningSafetyFile_IsIncludedInExport()
+        {
+            var svc = new DiagnosticExportService(_logging, _tempDir);
+            var zipPath = await svc.CollectAndExportAsync();
+
+            zipPath.Should().NotBeNullOrEmpty();
+
+            if (File.Exists(zipPath))
+            {
+                using var archive = ZipFile.OpenRead(zipPath);
+                var entry = archive.Entries
+                    .FirstOrDefault(e => e.Name.Equals("tuning-safety.txt", StringComparison.OrdinalIgnoreCase));
+                entry.Should().NotBeNull("tuning-safety.txt must be present in the diagnostic bundle");
+            }
+            else
+            {
+                var txtPath = Path.Combine(zipPath, "tuning-safety.txt");
+                File.Exists(txtPath).Should().BeTrue("tuning-safety.txt must be written to the export folder");
+            }
+        }
+
+        [Fact]
         public async Task ResourceFootprintFile_ContainsLightweightBaselineSections()
         {
             const string timerName = "Test_ResourceFootprint_Timer";
@@ -134,6 +179,83 @@ namespace OmenCoreApp.Tests.Services
         }
 
         // ── helpers ──────────────────────────────────────────────────────────
+
+        [Fact]
+        public async Task RgbControlPathFile_ContainsExpectedSections_WhenServicesUnavailable()
+        {
+            var svc = new DiagnosticExportService(_logging, _tempDir);
+            var zipPath = await svc.CollectAndExportAsync();
+
+            string content = ReadFileFromExport(zipPath, "rgb-control-path.txt");
+
+            content.Should().Contain("RGB CONTROL PATH SNAPSHOT");
+            content.Should().Contain("[HP Keyboard]");
+            content.Should().Contain("Keyboard lighting service unavailable.");
+            content.Should().Contain("[External RGB Providers]");
+            content.Should().Contain("RGB manager unavailable or not initialized yet.");
+            content.Should().Contain("[Known HP/OMEN RGB Conflict Processes]");
+        }
+
+        [Fact]
+        public async Task TuningSafetyFile_ContainsSavedSafetyStateWithoutHardwareProviders()
+        {
+            var config = DefaultConfiguration.Create();
+            config.EnableStartupHardwareRestore = true;
+            config.AllowStartupRestoreOnOmen16OrVictus = false;
+            config.LastPerformanceModeName = "Performance";
+            config.LastGpuPowerBoostLevel = "Maximum";
+            config.LastCpuPl1Watts = 55;
+            config.LastCpuPl2Watts = 80;
+            config.LastTccOffset = 10;
+            config.Undervolt = new UndervoltPreferences
+            {
+                ApplyOnStartup = true,
+                PendingTestApply = true,
+                StartupPendingConfirmation = true,
+                RespectExternalControllers = true,
+                DefaultOffset = new UndervoltOffset { CoreMv = -42, CacheMv = -30 },
+                EnablePerCoreUndervolt = true,
+                PerCoreOffsetsMv = new int?[] { -15, null, -20 },
+                LastConfirmedOffset = new UndervoltOffset { CoreMv = -35, CacheMv = -25 },
+                LastConfirmedAtUtc = new DateTime(2026, 5, 8, 1, 2, 3, DateTimeKind.Utc)
+            };
+            config.GpuOc = new GpuOcSettings
+            {
+                ApplyOnStartup = true,
+                PendingTestApply = true,
+                StartupPendingConfirmation = true,
+                CoreClockOffsetMHz = 100,
+                MemoryClockOffsetMHz = 250,
+                PowerLimitPercent = 110,
+                VoltageOffsetMv = 5,
+                LastConfirmedCoreClockOffsetMHz = 80,
+                LastConfirmedMemoryClockOffsetMHz = 200,
+                LastConfirmedPowerLimitPercent = 105,
+                LastConfirmedVoltageOffsetMv = 0,
+                LastConfirmedAtUtc = new DateTime(2026, 5, 8, 4, 5, 6, DateTimeKind.Utc)
+            };
+            config.LastGpuOcProfileName = "Gaming";
+            config.AmdPowerLimits = new AmdPowerLimits { StapmLimitWatts = 20, TempLimitC = 95 };
+            new ConfigurationService().Save(config);
+
+            var svc = new DiagnosticExportService(_logging, _tempDir);
+            var zipPath = await svc.CollectAndExportAsync();
+
+            string content = ReadFileFromExport(zipPath, "tuning-safety.txt");
+
+            content.Should().Contain("TUNING SAFETY SNAPSHOT");
+            content.Should().Contain("Purpose: Export saved tuning safety state without waking System Control");
+            content.Should().Contain("EnableStartupHardwareRestore: yes");
+            content.Should().Contain("LastGpuPowerBoostLevel: Maximum");
+            content.Should().Contain("LastCpuPl1Watts: 55 W");
+            content.Should().Contain("RecoveryRequiredOnNextStartup: yes");
+            content.Should().Contain("SavedDefaultOffset: Core -42 mV, Cache -30 mV");
+            content.Should().Contain("SavedPerCoreOffsets: 2/3 active");
+            content.Should().Contain("SavedCoreClockOffsetMHz: +100");
+            content.Should().Contain("SavedPowerLimitPercent: 110%");
+            content.Should().Contain("SelectedGpuOcProfile: Gaming");
+            content.Should().Contain("StapmLimitWatts: 20 W");
+        }
 
         private static string ReadFileFromExport(string exportPath, string fileName)
         {

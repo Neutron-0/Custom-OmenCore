@@ -68,6 +68,8 @@ namespace OmenCore.ViewModels
                     OnPropertyChanged();
                     OnPropertyChanged(nameof(CurrentPerformanceModeName));  // Notify sidebar to update
                     OnPropertyChanged(nameof(CurrentPerformanceModeIndicator));
+                    OnPropertyChanged(nameof(PerformanceModeVisualState));
+                    OnPropertyChanged(nameof(PerformanceModeVisualLabel));
                     OnPropertyChanged(nameof(IsQuietMode));
                     OnPropertyChanged(nameof(IsBalancedMode));
                     OnPropertyChanged(nameof(IsPerformanceMode));
@@ -614,6 +616,12 @@ namespace OmenCore.ViewModels
             }
         }
 
+        public string PerformanceModeVisualState => PerformanceModeEcControlAvailable ? "confirmed" : "degraded";
+
+        public string PerformanceModeVisualLabel => PerformanceModeVisualState == "confirmed"
+            ? "Confirmed"
+            : "Degraded";
+
         private string _currentGpuMode = "Detecting...";
         public string CurrentGpuMode
         {
@@ -696,6 +704,8 @@ namespace OmenCore.ViewModels
                     OnPropertyChanged(nameof(IsGpuFullPowerActive));
                     OnPropertyChanged(nameof(ShowGpuFullPowerPill));
                     OnPropertyChanged(nameof(CurrentPerformanceModeIndicator));
+                    OnPropertyChanged(nameof(GpuPowerBoostVisualState));
+                    OnPropertyChanged(nameof(GpuPowerBoostVisualLabel));
                 }
             }
         }
@@ -710,9 +720,38 @@ namespace OmenCore.ViewModels
                 {
                     _gpuPowerBoostStatus = value;
                     OnPropertyChanged();
+                    OnPropertyChanged(nameof(GpuPowerBoostVisualState));
+                    OnPropertyChanged(nameof(GpuPowerBoostVisualLabel));
                 }
             }
         }
+
+        public string GpuPowerBoostVisualState
+        {
+            get
+            {
+                if (!GpuPowerBoostAvailable ||
+                    GpuPowerBoostStatus.StartsWith("Failed", StringComparison.OrdinalIgnoreCase) ||
+                    GpuPowerBoostStatus.StartsWith("Not supported", StringComparison.OrdinalIgnoreCase) ||
+                    GpuPowerBoostStatus.StartsWith("Not available", StringComparison.OrdinalIgnoreCase))
+                {
+                    return "blocked";
+                }
+
+                return GpuPowerBoostStatus.Contains("detected", StringComparison.OrdinalIgnoreCase) ||
+                       GpuPowerBoostStatus.Contains("restored", StringComparison.OrdinalIgnoreCase) ||
+                       GpuPowerBoostStatus.Contains("applied", StringComparison.OrdinalIgnoreCase)
+                    ? "confirmed"
+                    : "degraded";
+            }
+        }
+
+        public string GpuPowerBoostVisualLabel => GpuPowerBoostVisualState switch
+        {
+            "blocked" => "Blocked",
+            "degraded" => "Degraded",
+            _ => "Confirmed"
+        };
         
         public string GpuPowerBoostDescription => GpuPowerBoostLevel switch
         {

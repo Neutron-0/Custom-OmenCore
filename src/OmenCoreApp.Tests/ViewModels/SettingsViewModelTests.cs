@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using FluentAssertions;
 using OmenCore.Hardware;
@@ -206,6 +207,59 @@ namespace OmenCoreApp.Tests.ViewModels
             vm.MonitoringCadenceTier.Should().Be("Active (1s)");
             vm.MonitoringCadenceBlockers.Should().Contain("Low overhead mode disabled");
             vm.MonitoringCadenceBlockers.Should().Contain("Main window active");
+        }
+
+        [Fact]
+        public void ScheduleTimer_StaysStoppedUntilRulesExist()
+        {
+            const string timerName = "SettingsScheduleEnforcement";
+            BackgroundTimerRegistry.Unregister(timerName);
+
+            var logging = new OmenCore.Services.LoggingService();
+            var cfgService = new ConfigurationService();
+            cfgService.Config.ScheduleRules.Clear();
+            cfgService.Save(cfgService.Config);
+
+            var sysInfo = new OmenCore.Services.SystemInfoService(logging);
+            var fanCleaning = new OmenCore.Services.FanCleaningService(logging, null, sysInfo);
+            var bios = new OmenCore.Services.BiosUpdateService(logging);
+            var profileExport = new OmenCore.Services.ProfileExportService(logging, cfgService);
+            var diagnosticsExport = new DiagnosticExportService(logging, System.IO.Path.GetTempPath());
+
+            using var vm = new SettingsViewModel(logging, cfgService, sysInfo, fanCleaning, bios, profileExport, diagnosticsExport);
+
+            BackgroundTimerRegistry.GetAll().Should().NotContain(t => t.Name == timerName,
+                because: "opening Settings with no schedule rules should not create a 30s background wakeup");
+        }
+
+        [Fact]
+        public void ScheduleTimer_StartsAndStopsWithScheduleRules()
+        {
+            const string timerName = "SettingsScheduleEnforcement";
+            BackgroundTimerRegistry.Unregister(timerName);
+
+            var logging = new OmenCore.Services.LoggingService();
+            var cfgService = new ConfigurationService();
+            cfgService.Config.ScheduleRules.Clear();
+            cfgService.Save(cfgService.Config);
+
+            var sysInfo = new OmenCore.Services.SystemInfoService(logging);
+            var fanCleaning = new OmenCore.Services.FanCleaningService(logging, null, sysInfo);
+            var bios = new OmenCore.Services.BiosUpdateService(logging);
+            var profileExport = new OmenCore.Services.ProfileExportService(logging, cfgService);
+            var diagnosticsExport = new DiagnosticExportService(logging, System.IO.Path.GetTempPath());
+
+            using var vm = new SettingsViewModel(logging, cfgService, sysInfo, fanCleaning, bios, profileExport, diagnosticsExport);
+
+            vm.AddScheduleRuleCommand.Execute(null);
+
+            BackgroundTimerRegistry.GetAll().Should().Contain(t => t.Name == timerName,
+                because: "schedule enforcement is only needed after at least one schedule rule exists");
+
+            vm.RemoveScheduleRuleCommand.Execute(vm.ScheduleRules.Single());
+
+            BackgroundTimerRegistry.GetAll().Should().NotContain(t => t.Name == timerName,
+                because: "removing the last schedule rule should remove the timer");
         }
     }
 }

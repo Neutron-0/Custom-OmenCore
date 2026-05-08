@@ -2,7 +2,9 @@ using System.IO;
 using System.Reflection;
 using System.Threading.Tasks;
 using FluentAssertions;
+using OmenCore.Models;
 using OmenCore.Services;
+using OmenCore.Services.Diagnostics;
 using OmenCore.ViewModels;
 using Xunit;
 
@@ -117,12 +119,87 @@ namespace OmenCoreApp.Tests.ViewModels
         {
             using var vm = new MainViewModel();
 
-            vm.SelectedTabIndex = 3;
+            vm.SelectedTabIndex = 2;
 
             var field = typeof(MainViewModel).GetField("_conflictMonitoringStarted", BindingFlags.Instance | BindingFlags.NonPublic);
             field.Should().NotBeNull();
             field!.GetValue(vm).Should().Be(1,
                 because: "tuning-related conflict scans should start when the user opens a relevant tab, not at app startup");
+        }
+
+        [Fact]
+        public void SelectingOmenTab_StartsConflictMonitoringScan()
+        {
+            using var vm = new MainViewModel();
+
+            vm.SelectedTabIndex = 1;
+
+            var field = typeof(MainViewModel).GetField("_conflictMonitoringStarted", BindingFlags.Instance | BindingFlags.NonPublic);
+            field.Should().NotBeNull();
+            field!.GetValue(vm).Should().Be(1,
+                because: "OMEN controls can conflict with external tuning tools and should start detection on first use");
+        }
+
+        [Fact]
+        public void SelectingDiagnosticsTab_DoesNotStartConflictMonitoringScan()
+        {
+            using var vm = new MainViewModel();
+
+            vm.SelectedTabIndex = 3;
+
+            var field = typeof(MainViewModel).GetField("_conflictMonitoringStarted", BindingFlags.Instance | BindingFlags.NonPublic);
+            field.Should().NotBeNull();
+            field!.GetValue(vm).Should().Be(0,
+                because: "the Diagnostics tab should not wake the tuning-conflict monitor unless a tuning surface is opened");
+        }
+
+        [Fact]
+        public void MemoryOptimizerRefreshTimer_PausesWhenLeavingMemoryTab()
+        {
+            const string timerName = "MemoryOptimizerRefresh";
+            BackgroundTimerRegistry.Unregister(timerName);
+
+            using var vm = new MainViewModel();
+
+            try
+            {
+                vm.SelectedTabIndex = 6;
+                _ = vm.MemoryOptimizer;
+
+                BackgroundTimerRegistry.GetAll().Should().Contain(t => t.Name == timerName,
+                    because: "the Memory tab needs live process and RAM telemetry while visible");
+
+                vm.SelectedTabIndex = 0;
+
+                BackgroundTimerRegistry.GetAll().Should().NotContain(t => t.Name == timerName,
+                    because: "hidden Memory tab refreshes are avoidable CPU wakeups");
+            }
+            finally
+            {
+                BackgroundTimerRegistry.Unregister(timerName);
+            }
+        }
+
+        [Fact]
+        public void GameProfileResolvers_DoNotForceFanOrSystemControlLazyLoad()
+        {
+            using var vm = new MainViewModel();
+
+            var fanResolver = typeof(MainViewModel).GetMethod("ResolveGameProfileFanPreset", BindingFlags.Instance | BindingFlags.NonPublic);
+            var performanceResolver = typeof(MainViewModel).GetMethod("ResolveGameProfilePerformanceMode", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            fanResolver.Should().NotBeNull();
+            performanceResolver.Should().NotBeNull();
+
+            var fanPreset = fanResolver!.Invoke(vm, new object[] { "Gaming" }).Should().BeOfType<FanPreset>().Subject;
+            fanPreset.Mode.Should().Be(FanMode.Performance);
+            fanPreset.Curve.Should().NotBeEmpty();
+            vm.IsFanControlLoaded.Should().BeFalse(
+                because: "game profiles must apply fan presets through FanService without constructing the advanced fan page");
+
+            _ = performanceResolver!.Invoke(vm, new object[] { "Balanced" });
+            vm.IsSystemControlLoaded.Should().BeFalse(
+                because: "game profiles must resolve performance modes without constructing the OMEN/Tuning view-model");
         }
     }
 }

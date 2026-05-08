@@ -57,8 +57,7 @@ namespace OmenCore.ViewModels
                 {
                     _currentTemperature = value;
                     OnPropertyChanged();
-                    OnPropertyChanged(nameof(PredictedFanPercent));
-                    OnPropertyChanged(nameof(CurvePreviewText));
+                    NotifyCurvePreviewChanged();
                 }
             }
         }
@@ -113,15 +112,22 @@ namespace OmenCore.ViewModels
         {
             get
             {
-                var raw = PredictedFanPercent;
-                var temp = CurrentTemperature;
-                
-                // Mirror FanService.ApplySafetyBoundsClamping thresholds
-                if (temp >= 95) return 100;
-                if (temp >= 90) return Math.Max(raw, 80);
-                if (temp >= 85) return Math.Max(raw, 60);
-                if (temp >= 80) return Math.Max(raw, 40);
-                return raw;
+                return ApplySafetyFloor(PredictedFanPercent, CurrentTemperature);
+            }
+        }
+
+        public bool IsSafetyFloorActive => EffectiveFanPercent > PredictedFanPercent;
+
+        public string SafetyFloorNoticeText
+        {
+            get
+            {
+                if (!IsSafetyFloorActive)
+                {
+                    return string.Empty;
+                }
+
+                return $"Thermal guard active: curve requests {PredictedFanPercent}% at {CurrentTemperature:F0}C; OmenCore will command {EffectiveFanPercent}% until temperatures fall.";
             }
         }
         
@@ -132,8 +138,8 @@ namespace OmenCore.ViewModels
                 var raw = PredictedFanPercent;
                 var effective = EffectiveFanPercent;
                 if (effective != raw)
-                    return $"At {CurrentTemperature:F0}°C → {raw}% (safety: {effective}%)";
-                return $"At {CurrentTemperature:F0}°C → {raw}%";
+                    return $"At {CurrentTemperature:F0}C -> requested {raw}%, effective {effective}%";
+                return $"At {CurrentTemperature:F0}C -> {raw}%";
             }
         }
         
@@ -165,6 +171,11 @@ namespace OmenCore.ViewModels
                 {
                     return $"ℹ️ Consider adding a point at 85-95°C";
                 }
+
+                if (IsSafetyFloorActive)
+                {
+                    return SafetyFloorNoticeText;
+                }
                 
                 // Check if fan never reaches 100%
                 if (sorted.All(p => p.FanPercent < 90))
@@ -188,8 +199,18 @@ namespace OmenCore.ViewModels
         {
             OnPropertyChanged(nameof(PredictedFanPercent));
             OnPropertyChanged(nameof(EffectiveFanPercent));
+            OnPropertyChanged(nameof(IsSafetyFloorActive));
+            OnPropertyChanged(nameof(SafetyFloorNoticeText));
             OnPropertyChanged(nameof(CurvePreviewText));
             OnPropertyChanged(nameof(CurveValidationMessage));
+        }
+
+        private void NotifyFanOwnershipChanged()
+        {
+            OnPropertyChanged(nameof(FanOwnershipSummary));
+            OnPropertyChanged(nameof(FanOwnershipDetail));
+            OnPropertyChanged(nameof(FanOwnershipVisualState));
+            OnPropertyChanged(nameof(FanOwnershipVisualLabel));
         }
         
         #endregion
@@ -256,6 +277,7 @@ namespace OmenCore.ViewModels
                     OnPropertyChanged(nameof(IsSilentSelected));
                     OnPropertyChanged(nameof(IsCustomSelected));
                     OnPropertyChanged(nameof(IsConstantSelected));
+                    NotifyFanOwnershipChanged();
                 }
             }
         }
@@ -315,6 +337,7 @@ namespace OmenCore.ViewModels
                     _constantFanPercent = clamped;
                     OnPropertyChanged();
                     OnPropertyChanged(nameof(ConstantFanRpmEstimate));
+                    NotifyFanOwnershipChanged();
                     
                     // If in constant mode, apply immediately
                     if (IsConstantSelected)
@@ -344,6 +367,7 @@ namespace OmenCore.ViewModels
                 {
                     _isApplyingCustomCurve = value;
                     OnPropertyChanged();
+                    NotifyFanOwnershipChanged();
                 }
             }
         }
@@ -357,9 +381,64 @@ namespace OmenCore.ViewModels
                 {
                     _curveApplyStatus = value;
                     OnPropertyChanged();
+                    NotifyFanOwnershipChanged();
                 }
             }
         }
+
+        public string FanOwnershipSummary
+        {
+            get
+            {
+                if (IsApplyingCustomCurve)
+                    return "Applying custom curve";
+
+                if (IsCurveActive)
+                    return ActiveFanMode == "Custom"
+                        ? "Custom curve is actively managing fans"
+                        : $"{ActiveFanMode} curve is actively managing fans";
+
+                return ActiveFanMode switch
+                {
+                    "Auto" => "Auto mode: firmware owns fan control",
+                    "Max" => "Max mode: OmenCore requests full cooling",
+                    "Constant" => $"Constant mode: OmenCore requests {ConstantFanPercent}%",
+                    "Custom" => "Custom curve loaded, not actively applied",
+                    _ => $"{ActiveFanMode} preset selected"
+                };
+            }
+        }
+
+        public string FanOwnershipDetail
+        {
+            get
+            {
+                var backend = string.IsNullOrWhiteSpace(RpmSourceDisplay) ? "unknown backend" : RpmSourceDisplay;
+                var status = string.IsNullOrWhiteSpace(CurveApplyStatus) ? "Ready" : CurveApplyStatus;
+                return $"Backend: {backend}. {status}";
+            }
+        }
+
+        public string FanOwnershipVisualState
+        {
+            get
+            {
+                if (ShowRpmSanityWarning)
+                    return "blocked";
+
+                if (IsApplyingCustomCurve || (ActiveFanMode == "Custom" && !IsCurveActive))
+                    return "degraded";
+
+                return "confirmed";
+            }
+        }
+
+        public string FanOwnershipVisualLabel => FanOwnershipVisualState switch
+        {
+            "blocked" => "Blocked",
+            "degraded" => "Degraded",
+            _ => "Confirmed"
+        };
 
         public string CustomPresetName
         {
@@ -631,7 +710,13 @@ namespace OmenCore.ViewModels
         public bool ShowRpmSanityWarning
         {
             get => _showRpmSanityWarning;
-            set => SetProperty(ref _showRpmSanityWarning, value, nameof(ShowRpmSanityWarning));
+            set
+            {
+                if (SetProperty(ref _showRpmSanityWarning, value, nameof(ShowRpmSanityWarning)))
+                {
+                    NotifyFanOwnershipChanged();
+                }
+            }
         }
 
         /// <summary>
@@ -1284,11 +1369,14 @@ namespace OmenCore.ViewModels
             if (controlTemp <= 0)
                 controlTemp = CurrentTemperature;
 
-            var targetPercent = EvaluateCurvePercent(curvePoints, controlTemp);
-            targetPercent = ApplySafetyFloor(targetPercent, controlTemp);
+            var requestedPercent = EvaluateCurvePercent(curvePoints, controlTemp);
+            var targetPercent = ApplySafetyFloor(requestedPercent, controlTemp);
+            var verificationTargetText = requestedPercent == targetPercent
+                ? $"{targetPercent}%"
+                : $"{targetPercent}% (curve requested {requestedPercent}%; thermal guard raised it)";
 
-            CurveApplyStatus = $"Verifying {sourceLabel.ToLowerInvariant()} at {controlTemp:F0}°C -> {targetPercent}%...";
-            _logging.Info($"[FanCurve] Running post-apply verification kick for {sourceLabel} at {controlTemp:F1}°C -> {targetPercent}%");
+            CurveApplyStatus = $"Verifying {sourceLabel.ToLowerInvariant()} at {controlTemp:F0}C -> {verificationTargetText}...";
+            _logging.Info($"[FanCurve] Running post-apply verification kick for {sourceLabel} at {controlTemp:F1}C -> {verificationTargetText}");
 
             var fanCount = Math.Min(2, FanTelemetry.Count);
             var results = new System.Collections.Generic.List<FanApplyResult>();
@@ -1311,8 +1399,8 @@ namespace OmenCore.ViewModels
             if (passedCount == results.Count)
             {
                 CurveApplyStatus = results.Count == 1
-                    ? $"{sourceLabel} verified at {targetPercent}% ({results[0].ActualRpmAfter} RPM)"
-                    : $"{sourceLabel} verified on both fans at {targetPercent}%";
+                    ? $"{sourceLabel} verified at {verificationTargetText} ({results[0].ActualRpmAfter} RPM)"
+                    : $"{sourceLabel} verified on both fans at {verificationTargetText}";
             }
             else if (passedCount > 0)
             {
@@ -1586,17 +1674,16 @@ namespace OmenCore.ViewModels
 
         private static List<FanCurvePoint> GetDefaultAutoCurve()
         {
-            // v2.6.1: More aggressive curve for high-power laptops (i9/i7 + RTX 40xx)
-            // Reaches 100% by 85°C to prevent thermal throttling
+            // v3.6.0: Balanced Auto curve; Max remains the explicit full-cooling mode.
             return new List<FanCurvePoint>
             {
-                new() { TemperatureC = 40, FanPercent = 35 },
-                new() { TemperatureC = 50, FanPercent = 45 },
-                new() { TemperatureC = 60, FanPercent = 60 },
-                new() { TemperatureC = 70, FanPercent = 75 },
-                new() { TemperatureC = 75, FanPercent = 85 },
-                new() { TemperatureC = 80, FanPercent = 95 },
-                new() { TemperatureC = 85, FanPercent = 100 }
+                new() { TemperatureC = 40, FanPercent = 30 },
+                new() { TemperatureC = 50, FanPercent = 38 },
+                new() { TemperatureC = 60, FanPercent = 50 },
+                new() { TemperatureC = 70, FanPercent = 62 },
+                new() { TemperatureC = 80, FanPercent = 78 },
+                new() { TemperatureC = 88, FanPercent = 92 },
+                new() { TemperatureC = 95, FanPercent = 100 }
             };
         }
 
@@ -1625,30 +1712,29 @@ namespace OmenCore.ViewModels
         
         private static List<FanCurvePoint> GetGamingCurve()
         {
-            // Gaming mode: aggressive ramp, maxes out at 75°C
-            // Similar to OGH Performance mode but with 75°C ceiling
-            // Recommended for gaming sessions where cooling is priority over noise
+            // Gaming mode: stronger than Auto, but avoids near-Max fan at moderate temps.
             return new List<FanCurvePoint>
             {
-                new() { TemperatureC = 40, FanPercent = 35 },
-                new() { TemperatureC = 50, FanPercent = 50 },
-                new() { TemperatureC = 60, FanPercent = 70 },
-                new() { TemperatureC = 70, FanPercent = 90 },
-                new() { TemperatureC = 75, FanPercent = 100 }
+                new() { TemperatureC = 40, FanPercent = 30 },
+                new() { TemperatureC = 50, FanPercent = 42 },
+                new() { TemperatureC = 60, FanPercent = 58 },
+                new() { TemperatureC = 70, FanPercent = 72 },
+                new() { TemperatureC = 80, FanPercent = 88 },
+                new() { TemperatureC = 90, FanPercent = 100 }
             };
         }
         
         private static List<FanCurvePoint> GetExtremeCurve()
         {
-            // Extreme mode: maximum cooling, maxes out at 70°C (like OGH Performance)
-            // Starts aggressive early, fans at 100% by 70°C to keep temps pinned low
-            // Recommended for: sustained gaming, benchmarks, thermal throttling prevention
+            // Extreme mode: highest non-Max curve; 100% is reserved for genuinely hot operation.
             return new List<FanCurvePoint>
             {
-                new() { TemperatureC = 40, FanPercent = 45 },
-                new() { TemperatureC = 50, FanPercent = 60 },
-                new() { TemperatureC = 60, FanPercent = 80 },
-                new() { TemperatureC = 70, FanPercent = 100 }
+                new() { TemperatureC = 40, FanPercent = 38 },
+                new() { TemperatureC = 50, FanPercent = 50 },
+                new() { TemperatureC = 60, FanPercent = 66 },
+                new() { TemperatureC = 70, FanPercent = 82 },
+                new() { TemperatureC = 80, FanPercent = 94 },
+                new() { TemperatureC = 88, FanPercent = 100 }
             };
         }
         

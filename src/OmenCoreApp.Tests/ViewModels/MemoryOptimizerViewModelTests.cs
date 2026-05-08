@@ -1,3 +1,6 @@
+using System;
+using System.IO;
+using System.Linq;
 using System.Windows;
 using FluentAssertions;
 using OmenCore.Services;
@@ -31,6 +34,71 @@ namespace OmenCoreApp.Tests.ViewModels
             {
                 // clipboard may not be available on CI, just ensure command executed above
                 Assert.True(true);
+            }
+        }
+
+        [Fact]
+        public void AddTopProcessToExclusionsCommand_AddsNormalizedProcessName()
+        {
+            using var logger = new LoggingService();
+            using var vm = new MemoryOptimizerViewModel(logger);
+            var process = new ProcessMemoryInfo
+            {
+                ProcessId = 123,
+                ProcessName = "ExampleGame.exe",
+                WorkingSetMB = 2048
+            };
+
+            vm.AddTopProcessToExclusionsCommand.CanExecute(process).Should().BeTrue();
+
+            vm.AddTopProcessToExclusionsCommand.Execute(process);
+
+            vm.ExcludedProcesses.Should().Contain("ExampleGame");
+            vm.ExcludedProcesses.Count(name => name == "ExampleGame").Should().Be(1);
+            vm.AddTopProcessToExclusionsCommand.CanExecute(process).Should().BeFalse();
+
+            vm.AddTopProcessToExclusionsCommand.Execute(process);
+
+            vm.ExcludedProcesses.Count(name => name == "ExampleGame").Should().Be(1);
+        }
+
+        [Fact]
+        public void GameAwareQuietWindow_RestoresAndPersistsSetting()
+        {
+            var tempDir = Path.Combine(Path.GetTempPath(), "OmenCoreTests", Guid.NewGuid().ToString("N"));
+            var previousConfigDir = Environment.GetEnvironmentVariable("OMENCORE_CONFIG_DIR");
+
+            try
+            {
+                Environment.SetEnvironmentVariable("OMENCORE_CONFIG_DIR", tempDir);
+                var configService = new ConfigurationService();
+                configService.Config.MemoryGameAwareQuietWindowEnabled = false;
+                configService.Config.MemoryAutoCleanCooldownMinutes = 12;
+                configService.Save(configService.Config);
+
+                using var logger = new LoggingService();
+                using var vm = new MemoryOptimizerViewModel(logger, configService);
+
+                vm.GameAwareQuietWindowEnabled.Should().BeFalse();
+                vm.GameAwareQuietWindowSummary.Should().Contain("full safe cleanup");
+                vm.AutoCleanCooldownMinutes.Should().Be(12);
+                vm.AutoCleanCooldownText.Should().Be("12 min");
+
+                vm.GameAwareQuietWindowEnabled = true;
+                vm.AutoCleanCooldownMinutes = 0;
+
+                configService.Config.MemoryGameAwareQuietWindowEnabled.Should().BeTrue();
+                configService.Config.MemoryAutoCleanCooldownMinutes.Should().Be(0);
+                vm.GameAwareQuietWindowSummary.Should().Contain("working-set trims");
+                vm.AutoCleanCooldownText.Should().Contain("Profile default");
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("OMENCORE_CONFIG_DIR", previousConfigDir);
+                if (Directory.Exists(tempDir))
+                {
+                    Directory.Delete(tempDir, recursive: true);
+                }
             }
         }
     }

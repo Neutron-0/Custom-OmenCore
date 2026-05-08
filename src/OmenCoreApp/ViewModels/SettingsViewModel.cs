@@ -22,7 +22,7 @@ using OmenCore.Utils;
 
 namespace OmenCore.ViewModels
 {
-    public class SettingsViewModel : ViewModelBase
+    public class SettingsViewModel : ViewModelBase, IDisposable
     {
         private readonly LoggingService _logging;
         private readonly ConfigurationService _configService;
@@ -123,6 +123,7 @@ namespace OmenCore.ViewModels
         // Profile scheduler
         private DispatcherTimer? _scheduleTimer;
         private string? _lastScheduleMinute; // track last checked HH:mm to fire rules once per minute
+        private const string ScheduleTimerRegistryName = "SettingsScheduleEnforcement";
 
         public SettingsViewModel(LoggingService logging, ConfigurationService configService, 
             SystemInfoService systemInfoService, FanCleaningService fanCleaningService,
@@ -212,6 +213,7 @@ namespace OmenCore.ViewModels
                 ScheduleRules.Add(new ScheduleRule());
                 _config.ScheduleRules = ScheduleRules.ToList();
                 _configService.Save(_config);
+                UpdateScheduleTimerState();
             });
             RemoveScheduleRuleCommand = new RelayCommand(param =>
             {
@@ -220,6 +222,7 @@ namespace OmenCore.ViewModels
                     ScheduleRules.Remove(rule);
                     _config.ScheduleRules = ScheduleRules.ToList();
                     _configService.Save(_config);
+                    UpdateScheduleTimerState();
                 }
             });
 
@@ -250,10 +253,7 @@ namespace OmenCore.ViewModels
                 AutomationRules.Add(item);
             }
 
-            // Start schedule enforcement timer (fires every 30 s, enforces once per HH:mm)
-            _scheduleTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
-            _scheduleTimer.Tick += EnforceScheduleRules;
-            _scheduleTimer.Start();
+            UpdateScheduleTimerState();
 
             // Check fan cleaning availability
             CheckFanCleaningAvailability();
@@ -2345,6 +2345,49 @@ namespace OmenCore.ViewModels
             }
         }
 
+        private void UpdateScheduleTimerState()
+        {
+            if (ScheduleRules.Count > 0)
+            {
+                StartScheduleTimer();
+            }
+            else
+            {
+                StopScheduleTimer();
+                _lastScheduleMinute = null;
+            }
+        }
+
+        private void StartScheduleTimer()
+        {
+            if (_scheduleTimer == null)
+            {
+                _scheduleTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+                _scheduleTimer.Tick += EnforceScheduleRules;
+            }
+
+            if (!_scheduleTimer.IsEnabled)
+            {
+                _scheduleTimer.Start();
+                BackgroundTimerRegistry.Register(
+                    ScheduleTimerRegistryName,
+                    "SettingsViewModel",
+                    "Enforces user-defined time-of-day profile schedule rules",
+                    30000,
+                    BackgroundTimerTier.Optional);
+            }
+        }
+
+        private void StopScheduleTimer()
+        {
+            if (_scheduleTimer != null)
+            {
+                _scheduleTimer.Stop();
+            }
+
+            BackgroundTimerRegistry.Unregister(ScheduleTimerRegistryName);
+        }
+
         #endregion
         
         #region Driver Status Properties
@@ -3051,7 +3094,11 @@ namespace OmenCore.ViewModels
                     createProcess.WaitForExit(5000);
                     
                     // Clean up temp file
-                    try { File.Delete(xmlPath); } catch { }
+                    try { File.Delete(xmlPath); }
+                    catch (Exception ex)
+                    {
+                        _logging.Debug($"Failed to delete temporary scheduled task XML '{xmlPath}': {ex.Message}");
+                    }
                     
                     if (createProcess.ExitCode == 0)
                     {
@@ -3385,7 +3432,10 @@ namespace OmenCore.ViewModels
                     if (wrService != null)
                         winRing0Available = true;
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _logging.Debug($"WinRing0 registry check failed: {ex.Message}");
+                }
                 
                 // Check for XTU service conflict (check SERVICES not processes)
                 bool xtuRunning = false;
@@ -3416,7 +3466,10 @@ namespace OmenCore.ViewModels
                         }
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _logging.Debug($"XTU service conflict check failed: {ex.Message}");
+                }
 
                 if (pawnIoAvailable)
                 {
@@ -3722,13 +3775,20 @@ namespace OmenCore.ViewModels
                                 OghInstalled = true;
                                 // Get the process path for more detail
                                 var path = "";
-                                try { path = procs[0].MainModule?.FileName ?? ""; } catch { }
+                                try { path = procs[0].MainModule?.FileName ?? ""; }
+                                catch (Exception ex)
+                                {
+                                    _logging.Debug($"Unable to read OGH process path for '{proc}': {ex.Message}");
+                                }
                                 var detail = string.IsNullOrEmpty(path) ? $"Process: {proc}" : $"Process: {proc} ({path})";
                                 detectedItems.Add(detail);
                                 foreach (var p in procs) p.Dispose();
                             }
                         }
-                        catch { }
+                        catch (Exception ex)
+                        {
+                            _logging.Debug($"OGH process check failed for '{proc}': {ex.Message}");
+                        }
                     }
                     
                     OghDetectionDetail = detectedItems.Count > 0 
@@ -4327,7 +4387,11 @@ namespace OmenCore.ViewModels
                 if (exportedPath != null && File.Exists(exportedPath))
                 {
                     File.Copy(exportedPath, dialog.FileName, overwrite: true);
-                    try { File.Delete(exportedPath); } catch { }
+                    try { File.Delete(exportedPath); }
+                    catch (Exception ex)
+                    {
+                        _logging.Debug($"Failed to delete temporary diagnostics export '{exportedPath}': {ex.Message}");
+                    }
                 }
                 
                 _logging.Info($"Diagnostics exported successfully to {dialog.FileName}");
@@ -4497,6 +4561,15 @@ namespace OmenCore.ViewModels
                     OnPropertyChanged(nameof(ValidationMessage));
                 }
             }
+        }
+
+        public void Dispose()
+        {
+            StopScheduleTimer();
+            _scheduleTimer = null;
+            _fanCleaningCts?.Cancel();
+            _fanCleaningCts?.Dispose();
+            _fanCleaningCts = null;
         }
     }
 

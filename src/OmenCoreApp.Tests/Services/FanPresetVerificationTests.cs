@@ -194,6 +194,8 @@ namespace OmenCoreApp.Tests.Services
                 "Auto presets with explicit curve payloads are already applied by the controller and must not drop the active thermal policy back to BIOS defaults");
             fanService.ActivePresetName.Should().Be("Auto");
             fanService.GetCurrentFanMode().Should().Be("Auto");
+            fanService.IsCurveActive.Should().BeTrue(
+                "explicit Auto curve payloads need a clear fan owner so fans can ramp down as the curve target drops");
 
             logging.Dispose();
         }

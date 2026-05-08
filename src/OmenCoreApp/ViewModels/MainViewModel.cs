@@ -72,6 +72,7 @@ namespace OmenCore.ViewModels
         private readonly ProcessMonitoringService _processMonitoringService;
         private readonly ITelemetryService _telemetryService;
         private readonly GameProfileService _gameProfileService;
+        private OmenCore.Services.Rgb.RgbManager? _rgbManager;
         private RgbSceneService? _rgbSceneService;
         private ScreenSamplingService? _screenSamplingService;
         private AudioReactiveRgbService? _audioReactiveRgbService;
@@ -226,6 +227,16 @@ namespace OmenCore.ViewModels
         }
 
         private int _selectedTabIndex = 0;
+        private const int GeneralTabIndex = 0;
+        private const int OmenTabIndex = 1;
+        private const int TuningTabIndex = 2;
+        private const int DiagnosticsTabIndex = 3;
+        private const int MonitoringTabIndex = 4;
+        private const int OptimizerTabIndex = 5;
+        private const int MemoryTabIndex = 6;
+        private const int BloatwareTabIndex = 7;
+        private const int RgbTabIndex = 8;
+
         public int SelectedTabIndex
         {
             get => _selectedTabIndex;
@@ -235,6 +246,7 @@ namespace OmenCore.ViewModels
                 {
                     _selectedTabIndex = value;
                     OnPropertyChanged(nameof(SelectedTabIndex));
+                    UpdateLazyTabActivity(value);
                     EnsureConflictMonitoringStartedForTab(value);
                 }
             }
@@ -275,7 +287,9 @@ namespace OmenCore.ViewModels
                         _logging.LogDirectory,
                         _resumeRecoveryDiagnostics,
                         _hardwareMonitoringService,
-                        _fanService);
+                        _fanService,
+                        _keyboardLightingService,
+                        () => _rgbManager);
                     
                     _settings = new SettingsViewModel(_logging, _configService, _systemInfoService, 
                         _fanCleaningService, _biosUpdateService, profileExportService, diagnosticsExportService,
@@ -353,6 +367,7 @@ namespace OmenCore.ViewModels
                 if (_memoryOptimizer == null)
                 {
                     _memoryOptimizer = new MemoryOptimizerViewModel(_logging, _configService);
+                    _memoryOptimizer.SetPageActive(_selectedTabIndex == MemoryTabIndex);
                     OnPropertyChanged(nameof(MemoryOptimizer));
                 }
                 return _memoryOptimizer;
@@ -2173,27 +2188,36 @@ namespace OmenCore.ViewModels
             }
         }
 
-        private Task ApplyGameProfileAsync(GameProfile profile)
+        private async Task ApplyGameProfileAsync(GameProfile profile)
         {
             // Apply fan preset
-            if (!string.IsNullOrEmpty(profile.FanPresetName) && FanControl != null)
+            if (!string.IsNullOrEmpty(profile.FanPresetName))
             {
-                var preset = FanControl.FanPresets.FirstOrDefault(p => p.Name == profile.FanPresetName);
+                var preset = ResolveGameProfileFanPreset(profile.FanPresetName);
                 if (preset != null)
                 {
-                    FanControl.SelectedPreset = preset;
-                    _logging.Info($"Applied fan preset: {preset.Name}");
+                    await Task.Run(() => _fanService.ApplyPreset(preset));
+                    _logging.Info($"Applied game-profile fan preset: {preset.Name}");
+                }
+                else
+                {
+                    _logging.Warn($"Game profile fan preset not found: {profile.FanPresetName}");
                 }
             }
 
             // Apply performance mode
-            if (!string.IsNullOrEmpty(profile.PerformanceModeName) && SystemControl != null)
+            if (!string.IsNullOrEmpty(profile.PerformanceModeName))
             {
-                var mode = SystemControl.PerformanceModes.FirstOrDefault(m => m.Name == profile.PerformanceModeName);
+                var mode = ResolveGameProfilePerformanceMode(profile.PerformanceModeName);
                 if (mode != null)
                 {
-                    SystemControl.SelectedPerformanceMode = mode;
-                    _logging.Info($"Applied performance mode: {mode.Name}");
+                    await Task.Run(() => _performanceModeService.Apply(mode));
+                    _logging.Info($"Applied game-profile performance mode: {mode.Name}");
+                }
+                else
+                {
+                    await Task.Run(() => _performanceModeService.SetPerformanceMode(profile.PerformanceModeName));
+                    _logging.Info($"Applied game-profile performance mode by fallback name: {profile.PerformanceModeName}");
                 }
             }
 
@@ -2244,7 +2268,95 @@ namespace OmenCore.ViewModels
 
             _logging.Info($"✓ Profile '{profile.Name}' applied successfully");
 
-            return Task.CompletedTask;
+        }
+
+        private FanPreset? ResolveGameProfileFanPreset(string presetName)
+        {
+            var configured = _config.FanPresets?.FirstOrDefault(p =>
+                p.Name.Equals(presetName, StringComparison.OrdinalIgnoreCase));
+            if (configured != null)
+            {
+                return configured;
+            }
+
+            if (_fanControl != null)
+            {
+                var loadedPreset = _fanControl.FanPresets.FirstOrDefault(p =>
+                    p.Name.Equals(presetName, StringComparison.OrdinalIgnoreCase));
+                if (loadedPreset != null)
+                {
+                    return loadedPreset;
+                }
+            }
+
+            var mode = FanModeNameResolver.ResolveBuiltInFanMode(presetName);
+            return new FanPreset
+            {
+                Name = presetName,
+                Mode = mode,
+                IsBuiltIn = true,
+                Curve = BuildGameProfileFanCurve(presetName, mode)
+            };
+        }
+
+        private PerformanceMode? ResolveGameProfilePerformanceMode(string modeName)
+        {
+            if (_systemControl != null)
+            {
+                var loadedMode = _systemControl.PerformanceModes.FirstOrDefault(m =>
+                    m.Name.Equals(modeName, StringComparison.OrdinalIgnoreCase));
+                if (loadedMode != null)
+                {
+                    return loadedMode;
+                }
+            }
+
+            return _config.PerformanceModes?.FirstOrDefault(m =>
+                m.Name.Equals(modeName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static List<FanCurvePoint> BuildGameProfileFanCurve(string presetName, FanMode mode)
+        {
+            if (mode == FanMode.Max || FanModeNameResolver.IsMaxAlias(presetName))
+            {
+                return new() { new FanCurvePoint { TemperatureC = 0, FanPercent = 100 } };
+            }
+
+            if (FanModeNameResolver.IsQuietAlias(presetName))
+            {
+                return new()
+                {
+                    new FanCurvePoint { TemperatureC = 50, FanPercent = 25 },
+                    new FanCurvePoint { TemperatureC = 65, FanPercent = 35 },
+                    new FanCurvePoint { TemperatureC = 75, FanPercent = 50 },
+                    new FanCurvePoint { TemperatureC = 85, FanPercent = 70 },
+                    new FanCurvePoint { TemperatureC = 95, FanPercent = 100 }
+                };
+            }
+
+            if (FanModeNameResolver.IsPerformanceAlias(presetName))
+            {
+                return new()
+                {
+                    new FanCurvePoint { TemperatureC = 40, FanPercent = 35 },
+                    new FanCurvePoint { TemperatureC = 50, FanPercent = 45 },
+                    new FanCurvePoint { TemperatureC = 60, FanPercent = 58 },
+                    new FanCurvePoint { TemperatureC = 70, FanPercent = 72 },
+                    new FanCurvePoint { TemperatureC = 80, FanPercent = 88 },
+                    new FanCurvePoint { TemperatureC = 90, FanPercent = 100 }
+                };
+            }
+
+            return new()
+            {
+                new FanCurvePoint { TemperatureC = 40, FanPercent = 30 },
+                new FanCurvePoint { TemperatureC = 50, FanPercent = 38 },
+                new FanCurvePoint { TemperatureC = 60, FanPercent = 50 },
+                new FanCurvePoint { TemperatureC = 70, FanPercent = 62 },
+                new FanCurvePoint { TemperatureC = 80, FanPercent = 78 },
+                new FanCurvePoint { TemperatureC = 88, FanPercent = 92 },
+                new FanCurvePoint { TemperatureC = 95, FanPercent = 100 }
+            };
         }
 
         private Task RestoreDefaultSettingsAsync()
@@ -3129,6 +3241,7 @@ namespace OmenCore.ViewModels
                     // Register RGB providers with priority: Corsair -> Logitech -> Razer -> OpenRGB -> SystemGeneric.
                     // Provider initialization remains lazy inside RgbManager until the RGB page applies/syncs.
                     var rgbManager = new OmenCore.Services.Rgb.RgbManager(_logging);
+                    _rgbManager = rgbManager;
                     var corsairProvider = new OmenCore.Services.Rgb.CorsairRgbProvider(_logging, _configService, _corsairDeviceService);
                     var logitechProvider = new OmenCore.Services.Rgb.LogitechRgbProvider(_logging, _logitechDeviceService);
                     var openRgbProvider = new OmenCore.Services.Rgb.OpenRgbProvider(_logging);
@@ -4037,23 +4150,28 @@ namespace OmenCore.ViewModels
                 ShowAdvancedControls = true;
             }
 
-            SelectedTabIndex = 7; // Bloatware tab index
+            SelectedTabIndex = BloatwareTabIndex;
         }
 
         private static bool IsAdvancedTab(int tabIndex) =>
-            tabIndex == 1 ||
-            tabIndex == 2 ||
-            tabIndex == 3 ||
-            tabIndex == 5 ||
-            tabIndex == 6 ||
-            tabIndex == 7 ||
-            tabIndex == 8;
+            tabIndex == OmenTabIndex ||
+            tabIndex == TuningTabIndex ||
+            tabIndex == DiagnosticsTabIndex ||
+            tabIndex == OptimizerTabIndex ||
+            tabIndex == MemoryTabIndex ||
+            tabIndex == BloatwareTabIndex ||
+            tabIndex == RgbTabIndex;
 
         private static bool ShouldStartConflictMonitoringForTab(int tabIndex) =>
-            tabIndex == 2 || // OMEN
-            tabIndex == 3 || // Tuning
-            tabIndex == 4 || // Monitoring
-            tabIndex == 5;   // Optimizer
+            tabIndex == OmenTabIndex ||
+            tabIndex == TuningTabIndex ||
+            tabIndex == MonitoringTabIndex ||
+            tabIndex == OptimizerTabIndex;
+
+        private void UpdateLazyTabActivity(int tabIndex)
+        {
+            _memoryOptimizer?.SetPageActive(tabIndex == MemoryTabIndex);
+        }
 
         private void EnsureConflictMonitoringStartedForTab(int tabIndex)
         {
@@ -4458,6 +4576,7 @@ namespace OmenCore.ViewModels
             // Clean up lazily-created child ViewModels that hold service event subscriptions
             Lighting?.Cleanup();
             _systemControl?.Cleanup();
+            _settings?.Dispose();
             
             // Dispose memory optimizer
             _memoryOptimizer?.Dispose();

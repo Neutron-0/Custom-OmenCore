@@ -7,12 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [3.6.0] - TBD - Draft: Lightweight Resource Usage and Reliability Follow-up
+## [3.6.0] - 2026-05-10 - Lightweight Resource Usage and Reliability Follow-up
 
 ### Development Status
 
-- Active development is on `v3.6.0-planning`.
-- The detailed draft changelog is maintained in [docs/CHANGELOG_v3.6.0.md](docs/CHANGELOG_v3.6.0.md).
+- Code-complete with 500/500 tests passing.
+- Late smoke-run blocker fixed: Settings live cadence status bindings no longer attempt TwoWay writeback against read-only `SettingsViewModel` properties.
+- Version metadata corrected to `3.6.0` across the app, hardware worker, Avalonia front end, and installer so startup/version reporting matches packaged release assets.
+- Comprehensive changelog and release summary: [docs/CHANGELOG_v3.6.0.md](docs/CHANGELOG_v3.6.0.md) and [docs/v3.6.0-RELEASE-SUMMARY.md](docs/v3.6.0-RELEASE-SUMMARY.md).
+- Release Branch: `v3.6.0-planning` → production ready pending Linux build asset resolution and packaging validation.
 
 ### Added
 
@@ -28,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Startup is lighter: tray startup, Dashboard, General, RGB/peripheral providers, and conflict/tuning software scans defer heavier view-model/provider work until the relevant page or action is used.
 - Monitoring cadence ownership is centralized around active, idle, tray-only, overlay, low-overhead, and static-tray sampling policies; obsolete polling-interval runtime/settings paths were removed while legacy config values remain normalized for compatibility.
 - Tray-only/low-overhead sessions can now reduce expensive GPU telemetry refreshes while keeping unified sample flow and fan/temperature telemetry alive.
+- Linux daemon performance hold now treats Default/Balanced readbacks as equivalent and only re-applies on true drift, making hold behavior less sensitive to board/kernel variance.
+- Keyboard lighting apply paths now retry model-specific fallback backends when the active 4-zone backend fails, improving resilience on systems where the preferred RGB path is unstable.
+- Keyboard lighting operations are now serialized across profile/zone/test/brightness/backlight writes, preventing concurrent backend-switch races when multiple RGB paths (manual apply, scenes, temperature RGB, startup restore) overlap.
+- Keyboard brightness and backlight toggles now use the same model-aware fallback retry path as color apply operations, including active-backend swap when fallback succeeds.
 - Memory Optimizer and Settings timers are more demand-driven: Memory telemetry pauses when its tab is hidden, and schedule enforcement only runs while schedule rules exist.
 - Tray quick-popup telemetry refresh is now visible-only: the 1s popup timer starts when the popup is shown, stops when hidden or closed, and appears in diagnostics only while active.
 - The main tray icon refresh loop is now registered in diagnostics, with descriptions that distinguish live temperature-badge redraws from static-icon tooltip/menu refreshes.
@@ -35,9 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CPU undervolt status polling and EDP throttling mitigation loops now register with diagnostics so tuning page activation and resource exports show those active safety/readback monitors.
 - Temperature-reactive keyboard RGB polling now registers with diagnostics while enabled, unregisters/disposes cleanly on stop, and no longer uses a bare catch for hex-color parsing.
 - Dashboard hardware metrics history is now capped by both age and count, and the monitor-loop power trend calculation avoids a per-sample `TakeLast().ToList()` allocation.
+- Load, Thermal, and GPU voltage/current charts now avoid per-render sample `ToList()` copies when bound to indexable sample collections; GPU voltage/current range calculation also avoids temporary projection lists.
 - Memory Optimizer visible refreshes do less repeated work by reusing the current memory snapshot and resolving process executable paths only when the user opens a process location.
 - Memory Optimizer Auto Clean now exposes a persisted minimum-gap override, with `0` preserving the selected profile default cooldown.
 - Memory Optimizer top-process rows can be added directly to working-set exclusions from the context menu.
+- Memory Optimizer now shows dynamic exclusion guidance that suggests currently high-memory processes not yet excluded, and updates suggestions as exclusions change.
 - Memory Optimizer cleanup results now show richer before/after deltas for physical memory, available memory, standby list, system cache, commit, page file, and modified pages.
 - Memory Optimizer auto-clean is more game-aware: fullscreen and borderless-fullscreen foreground windows now trigger a quieter working-set-only clean unless memory pressure is critical, and the quiet-window behavior is exposed as a persisted Auto Clean toggle.
 - Fan curve previews now show requested vs effective fan duty when the thermal guard raises an unsafe low curve point at high temperatures.
@@ -46,6 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Linux diagnostics now include service/package readiness details for systemd availability, OmenCore unit state, system/user config presence, and the bundle extraction directory.
 - Lighting now exposes RGB control ownership, HP keyboard backend, provider status details, and OMEN Light Studio/Gaming Hub conflict warnings in the page header.
 - Lighting now includes a Restore Keyboard action that reapplies saved HP keyboard colors through the active backend, and startup restore now uses the same zone ordering as manual Apply.
+- Hotkey registration now de-duplicates queued actions and rejects conflicting key-chord mappings earlier, reducing startup/retry timing cases where hotkeys could become flaky or ambiguous.
 - Fan Control now shows a plain-language fan ownership panel so users can see whether firmware, OmenCore Max, constant duty, or a managed curve is currently responsible for fan behavior.
 - Installer wizard artwork was regenerated from the first-party red/blue OmenCore visual generator.
 - Model identity diagnostics now separate the baseboard ProductId used by OmenCore capability lookup from HP's public support product number, making reports like `8A43` / `6G103EA` less ambiguous (Discord: Hades / 8A43).

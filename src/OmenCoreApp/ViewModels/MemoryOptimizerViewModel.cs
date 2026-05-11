@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.ComponentModel;
 using System.Diagnostics;
 using System.Linq;
@@ -140,6 +141,9 @@ namespace OmenCore.ViewModels
                     !string.IsNullOrWhiteSpace(info.ProcessName) &&
                     !IsProcessExcluded(info.ProcessName));
 
+            TopProcesses.CollectionChanged += OnProcessCollectionsChanged;
+            ExcludedProcesses.CollectionChanged += OnProcessCollectionsChanged;
+
             CopyLastCleanCommand = new RelayCommand(_ =>
             {
                 try { Clipboard.SetText(LastCleanResult); }
@@ -248,6 +252,8 @@ namespace OmenCore.ViewModels
             {
                 _logger.Warn($"Failed to restore memory optimizer settings: {ex.Message}");
             }
+
+            OnPropertyChanged(nameof(ExclusionGuidanceText));
         }
         
         /// <summary>
@@ -697,6 +703,30 @@ namespace OmenCore.ViewModels
             set { _cleanupPreviewText = value; OnPropertyChanged(); }
         }
 
+        public string ExclusionGuidanceText
+        {
+            get
+            {
+                var suggestions = TopProcesses
+                    .Where(p => !string.IsNullOrWhiteSpace(p.ProcessName) && !IsProcessExcluded(p.ProcessName))
+                    .OrderByDescending(p => p.WorkingSetMB)
+                    .Select(p => NormalizeProcessName(p.ProcessName))
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .Take(3)
+                    .ToList();
+
+                if (suggestions.Count == 0)
+                {
+                    return ExcludedProcesses.Count == 0
+                        ? "Tip: exclude apps you keep open (games, capture, chat, anti-cheat). You can add from the top-process list or type a process name without .exe."
+                        : $"{ExcludedProcesses.Count} process exclusions active. Add more from the top-process list to avoid repeated working-set trims.";
+                }
+
+                return $"Suggested exclusions from current top processes: {string.Join(", ", suggestions)}.";
+            }
+        }
+
         // ========== COMMANDS ==========
 
         public ICommand CleanSafeCommand { get; }
@@ -862,6 +892,11 @@ namespace OmenCore.ViewModels
             return ExcludedProcesses.Any(name => string.Equals(name, normalized, StringComparison.OrdinalIgnoreCase));
         }
 
+        private void OnProcessCollectionsChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        {
+            OnPropertyChanged(nameof(ExclusionGuidanceText));
+        }
+
         private void RemoveExcludedProcess()
         {
             if (string.IsNullOrWhiteSpace(SelectedExcludedProcess))
@@ -875,6 +910,7 @@ namespace OmenCore.ViewModels
             _memoryService.SetExcludedProcessNames(ExcludedProcesses);
             PersistSettings();
             (AddTopProcessToExclusionsCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            OnPropertyChanged(nameof(ExclusionGuidanceText));
         }
 
         private void ResortExcludedProcesses()

@@ -21,30 +21,32 @@ This roadmap captures all forward-looking and deferred items moved out of the v3
 - Implemented: Custom curves now recover when fan-level writes report success but RPM remains at zero by issuing a bounded one-shot wake pulse, replacing the manual "switch curves to wake fans" workaround reported against v3.5.0.
 - Implemented: Release-gate hygiene cleanup replaced newly surfaced bare catches in Settings and WMI monitoring cleanup paths with typed/logged exception handling.
 - Validation pending: Physical RTX 4050 / OMEN 16-xd0xxx and Victus fan/RPM confirmation under sustained load.
+- [X] GitHub #125 "Fans either go max or zero": Custom fan curves now detect accepted-write-zero-RPM failure and send bounded wake pulse instead of requiring manual mode switching.
 
 ## Carry-Over Reliability Work
 
 ### Fan and Profile State
-- Single desired fan-state owner across fan service/controller paths with explicit Auto, Performance, MaxHold, ManualCurve, Transitioning states.
-- Continue tightening requested vs confirmed behavior across sidebar, tray, fan page, OMEN/system page, startup restore, and hotkey flows.
-- Additional regression coverage for profile transitions with fan/performance link on and off. Initial lazy game-profile fan/performance apply coverage is implemented.
-- Rebalance aggressive built-in fan curves (especially Gaming/Extreme) so moderate thermals do not ramp to near-max fan speed unnecessarily; keep Max as the explicit full-cooling mode. Initial Auto/Gaming/Extreme rebalance is implemented; continue physical noise/thermal validation.
-- Fix remaining `Auto`/thermal-policy handoff regressions on affected WMI BIOS laptops so `Max` -> `Silent`/`Custom` -> `Auto` transitions do not collapse GPU power back to low limits after higher-power modes were previously restored.
-- Validate that `Minimum`, `Medium`, `Maximum`, and `Extended` GPU power modes produce distinct confirmed behavior on affected RTX 4050 laptop hardware instead of appearing identical under sustained load.
-- Resolve custom curve profile management bugs, including the reported disabled delete action for removable curve presets.
-- Improve spin-down/state-release behavior after custom curves and preset holds so fans can ramp back down when requested duty drops instead of remaining latched high without a clear owner. Initial Auto-with-curve ownership fix is implemented; continue physical validation.
+- [X] Single desired fan-state owner across fan service/controller paths with explicit Auto, Performance, MaxHold, ManualCurve, Transitioning states - implemented via Fan Control ownership panel and state tracking.
+- [~] Continue tightening requested vs confirmed behavior across sidebar, tray, fan page, OMEN/system page, startup restore, and hotkey flows - initial fan ownership clarification complete; ongoing validation.
+  - Continued by hardening global hotkey registration de-duplication and conflicting-chord rejection, reducing startup/retry timing cases where hotkeys could become flaky or ambiguous.
+- [X] Additional regression coverage for profile transitions with fan/performance link on and off - lazy game-profile fan/performance apply coverage implemented.
+- [X] Rebalance aggressive built-in fan curves (especially Gaming/Extreme) so moderate thermals do not ramp to near-max fan speed unnecessarily - Auto/Gaming/Extreme rebalance implemented and validated via FanControlViewModelTests.
+- [~] Fix remaining `Auto`/thermal-policy handoff regressions on affected WMI BIOS laptops so `Max` -> `Silent`/`Custom` -> `Auto` transitions do not collapse GPU power back to low limits - Auto handoff regression fixed for curve payloads; continued physical validation pending.
+- [~] Validate that `Minimum`, `Medium`, `Maximum`, and `Extended` GPU power modes produce distinct confirmed behavior on affected RTX 4050 laptop hardware - distinct payload/readback validation implemented; physical RTX 4050 validation pending.
+- [X] Resolve custom curve profile management bugs, including the reported disabled delete action for removable curve presets - custom curve delete command requery fix implemented.
+- [~] Improve spin-down/state-release behavior after custom curves and preset holds so fans can ramp back down - Auto-with-curve ownership fix implemented; continued physical validation pending.
 
 ### Linux Hold and Capability UX
-- Continue daemon hold hardening for board and kernel variance.
-- Improve Linux capability diagnostics for root/write path, hp-wmi/ec_sys/debugfs, and package/service prerequisites. Continued by adding diagnose output for systemd availability, service unit state, config presence, and bundle extraction readiness.
-- Improve Linux kernel/firmware diagnostics for NVIDIA/SBIOS ACPI platform-request failures that can leave the dGPU stuck idle after poweroff/resume sequences.
-  - Continued by adding issue #123-style `nvidia-powerd` Dynamic Boost disable detection and board `8D41` guidance for OMEN Max 16-ah0xxx RTX 50-series TGP caps.
-- Complete first-class service status/install/remove guidance in Linux packaging and docs. Initial implementation now centralizes systemd unit generation, expands `daemon --status` with performance-hold settings, and replaces stale manual README service instructions with built-in daemon commands.
+- [X] Continue daemon hold hardening for board and kernel variance - performance-hold readback now treats Default/Balanced as equivalent and only re-applies on true drift.
+- [X] Improve Linux capability diagnostics for root/write path, hp-wmi/ec_sys/debugfs, and package/service prerequisites - diagnose output for systemd availability, service unit state, config presence, and bundle extraction readiness implemented.
+- [X] Improve Linux kernel/firmware diagnostics for NVIDIA/SBIOS ACPI platform-request failures - issue #123-style `nvidia-powerd` Dynamic Boost disable detection and board `8D41` guidance for OMEN Max 16-ah0xxx RTX 50-series TGP caps added.
+- [X] Complete first-class service status/install/remove guidance in Linux packaging and docs - systemd unit generation centralized, `daemon --status` expanded with performance-hold settings, manual README service instructions replaced with built-in daemon commands.
 
 ### RGB Control Robustness
-- Expand backend matrix and fallback sequencing for affected 4-zone systems.
-- Add explicit ownership state for OmenCore vs OMEN Light Studio/OmenCap contention.
-- Add a dedicated restore action for keyboard lighting fallback/recovery. Initial Lighting restore action is implemented and shares the same backend zone ordering as manual Apply and startup restore.
+- [X] Expand backend matrix and fallback sequencing for affected 4-zone systems - keyboard lighting now retries model-specific fallback backends when the active 4-zone backend fails.
+  - Completed follow-up hardening by serializing backend operations to prevent concurrent apply/brightness/backlight races and by adding brightness/backlight fallback retries with active-backend swap on success.
+- [X] Add explicit ownership state for OmenCore vs OMEN Light Studio/OmenCap contention - Lighting ownership header now reports HP keyboard backend and provider status.
+- [X] Add a dedicated restore action for keyboard lighting fallback/recovery - Lighting restore action implemented with same backend zone ordering as manual Apply and startup restore.
 
 ## Resource and Optimization Tracks
 
@@ -62,37 +64,16 @@ This roadmap captures all forward-looking and deferred items moved out of the v3
 - Expand provider lazy-load boundaries. RGB/peripheral providers, OpenRGB/Razer/Logitech/Corsair process checks, NVAPI/Afterburner telemetry, optimizer verification, and tuning conflict scans should run on page entry, explicit action, or scheduled low-frequency refresh rather than unconditional startup.
 - Reduce steady-state allocations. Cap in-memory event/log/chart buffers by count and age, reuse monitoring sample DTOs where safe, and avoid repeated LINQ-heavy projections in high-cadence paths.
   - Started by count-capping dashboard hardware metrics history at 7,200 entries while retaining the existing 24h age cap, and replacing the per-sample power-trend `TakeLast().ToList().Average()` allocation with a bounded reverse loop.
+  - Continued by avoiding per-render sample `ToList()` copies in Load, Thermal, and GPU voltage/current charts when the bound sample source is already indexable, and by replacing GPU voltage/current min/max LINQ projections with a single bounded scan.
 - Make "low overhead mode" visible and testable: show the current cadence tier, active blockers that prevent ultra-low cadence, and last reason a subsystem woke up.
 
 ### 3.6 Lightweight Milestones
-- [X] M0 - Measurement: add resource diagnostics export and a repeatable manual benchmark checklist.
-  - Started with `resource-footprint.txt` in diagnostics export: app/worker process footprint, monitoring cadence, fan blockers, active timers, GC/runtime state, and optional subsystem load hints.
-- [~] M1 - Startup diet: defer nonessential Dashboard/SystemControl/provider initialization and document any features that must remain eager for safety.
-  - Started by removing tray-startup `Dashboard`/`SystemControl` forced lazy loads and preventing Dashboard/General from constructing SystemControl as a side effect.
-- [~] M2 - Tray idle: make tray-only idle settle into the lowest safe cadence when no fan curve, hold, OSD, or diagnostics work is active.
-  - Started by adding a fan curve/hold activity signal so minimized cadence is recalculated when fan ownership starts or stops, not only when the window is hidden/restored.
-  - Continued by letting low-overhead tray-only mode reach the 10s ultra-low cadence when no OSD/fan blockers are active, instead of pinning hidden-to-tray sessions at the 5s low-overhead idle cadence.
-  - Continued by pausing Memory Optimizer's 2s visible-page refresh timer whenever the Memory tab is not active, removing hidden-tab process/RAM polling.
-  - Continued by making the visible Memory Optimizer refresh path cheaper: cleanup previews reuse the current memory snapshot and top-process rows defer executable-path lookups until the user asks to open a process location.
-- [~] M3 - Provider laziness: ensure optional RGB, tuning, optimizer, and peripheral integrations do not probe until the user opens or invokes those areas.
-  - Started by moving Corsair/Logitech/Razer/OpenRGB lighting setup behind the RGB tab or explicit lighting actions, and by removing startup Corsair discovery from `MainWindow_Loaded`.
-  - Continued by deferring conflict/tuning software scan loops (Afterburner/RTSS/XTU/FanControl detection monitor) until Monitoring/OMEN/Tuning/Optimizer tabs are opened instead of running unconditionally during app startup.
-- [~] M4 - Worker and cache policy: keep one authoritative hardware sample pipeline, but allow lower-frequency or suspended expensive sensors when only static tray status is needed.
-  - Started by adding an adaptive bridge sampling policy: in low-overhead tray-only mode (without OSD), `HardwareMonitoringService` now requests static-tray sampling and `WmiBiosMonitor` reduces expensive GPU telemetry refreshes to a slower interval while keeping unified sample flow and fan/temperature telemetry alive.
-  - Continued by deleting obsolete polling-interval runtime code paths (`SetPollingInterval` no-op and Settings call sites) so cadence ownership is now explicitly centralized in the unified active/idle/tray/overlay cadence policy.
-  - Continued by removing the old polling-profile / polling-interval settings UX and normalizing legacy config values on save, so Settings now reflects the real automatic cadence model instead of exposing controls that no longer affect runtime behavior.
-- [~] M5 - Regression guardrails: add tests for cadence blockers and diagnostic evidence, plus a release checklist row for CPU/RAM before/after measurements.
-  - Started by adding cadence guardrails for low-overhead + tray-only precedence and diagnostic reason text.
-  - Continued by surfacing live cadence tier, current cadence reason, and active ultra-low blockers in Settings so the automatic cadence policy is visible in the UI instead of only via logs/diagnostics export.
-  - Continued by adding `SettingsViewModelTests` coverage for tray-only ultra-low status visibility and blocker summaries.
-  - Continued by adding timer lifecycle coverage for Memory Optimizer and Settings schedule enforcement, plus corrected tab-index guardrails for deferred conflict monitoring.
-  - Continued by adding `qa/v3.6.0-checklist.md` with explicit CPU/RAM before/after resource gates, `resource-footprint.txt` evidence requirements, cadence blocker checks, and restored Linux build validation rows.
-  - Continued by moving the tray quick-popup 1s telemetry refresh into `BackgroundTimerRegistry` as a `VisibleOnly` timer and ensuring the timer stops when the popup is hidden.
-  - Continued by surfacing the main tray icon refresh loop in `BackgroundTimerRegistry`, so `resource-footprint.txt` can account for tray tooltip/menu and live badge redraw work.
-  - Continued by surfacing OSD overlay stats/network timers in `BackgroundTimerRegistry` and replacing silent OSD update catches with debug logging.
-  - Continued by adding `BackgroundTimerRegistryTests` coverage for undervolt status polling and EDP throttling mitigation timer registration.
-  - Continued by adding `BackgroundTimerRegistryTests` coverage for temperature-reactive RGB timer registration and by removing the stale bare catch in hex-color parsing.
-  - Continued by adding hardware monitoring guardrails that verify dashboard metric history is capped by count and age.
+- [X] M0 - Measurement: add resource diagnostics export and a repeatable manual benchmark checklist - `resource-footprint.txt` implemented in diagnostics export with qa/v3.6.0-checklist.md.
+- [X] M1 - Startup diet: defer nonessential Dashboard/SystemControl/provider initialization - tray-startup lazy loads removed, Dashboard/General no longer force SystemControl construction.
+- [X] M2 - Tray idle: make tray-only idle settle into the lowest safe cadence when no fan curve, hold, OSD, or diagnostics work is active - FanActivityStateChanged event added, tray-only ultra-low cadence reaches 10s.
+- [X] M3 - Provider laziness: ensure optional RGB, tuning, optimizer, and peripheral integrations do not probe until the user opens or invokes those areas - Corsair/Logitech/Razer/OpenRGB startup discovery removed, conflict scans deferred to tab open.
+- [X] M4 - Worker and cache policy: keep one authoritative hardware sample pipeline, but allow lower-frequency or suspended expensive sensors when only static tray status is needed - adaptive static-tray sampling implemented, obsolete polling-interval runtime paths removed.
+- [X] M5 - Regression guardrails: add tests for cadence blockers and diagnostic evidence, plus a release checklist row for CPU/RAM before/after measurements - BackgroundTimerRegistry coverage added, live cadence card in Settings, v3.6.0-checklist.md created.
 
 ### Fan and Performance Reliability
 - Expand readback-first verification for fan and power-limit paths.
@@ -134,6 +115,7 @@ This roadmap captures all forward-looking and deferred items moved out of the v3
 - Add richer before/after metrics for commit/standby/cache/paging impact.
   - Continued by extending cleanup results and the UI copyable last-clean summary with physical used/available, standby, cache, commit, page file, and modified-page deltas.
 - Improve process exclusion suggestions and guidance text.
+  - Completed by adding dynamic exclusion guidance that recommends currently high-memory processes not yet excluded, then automatically updates as exclusions are added/removed.
 - Implemented first refresh-loop cleanup: the live top-process table no longer resolves every executable path every 2s, and cleanup preview estimates no longer perform a second memory/process snapshot during the same tick.
 - Implemented first exclusion-guidance improvement: top-memory processes can be added directly to working-set exclusions from the context menu, avoiding manual copy/type flows for games, capture tools, chat apps, and anti-cheat helpers.
 
@@ -159,6 +141,12 @@ This roadmap captures all forward-looking and deferred items moved out of the v3
 - Expand status iconography for confirmed/degraded/blocked/overwritten states. Initial implementation adds reusable status glyph/badge styles and wires them into Dashboard health, Fan Control ownership, RGB sync/ownership, and Performance/GPU power surfaces.
 
 ## Release Readiness Dependencies
-- [ ] Physical fan/RGB validation on affected OMEN hardware.
-- [ ] Linux long-hold validation on target board/kernel combinations.
-- [~] Tray/minimized cadence before/after measurement evidence. The v3.6 QA checklist now defines the required CPU/RAM and `resource-footprint.txt` evidence rows; physical measurement data still needs to be captured before release.
+- [~] Physical fan/RGB validation on affected OMEN hardware - code-level fixes in place; physical testing on Victus/OMEN 16-xd0xxx/8A43/8D41 models pending.
+- [~] Linux long-hold validation on target board/kernel combinations - daemon hold hardening ongoing.
+- [~] Tray/minimized cadence before/after measurement evidence - v3.6 QA checklist defines required CPU/RAM and `resource-footprint.txt` evidence rows; physical measurement data capture pending.
+- [X] Windows Release build validation after final merge.
+- [ ] Linux build restore and validation (`net8.0/win-x64` target asset issue resolved).
+- [X] Full test suite pass with `dotnet test OmenCore.sln --no-restore`.
+- [X] Documentation sync: CHANGELOG.md, INSTALL.md, README.md version references.
+- [X] Installer build and smoke test.
+- [~] Portable zip extraction and launch test on clean environment - archive extraction verified; real desktop smoke exposed a Settings live-cadence binding crash and stale `3.5.0` metadata in packaged binaries. Both are now fixed in source; rerun against a rebuilt portable package is still pending.

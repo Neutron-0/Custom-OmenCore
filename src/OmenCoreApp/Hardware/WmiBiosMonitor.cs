@@ -138,10 +138,14 @@ namespace OmenCore.Hardware
         // Battery
         private double _cachedBatteryDischargeRate;
         private bool _batteryMonitoringDisabled;
+        private bool _batteryDischargeRateSupported = true;
         private int _consecutiveZeroBatteryReads;
         private const int MaxZeroBatteryReadsBeforeDisable = 3;
         private DateTime _lastBatteryQuery = DateTime.MinValue;
         private readonly TimeSpan _batteryQueryCooldown = TimeSpan.FromSeconds(10);
+        private DateTime _lastBatteryDischargeRateWarnAt = DateTime.MinValue;
+        private int _suppressedBatteryDischargeRateWarnCount;
+        private static readonly TimeSpan BatteryDischargeRateWarnInterval = TimeSpan.FromMinutes(2);
         
         // NVAPI failure tracking — disable after repeated failures, then auto-recover after cooldown
         private int _nvapiConsecutiveFailures;
@@ -1838,7 +1842,7 @@ namespace OmenCore.Hardware
         /// </summary>
         private double GetBatteryDischargeRate()
         {
-            if (_batteryMonitoringDisabled) return 0;
+            if (_batteryMonitoringDisabled || !_batteryDischargeRateSupported) return 0;
             
             try
             {
@@ -1855,7 +1859,33 @@ namespace OmenCore.Hardware
             }
             catch (Exception ex)
             {
-                _logging?.Warn($"[WmiBiosMonitor] {nameof(GetBatteryDischargeRate)} failed: {ex.Message}");
+                // Some systems/providers do not expose DischargeRate and throw Invalid query every poll.
+                if (ex.Message.IndexOf("Invalid query", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    _batteryDischargeRateSupported = false;
+                    _logging?.Info($"[WmiBiosMonitor] {nameof(GetBatteryDischargeRate)} unavailable on this system (Invalid query) — disabling discharge-rate polling");
+                    return 0;
+                }
+
+                var now = DateTime.UtcNow;
+                if (now - _lastBatteryDischargeRateWarnAt >= BatteryDischargeRateWarnInterval)
+                {
+                    if (_suppressedBatteryDischargeRateWarnCount > 0)
+                    {
+                        _logging?.Warn($"[WmiBiosMonitor] {nameof(GetBatteryDischargeRate)} failed: {ex.Message} (suppressed {_suppressedBatteryDischargeRateWarnCount} repeats)");
+                        _suppressedBatteryDischargeRateWarnCount = 0;
+                    }
+                    else
+                    {
+                        _logging?.Warn($"[WmiBiosMonitor] {nameof(GetBatteryDischargeRate)} failed: {ex.Message}");
+                    }
+
+                    _lastBatteryDischargeRateWarnAt = now;
+                }
+                else
+                {
+                    _suppressedBatteryDischargeRateWarnCount++;
+                }
             }
             return 0;
         }

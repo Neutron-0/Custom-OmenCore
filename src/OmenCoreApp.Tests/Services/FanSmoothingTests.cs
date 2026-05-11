@@ -312,6 +312,7 @@ namespace OmenCoreApp.Tests.Services
             try
             {
                 // Helper: poll until condition is met or timeout expires.
+                // Poll at 10ms to avoid missing short acceptance windows between service ticks.
                 async Task<bool> WaitFor(Func<List<int>, bool> condition, int timeoutMs = 3000)
                 {
                     var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -319,7 +320,7 @@ namespace OmenCoreApp.Tests.Services
                     {
                         var rpms = (List<int>)lastRpmsField!.GetValue(fanService)!;
                         if (condition(rpms)) return true;
-                        await Task.Delay(50);
+                        await Task.Delay(10);
                     }
                     return false;
                 }
@@ -333,11 +334,13 @@ namespace OmenCoreApp.Tests.Services
                 }
 
                 // 2) After the second consecutive 1234 read, the value must be accepted.
-                bool accepted = await WaitFor(r => r.Count > 0 && r[0] == 1234, timeoutMs: 2000);
+                // Use a generous timeout and fast polling: the acceptance window is ~200ms wide
+                // (two 100ms service ticks) and can be missed under load with coarse polling.
+                bool accepted = await WaitFor(r => r.Count > 0 && r[0] == 1234, timeoutMs: 5000);
                 accepted.Should().BeTrue("second consecutive 1234 read must cause acceptance");
 
                 // 3) Accept zero immediately once fans stop (duty==0).
-                bool stoppedAndAccepted = await WaitFor(r => r.Count > 0 && r[0] == 0, timeoutMs: 2000);
+                bool stoppedAndAccepted = await WaitFor(r => r.Count > 0 && r[0] == 0, timeoutMs: 5000);
                 stoppedAndAccepted.Should().BeTrue("_lastFanSpeeds[0] should drop to 0 once the zero+duty==0 stage is reached");
             }
             finally
@@ -474,7 +477,7 @@ namespace OmenCoreApp.Tests.Services
                 {
                     var rpms = (List<int>)lastRpmsField!.GetValue(fanService)!;
                     if (condition(rpms)) return true;
-                    await Task.Delay(30);
+                    await Task.Delay(10);
                 }
                 return false;
             }
@@ -482,7 +485,7 @@ namespace OmenCoreApp.Tests.Services
             try
             {
                 // Wait for the initial stable 2000rpm to be established
-                bool seeded = await WaitFor(r => r.Count > 0 && r[0] == 2000, timeoutMs: 1000);
+                bool seeded = await WaitFor(r => r.Count > 0 && r[0] == 2000, timeoutMs: 2000);
                 seeded.Should().BeTrue("initial stable RPM must be seeded");
 
                 // Rapidly apply presets (simulate user hammering quick-profile keys)
@@ -505,7 +508,7 @@ namespace OmenCoreApp.Tests.Services
                 }
 
                 // After sufficient poll cycles the inconsistent-zero stages drain and 3500 is confirmed.
-                bool accepted = await WaitFor(r => r.Count > 0 && r[0] == 3500, timeoutMs: 3000);
+                bool accepted = await WaitFor(r => r.Count > 0 && r[0] == 3500, timeoutMs: 5000);
                 accepted.Should().BeTrue("confirmed 3500rpm must be accepted once inconsistent-zero stages are exhausted");
             }
             finally

@@ -872,17 +872,17 @@
 
                                 <TextBlock Foreground="{StaticResource TextPrimaryBrush}" Margin="0,0,0,4">
                                     <Run Text="Current tier: " FontWeight="SemiBold"/>
-                                    <Run Text="{Binding MonitoringCadenceTier}"/>
+                                    <Run Text="{Binding MonitoringCadenceTier, Mode=OneWay}"/>
                                 </TextBlock>
 
                                 <TextBlock Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap" Margin="0,0,0,4">
                                     <Run Text="Reason: " FontWeight="SemiBold"/>
-                                    <Run Text="{Binding MonitoringCadenceReason}"/>
+                                    <Run Text="{Binding MonitoringCadenceReason, Mode=OneWay}"/>
                                 </TextBlock>
 
                                 <TextBlock Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap">
                                     <Run Text="Ultra-low blockers: " FontWeight="SemiBold"/>
-                                    <Run Text="{Binding MonitoringCadenceBlockers}"/>
+                                    <Run Text="{Binding MonitoringCadenceBlockers, Mode=OneWay}"/>
                                 </TextBlock>
                             </StackPanel>
                         </Border>

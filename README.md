@@ -27,7 +27,7 @@
 
 ### ⚡ Quick Links
 
-[![Version](https://img.shields.io/badge/version-3.5.0-red.svg?style=for-the-badge)](docs/CHANGELOG_v3.5.0.md)
+[![Version](https://img.shields.io/badge/version-3.6.0-red.svg?style=for-the-badge)](docs/CHANGELOG_v3.6.0.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=for-the-badge)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8.0-purple.svg?style=for-the-badge)](https://dotnet.microsoft.com/download/dotnet/8.0)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2.svg?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/9WhJdabGk8)
@@ -83,25 +83,24 @@ This generates a timestamped folder with:
 
 Attach those files to your GitHub issue for faster triage.
 
-## 🔥 **What's New in v3.5.0**
+## 🔥 **What's New in v3.6.0**
 
-v3.5.0 is the current release, focused on hardware-control correctness, reliability, and clearer requested-vs-confirmed state reporting.
+v3.6.0 is the current release, focused on lightweight runtime behavior plus reliability hardening for fan, hotkey, and RGB control paths.
 
-### v3.5.0 Highlights
+### v3.6.0 Highlights
 
-- **Fan/profile wording clarity updates** now make linked-vs-independent fan policy behavior explicit.
-- **Quick tuning diagnostics panel** was added in the tuning view for screenshot-friendly status capture (CPU UV, GPU OC, conflicts, startup recovery state).
-- **Tuning safety guardrails expanded** with conflict detection and startup recovery metadata/reset flow.
-- **Requested vs confirmed status surfaces** were hardened across fan/tray/tuning paths to reduce optimistic-success confusion.
-- **Deferred scope moved out of the changelog** into the dedicated v3.6 roadmap document.
+- **RGB/backlight reliability hardening** with model-aware backend fallback retries and safer recovery flows.
+- **Hotkey reliability improvements** to avoid duplicate/conflicting startup registrations under delayed window-handle timing.
+- **Memory Optimizer quality pass** with richer cleanup metrics, game-aware behavior, and dynamic exclusion guidance.
+- **Lightweight runtime work** to reduce startup/idle overhead while preserving monitoring and diagnostics visibility.
 
 ### Release Notes
 
-Current stable release is **v3.5.0**.
+Current stable release is **v3.6.0**.
 
-→ **[v3.5.0 Changelog / Validation Gate](docs/CHANGELOG_v3.5.0.md)**
+→ **[v3.6.0 Changelog](docs/CHANGELOG_v3.6.0.md)**
 
-→ **[v3.6.0 Roadmap (Deferred Scope)](docs/ROADMAP_v3.6.0.md)**
+→ **[v3.6.0 Roadmap](docs/ROADMAP_v3.6.0.md)**
 
 → **[Previous Stable Changelog (v3.4.1)](docs/CHANGELOG_v3.4.1.md)**
 
@@ -109,25 +108,19 @@ Current stable release is **v3.5.0**.
 
 ## 📦 **Downloads & Artifacts**
 
-**Version:** v3.5.0 | **Status:** Released
+**Version:** v3.6.0 | **Status:** Released
 
 Release artifacts:
 
 | Download | Platform | Details |
 |----------|----------|----------|
-| **OmenCoreSetup-3.5.0.exe** | Windows | Installer (Recommended) — Includes .NET 8 runtime |
-| **OmenCore-3.5.0-win-x64.zip** | Windows | Portable — Extract and run, no installation |
-| **OmenCore-3.5.0-linux-x64.zip** | Linux | CLI + Avalonia GUI, self-contained runtime |
+| **OmenCoreSetup-3.6.0.exe** | Windows | Installer (Recommended) — Includes .NET 8 runtime |
+| **OmenCore-3.6.0-win-x64.zip** | Windows | Portable — Extract and run, no installation |
+| **OmenCore-3.6.0-linux-x64.zip** | Linux | CLI + Avalonia GUI, self-contained runtime |
 
 ### SHA256
 
-```text
-8821890923D1C4A59C300FEE8B1F8415AE2B92F4063F71D1FF8A8EA009533E14  OmenCoreSetup-3.5.0.exe
-16DF5B0FD818A5BF358AD82489B49980C5EBA7B987E697E2044F2ED51C3ABC9F  OmenCore-3.5.0-win-x64.zip
-B3892F2BAC699DB3C07EAF6D8A2C5412663711D44DC2AE1076299B3CF77C6744  OmenCore-3.5.0-linux-x64.zip
-```
-
-> Security: release hashes are documented in [CHANGELOG_v3.5.0.md](docs/CHANGELOG_v3.5.0.md) and on the [GitHub Releases page](https://github.com/theantipopau/omencore/releases).
+Release hashes are published alongside each asset on the [GitHub Releases page](https://github.com/theantipopau/omencore/releases).
 
 ---
 
@@ -304,7 +297,7 @@ cd src\OmenCoreApp\bin\Release\net8.0-windows10.0.19041.0
 ```powershell
 pwsh ./build-installer.ps1
 # Optional: -Configuration Release -Runtime win-x64 (these are the defaults)
-# Outputs: artifacts/OmenCoreSetup-3.5.0.exe and artifacts/OmenCore-3.5.0-win-x64.zip
+# Outputs: artifacts/OmenCoreSetup-3.6.0.exe and artifacts/OmenCore-3.6.0-win-x64.zip
 ```
 
 ### Tests

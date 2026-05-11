@@ -101,5 +101,42 @@ namespace OmenCoreApp.Tests.ViewModels
                 }
             }
         }
+
+        [Fact]
+        public void ExclusionGuidanceText_SuggestsTopProcess_ThenAdvancesAfterExclusion()
+        {
+            using var logger = new LoggingService();
+            using var vm = new MemoryOptimizerViewModel(logger);
+            vm.SetPageActive(false);
+
+            var game = new ProcessMemoryInfo { ProcessId = 11, ProcessName = "ExampleGame.exe", WorkingSetMB = 3200 };
+            var capture = new ProcessMemoryInfo { ProcessId = 12, ProcessName = "CaptureTool.exe", WorkingSetMB = 1800 };
+
+            vm.TopProcesses.Clear();
+            vm.TopProcesses.Add(game);
+            vm.TopProcesses.Add(capture);
+
+            vm.ExclusionGuidanceText.Should().Contain("ExampleGame");
+            vm.ExclusionGuidanceText.Should().Contain("CaptureTool");
+
+            vm.AddTopProcessToExclusionsCommand.Execute(game);
+
+            vm.ExclusionGuidanceText.Should().NotContain("ExampleGame");
+            vm.ExclusionGuidanceText.Should().Contain("CaptureTool");
+        }
+
+        [Fact]
+        public void ExclusionGuidanceText_WithNoSuggestions_ShowsFallbackGuidance()
+        {
+            using var logger = new LoggingService();
+            using var vm = new MemoryOptimizerViewModel(logger);
+            vm.SetPageActive(false);
+
+            vm.TopProcesses.Clear();
+            vm.ExcludedProcesses.Clear();
+
+            vm.ExclusionGuidanceText.Should().Contain("Tip: exclude apps you keep open");
+            vm.ExclusionGuidanceText.Should().Contain("without .exe");
+        }
     }
 }

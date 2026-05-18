@@ -150,7 +150,7 @@ namespace OmenCore.ViewModels
                     if (_preTestPreset != null)
                     {
                         _logging.Info($"[FanDiagnostic] Restoring preset: {_preTestPreset.Name}");
-                        _fanService.ApplyPreset(_preTestPreset);
+                        _fanService.ApplyPreset(_preTestPreset, immediate: true);
                         _preTestPreset = null;
                     }
                     else
@@ -346,7 +346,7 @@ namespace OmenCore.ViewModels
                 if (_preTestPreset != null)
                 {
                     _logging.Info($"[GuidedDiagnostic] Restoring preset: {_preTestPreset.Name}");
-                    _fanService.ApplyPreset(_preTestPreset);
+                    _fanService.ApplyPreset(_preTestPreset, immediate: true);
                     _preTestPreset = null;
                 }
                 else

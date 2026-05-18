@@ -271,9 +271,9 @@ namespace OmenCore.ViewModels
             }
 
             // Subscribe to service events
-            _service.StatusChanged += status => Application.Current.Dispatcher.Invoke(() => StatusMessage = status);
-            _service.AppRemoved += app => Application.Current.Dispatcher.Invoke(() => UpdateCounts());
-            _service.AppRestored += app => Application.Current.Dispatcher.Invoke(() => UpdateCounts());
+            _service.StatusChanged += status => DispatcherHelper.RunOnUiThread(() => StatusMessage = status);
+            _service.AppRemoved += app => DispatcherHelper.RunOnUiThread(UpdateCounts);
+            _service.AppRestored += app => DispatcherHelper.RunOnUiThread(UpdateCounts);
 
             // Warn immediately if not running as admin
             if (!BloatwareManagerService.IsRunningAsAdmin)

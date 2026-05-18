@@ -2662,7 +2662,7 @@ namespace OmenCore.ViewModels
         
         private void OnSceneServiceSceneChanged(object? sender, RgbSceneChangedEventArgs e)
         {
-            Application.Current?.Dispatcher?.Invoke(() =>
+            DispatcherHelper.RunOnUiThread(() =>
             {
                 _selectedScene = e.CurrentScene;
                 OnPropertyChanged(nameof(SelectedScene));
@@ -2678,7 +2678,7 @@ namespace OmenCore.ViewModels
         
         private void OnSceneServiceListChanged(object? sender, EventArgs e)
         {
-            Application.Current?.Dispatcher?.Invoke(() =>
+            DispatcherHelper.RunOnUiThread(() =>
             {
                 Scenes.Clear();
                 if (_sceneService != null)
@@ -2693,7 +2693,7 @@ namespace OmenCore.ViewModels
         
         private void OnAmbientColorChanged(object? sender, System.Drawing.Color color)
         {
-            Application.Current?.Dispatcher?.Invoke(() =>
+            DispatcherHelper.RunOnUiThread(() =>
             {
                 AmbientColorHex = $"#{color.R:X2}{color.G:X2}{color.B:X2}";
                 OnPropertyChanged(nameof(AmbientColorHex));
@@ -2799,7 +2799,7 @@ namespace OmenCore.ViewModels
                     
                     _sceneService.AddScene(scene);
                     
-                    Application.Current?.Dispatcher?.Invoke(() =>
+                    DispatcherHelper.RunOnUiThread(() =>
                     {
                         Scenes.Add(scene);
                         SelectedScene = scene;
@@ -2881,7 +2881,7 @@ namespace OmenCore.ViewModels
 
         private void OnAudioReactiveDataProcessed(object? sender, AudioDataEventArgs e)
         {
-            Application.Current?.Dispatcher?.Invoke(() =>
+            DispatcherHelper.RunOnUiThread(() =>
             {
                 AmbientColorHex = $"#{_audioReactiveRgbService?.GetCurrentColor().R ?? 0:X2}{_audioReactiveRgbService?.GetCurrentColor().G ?? 0:X2}{_audioReactiveRgbService?.GetCurrentColor().B ?? 0:X2}";
                 OnPropertyChanged(nameof(AmbientColorHex));

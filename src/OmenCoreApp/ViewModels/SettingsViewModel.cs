@@ -48,6 +48,8 @@ namespace OmenCore.ViewModels
         private bool _headlessMode;
         private bool _liteModeEnabled;
         private bool _linkFanToPerformanceMode;
+        private bool _enableStartupHardwareRestore;
+        private bool _allowStartupRestoreOnOmen16OrVictus;
         private bool _useSoftwareRendering;
         private int _historyCount = 120;
         private bool _lowOverheadMode;
@@ -354,6 +356,42 @@ namespace OmenCore.ViewModels
                 }
             }
         }
+
+        public bool EnableStartupHardwareRestore
+        {
+            get => _enableStartupHardwareRestore;
+            set
+            {
+                if (_enableStartupHardwareRestore != value)
+                {
+                    _enableStartupHardwareRestore = value;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(StartupHardwareRestoreStatus));
+                    SaveSettings();
+                }
+            }
+        }
+
+        public bool AllowStartupRestoreOnOmen16OrVictus
+        {
+            get => _allowStartupRestoreOnOmen16OrVictus;
+            set
+            {
+                if (_allowStartupRestoreOnOmen16OrVictus != value)
+                {
+                    _allowStartupRestoreOnOmen16OrVictus = value;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(StartupHardwareRestoreStatus));
+                    SaveSettings();
+                }
+            }
+        }
+
+        public string StartupHardwareRestoreStatus => EnableStartupHardwareRestore
+            ? AllowStartupRestoreOnOmen16OrVictus
+                ? "Enabled for all supported models"
+                : "Enabled, but blocked on OMEN 16/Victus guardrail models"
+            : "Disabled";
 
         public bool UseSoftwareRendering
         {
@@ -2866,6 +2904,8 @@ namespace OmenCore.ViewModels
             _headlessMode = _config.HeadlessMode;
             _liteModeEnabled = _config.LiteModeEnabled;
             _linkFanToPerformanceMode = _config.LinkFanToPerformanceMode;
+            _enableStartupHardwareRestore = _config.EnableStartupHardwareRestore;
+            _allowStartupRestoreOnOmen16OrVictus = _config.AllowStartupRestoreOnOmen16OrVictus;
             _useSoftwareRendering = _config.UseSoftwareRendering;
             
             // Load power automation settings
@@ -2912,6 +2952,8 @@ namespace OmenCore.ViewModels
             _config.HeadlessMode = _headlessMode;
             _config.LiteModeEnabled = _liteModeEnabled;
             _config.LinkFanToPerformanceMode = _linkFanToPerformanceMode;
+            _config.EnableStartupHardwareRestore = _enableStartupHardwareRestore;
+            _config.AllowStartupRestoreOnOmen16OrVictus = _allowStartupRestoreOnOmen16OrVictus;
             _config.UseSoftwareRendering = _useSoftwareRendering;
             
             // Save power automation settings

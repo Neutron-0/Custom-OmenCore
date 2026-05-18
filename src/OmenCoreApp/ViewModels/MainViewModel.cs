@@ -138,12 +138,15 @@ namespace OmenCore.ViewModels
                     {
                         if (e.PropertyName == nameof(FanControlViewModel.CurrentFanModeName))
                         {
+                            var confirmedFanMode = _fanService.GetCurrentFanMode()
+                                ?? _fanService.ActivePresetName
+                                ?? CurrentFanMode;
                             if (_dashboard != null)
                             {
-                                _dashboard.CurrentFanMode = _fanControl.CurrentFanModeName;
+                                _dashboard.CurrentFanMode = confirmedFanMode;
                             }
-                            // Also update MainViewModel.CurrentFanMode to sync with tray
-                            CurrentFanMode = _fanControl.CurrentFanModeName;
+                            // Keep tray/OSD on the confirmed runtime mode; selection changes are only requests.
+                            CurrentFanMode = confirmedFanMode;
                         }
                     };
                     OnPropertyChanged(nameof(FanControl));
@@ -190,12 +193,14 @@ namespace OmenCore.ViewModels
                     {
                         if (e.PropertyName == nameof(SystemControlViewModel.CurrentPerformanceModeName))
                         {
+                            var confirmedPerformanceMode = _performanceModeService.GetCurrentMode()
+                                ?? CurrentPerformanceMode;
                             if (_dashboard != null)
                             {
-                                _dashboard.CurrentPerformanceMode = _systemControl.CurrentPerformanceModeName;
+                                _dashboard.CurrentPerformanceMode = confirmedPerformanceMode;
                             }
-                            // Also sync to MainViewModel's CurrentPerformanceMode for tray menu
-                            CurrentPerformanceMode = _systemControl.CurrentPerformanceModeName;
+                            // Keep tray/OSD on the confirmed runtime mode; selection changes are only requests.
+                            CurrentPerformanceMode = confirmedPerformanceMode;
                         }
                     };
                     _general?.SetSystemControlViewModel(_systemControl);
@@ -216,18 +221,16 @@ namespace OmenCore.ViewModels
                 {
                     _dashboard = new DashboardViewModel(_hardwareMonitoringService, pollingCoordinator: _pollingCoordinator);
                     // Initialize with current values without forcing lazy sub-viewmodels to load.
-                    if (_systemControl != null)
-                    {
-                        _dashboard.CurrentPerformanceMode = _systemControl.CurrentPerformanceModeName;
-                        // Sync to tray menu as well
-                        CurrentPerformanceMode = _systemControl.CurrentPerformanceModeName;
-                    }
-                    else
-                    {
-                        _dashboard.CurrentPerformanceMode = CurrentPerformanceMode;
-                    }
+                    var confirmedPerformanceMode = _performanceModeService.GetCurrentMode()
+                        ?? CurrentPerformanceMode;
+                    var confirmedFanMode = _fanService.GetCurrentFanMode()
+                        ?? _fanService.ActivePresetName
+                        ?? CurrentFanMode;
 
-                    _dashboard.CurrentFanMode = _fanControl?.CurrentFanModeName ?? CurrentFanMode;
+                    _dashboard.CurrentPerformanceMode = confirmedPerformanceMode;
+                    _dashboard.CurrentFanMode = confirmedFanMode;
+                    CurrentPerformanceMode = confirmedPerformanceMode;
+                    CurrentFanMode = confirmedFanMode;
                     _dashboard.ModeLinkStatus = FanPerformanceLinkStatus;
                     OnPropertyChanged(nameof(Dashboard));
                 }
@@ -408,6 +411,8 @@ namespace OmenCore.ViewModels
                 {
                     var libraryService = new GameLibraryService(_logging);
                     _gameLibrary = new GameLibraryViewModel(_logging, libraryService, _gameProfileService);
+                    _gameLibrary.ProfileCreated += (_, e) => OpenGameProfileManager(e.Profile);
+                    _gameLibrary.ProfileEditRequested += (_, e) => OpenGameProfileManager(e.Profile);
                     OnPropertyChanged(nameof(GameLibrary));
                 }
                 return _gameLibrary;
@@ -1846,6 +1851,8 @@ namespace OmenCore.ViewModels
             _hotkeyService.TogglePerformanceModeRequested += OnHotkeyTogglePerformanceMode;
             _hotkeyService.ToggleBoostModeRequested += OnHotkeyToggleBoostMode;
             _hotkeyService.ToggleQuietModeRequested += OnHotkeyToggleQuietMode;
+            _hotkeyService.ShowWindowRequested += OnHotkeyShowWindow;
+            _hotkeyService.OpenDashboardRequested += OnHotkeyOpenDashboard;
             _hotkeyService.ToggleWindowRequested += OnHotkeyToggleWindow;
             
             // Wire up OMEN key events
@@ -2116,11 +2123,18 @@ namespace OmenCore.ViewModels
             {
                 // Brief delay to let hardware stabilize after boot
                 await Task.Delay(2000);
+                var startupHardwareRestoreEnabled = ShouldRunStartupHardwareRestore();
                 
                 // Restore GPU Power Boost level
                 var savedGpuPb = _config.LastGpuPowerBoostLevel;
                 if (!string.IsNullOrEmpty(savedGpuPb) && _wmiBios != null)
                 {
+                    if (!startupHardwareRestoreEnabled)
+                    {
+                        _logging.Warn("Startup hardware restore is disabled - skipping automatic GPU Power Boost reapply");
+                    }
+                    else
+                    {
                     for (int attempt = 1; attempt <= 3; attempt++)
                     {
                         try
@@ -2146,12 +2160,19 @@ namespace OmenCore.ViewModels
                             if (attempt < 3) await Task.Delay(1500);
                         }
                     }
+                    }
                 }
                 
                 // Restore fan preset
                 var savedFanPreset = _config.LastFanPresetName;
                 if (!string.IsNullOrEmpty(savedFanPreset) && _fanService != null)
                 {
+                    if (!startupHardwareRestoreEnabled)
+                    {
+                        _logging.Warn("Startup hardware restore is disabled - skipping automatic fan preset reapply");
+                    }
+                    else
+                    {
                     try
                     {
                         string ResolveConfirmedFanModeLabel(string requested)
@@ -2177,6 +2198,7 @@ namespace OmenCore.ViewModels
                                 FanControl?.SelectPresetByNameNoApply(savedFanPreset);
                                 CurrentFanMode = confirmedMode;
                                 if (_dashboard != null) _dashboard.CurrentFanMode = confirmedMode;
+                                _general?.SyncRuntimeState(CurrentPerformanceMode, confirmedMode);
                             }, "RestoreSavedFanPreset");
                         }
                         else
@@ -2198,12 +2220,14 @@ namespace OmenCore.ViewModels
                                 FanControl?.SelectPresetByNameNoApply(savedFanPreset);
                                 CurrentFanMode = confirmedMode;
                                 if (_dashboard != null) _dashboard.CurrentFanMode = confirmedMode;
+                                _general?.SyncRuntimeState(CurrentPerformanceMode, confirmedMode);
                             }, "RestoreBuiltInFanPreset");
                         }
                     }
                     catch (Exception ex)
                     {
                         _logging.Warn($"Fan preset restore failed: {ex.Message}");
+                    }
                     }
                 }
                 
@@ -2230,6 +2254,26 @@ namespace OmenCore.ViewModels
                     message: "Settings restoration failed",
                     ex: ex);
             }
+        }
+
+        private bool ShouldRunStartupHardwareRestore()
+        {
+            if (!_config.EnableStartupHardwareRestore)
+            {
+                return false;
+            }
+
+            var model = SystemInfo?.Model ?? string.Empty;
+            var guardedModel = model.Contains("OMEN 16", StringComparison.OrdinalIgnoreCase) ||
+                               model.Contains("Victus", StringComparison.OrdinalIgnoreCase);
+
+            if (guardedModel && !_config.AllowStartupRestoreOnOmen16OrVictus)
+            {
+                _logging.Warn($"Startup hardware restore blocked on sensitive model '{model}'. Enable AllowStartupRestoreOnOmen16OrVictus to override.");
+                return false;
+            }
+
+            return true;
         }
 
         private async Task InitializeGameProfilesAsync()
@@ -2446,14 +2490,14 @@ namespace OmenCore.ViewModels
             return Task.CompletedTask;
         }
 
-        private void OpenGameProfileManager()
+        private void OpenGameProfileManager(GameProfile? initialProfile = null)
         {
             try
             {
                 var window = new GameProfileManagerView
                 {
                     Owner = Application.Current.MainWindow,
-                    DataContext = new GameProfileManagerViewModel(_gameProfileService, _logging)
+                    DataContext = new GameProfileManagerViewModel(_gameProfileService, _logging, initialProfile)
                 };
                 window.ShowDialog();
             }
@@ -3713,21 +3757,63 @@ namespace OmenCore.ViewModels
                 return activeCustom;
             }
 
+            if (_fanControl?.SelectedPreset is { IsBuiltIn: false } activeFanControlCustom)
+            {
+                return activeFanControlCustom;
+            }
+
             var activeName = _fanService?.ActivePresetName;
             if (!string.IsNullOrWhiteSpace(activeName))
             {
-                var namedPreset = FanPresets.FirstOrDefault(p =>
-                    !p.IsBuiltIn &&
-                    p.Curve.Count > 0 &&
-                    p.Name.Equals(activeName, StringComparison.OrdinalIgnoreCase));
-
+                var namedPreset = FindQuickAccessCurvePreset(activeName);
                 if (namedPreset != null)
                 {
                     return namedPreset;
                 }
             }
 
-            return FanPresets.FirstOrDefault(p => !p.IsBuiltIn && p.Curve.Count > 0);
+            var savedName = _configService.Config.LastFanPresetName;
+            if (!string.IsNullOrWhiteSpace(savedName))
+            {
+                var savedPreset = FindQuickAccessCurvePreset(savedName);
+                if (savedPreset != null)
+                {
+                    return savedPreset;
+                }
+            }
+
+            return EnumerateQuickAccessFanPresetCandidates()
+                .FirstOrDefault(p => !p.IsBuiltIn && p.Curve.Count > 0);
+        }
+
+        private FanPreset? FindQuickAccessCurvePreset(string presetName)
+        {
+            return EnumerateQuickAccessFanPresetCandidates()
+                .FirstOrDefault(p =>
+                    !p.IsBuiltIn &&
+                    p.Curve.Count > 0 &&
+                    p.Name.Equals(presetName, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private IEnumerable<FanPreset> EnumerateQuickAccessFanPresetCandidates()
+        {
+            foreach (var preset in FanPresets)
+            {
+                yield return preset;
+            }
+
+            if (_fanControl != null)
+            {
+                foreach (var preset in _fanControl.FanPresets)
+                {
+                    yield return preset;
+                }
+            }
+
+            foreach (var preset in _configService.Config.FanPresets)
+            {
+                yield return preset;
+            }
         }
 
         public void SetPerformanceModeFromTray(string mode)
@@ -3747,8 +3833,10 @@ namespace OmenCore.ViewModels
                             _systemControl.SelectModeByNameNoApply(mode);
                         }
 
-                        CurrentPerformanceMode = mode;
-                        PushEvent($"⚡ Performance: {mode}");
+                        var confirmedMode = _performanceModeService.GetCurrentMode() ?? mode;
+                        CurrentPerformanceMode = confirmedMode;
+                        General?.SyncRuntimeState(confirmedMode, CurrentFanMode);
+                        PushEvent($"⚡ Performance: {confirmedMode}");
                     });
                 }
             });
@@ -3772,10 +3860,10 @@ namespace OmenCore.ViewModels
                         await Task.Run(() =>
                         {
                             _performanceModeService.SetPerformanceMode("Performance");
-                            _fanService.ApplyMaxCooling();
+                            _fanService.ApplyPreset(CreatePerformanceQuickProfileFanPreset(), immediate: true);
                         });
                         performanceMode = "Performance";
-                        fanMode = "Max";
+                        fanMode = "Gaming";
                         break;
 
                     case "balanced":
@@ -3810,17 +3898,39 @@ namespace OmenCore.ViewModels
                         var confirmedFanMode = _fanService.GetCurrentFanMode()
                             ?? _fanService.ActivePresetName
                             ?? fanMode;
+                        var confirmedPerformanceMode = _performanceModeService.GetCurrentMode()
+                            ?? performanceMode;
 
-                        CurrentPerformanceMode = performanceMode;
+                        CurrentPerformanceMode = confirmedPerformanceMode;
                         CurrentFanMode = confirmedFanMode;
                         General?.SetSystemControlViewModel(_systemControl);
-                        _systemControl?.SelectModeByNameNoApply(performanceMode);
+                        General?.SyncRuntimeState(confirmedPerformanceMode, confirmedFanMode);
+                        _systemControl?.SelectModeByNameNoApply(confirmedPerformanceMode);
                         FanControl?.SelectPresetByNameNoApply(confirmedFanMode);
                         ShowHotkeyOsd("Profile", profile, "Tray");
                         PushEvent($"🎮 Profile: {profile} (fan: {confirmedFanMode})");
                     });
                 }
             });
+        }
+
+        private static FanPreset CreatePerformanceQuickProfileFanPreset()
+        {
+            return new FanPreset
+            {
+                Name = "Gaming",
+                Mode = FanMode.Performance,
+                IsBuiltIn = true,
+                Curve = new()
+                {
+                    new FanCurvePoint { TemperatureC = 40, FanPercent = 30 },
+                    new FanCurvePoint { TemperatureC = 50, FanPercent = 42 },
+                    new FanCurvePoint { TemperatureC = 60, FanPercent = 58 },
+                    new FanCurvePoint { TemperatureC = 70, FanPercent = 72 },
+                    new FanCurvePoint { TemperatureC = 80, FanPercent = 88 },
+                    new FanCurvePoint { TemperatureC = 90, FanPercent = 100 }
+                }
+            };
         }
         
         /// <summary>
@@ -3948,21 +4058,8 @@ namespace OmenCore.ViewModels
             {
                 if (FanControl == null) return;
 
-                // Required deterministic cycle: Auto -> Gaming -> Extreme -> Custom -> Quiet
-                var cycle = new[] { "Auto", "Gaming", "Extreme", "Custom", "Quiet" };
                 var currentCycleMode = ResolveHotkeyFanCycleMode();
-                var currentIndex = Array.IndexOf(cycle, currentCycleMode);
-                if (currentIndex < 0)
-                {
-                    currentIndex = 0;
-                }
-
-                var nextMode = cycle[(currentIndex + 1) % cycle.Length];
-                var targetMode = nextMode;
-                if (string.Equals(nextMode, "Custom", StringComparison.OrdinalIgnoreCase))
-                {
-                    targetMode = ResolveQuickAccessCurvePreset()?.Name ?? "Auto";
-                }
+                var nextMode = ResolveNextHotkeyFanMode(currentCycleMode, out var targetMode);
                 
                 try
                 {
@@ -4130,6 +4227,55 @@ namespace OmenCore.ViewModels
                 }
             });
         }
+
+        private void OnHotkeyShowWindow(object? sender, EventArgs e)
+        {
+            _hotkeyCoordinator.EnqueueUiAction("ShowWindow", () =>
+            {
+                ShowMainWindowFromHotkey(navigateToMonitoring: false);
+            });
+        }
+
+        private void OnHotkeyOpenDashboard(object? sender, EventArgs e)
+        {
+            _hotkeyCoordinator.EnqueueUiAction("OpenDashboard", () =>
+            {
+                ShowMainWindowFromHotkey(navigateToMonitoring: true);
+            });
+        }
+
+        private void ShowMainWindowFromHotkey(bool navigateToMonitoring)
+        {
+            var mainWindow = Application.Current.MainWindow;
+            if (mainWindow == null)
+            {
+                _logging.Warn("Show window: MainWindow is null");
+                return;
+            }
+
+            mainWindow.Show();
+            mainWindow.ShowInTaskbar = true;
+            mainWindow.WindowState = WindowState.Normal;
+
+            var handle = new WindowInteropHelper(mainWindow).Handle;
+            if (handle != IntPtr.Zero)
+            {
+                ShowWindow(handle, SW_RESTORE);
+                SetForegroundWindow(handle);
+            }
+
+            mainWindow.Activate();
+            mainWindow.Focus();
+
+            if (navigateToMonitoring)
+            {
+                SelectedTabIndex = MonitoringTabIndex;
+            }
+
+            _logging.Info(navigateToMonitoring
+                ? "Dashboard window shown from hotkey"
+                : "Window shown from hotkey");
+        }
         
         private void OnOmenKeyToggleWindow(object? sender, EventArgs e)
         {
@@ -4266,6 +4412,7 @@ namespace OmenCore.ViewModels
                     
                     // Update FanControlViewModel's selected preset if loaded
                     FanControl?.SelectPresetByNameNoApply(presetName);
+                    _general?.SyncRuntimeState(CurrentPerformanceMode, confirmedModeName);
 
                     // When fan/performance linking is enabled, fan mode changes become
                     // authoritative and update performance mode through one guarded path.
@@ -4319,6 +4466,7 @@ namespace OmenCore.ViewModels
                     
                     // Update SystemControlViewModel's selected mode (without re-applying)
                     SystemControl?.SelectModeByNameNoApply(modeName);
+                    _general?.SyncRuntimeState(modeName, CurrentFanMode);
 
                     if (IsFanPerformanceLinked && TryEnterProfileSync())
                     {
@@ -4375,7 +4523,8 @@ namespace OmenCore.ViewModels
                         // Its entire purpose is to bring the window back from tray — it must
                         // fire even when the window is hidden/deactivated.
                         _hotkeyService.RegisterHotkey(HotkeyAction.ToggleWindow, ModifierKeys.Control | ModifierKeys.Shift, Key.O);
-                        _logging.Info("ToggleWindow hotkey registered globally (window-focus mode)");
+                        _hotkeyService.RegisterHotkey(HotkeyAction.ShowWindow, ModifierKeys.Windows, Key.F12);
+                        _logging.Info("Window restore hotkeys registered globally (window-focus mode)");
 
                         // Attach to main window activation events so that the remaining hotkeys
                         // are only active when the app has focus. This avoids conflicts with
@@ -4520,9 +4669,9 @@ namespace OmenCore.ViewModels
                 // Unregister all window-focused hotkeys EXCEPT ToggleWindow (Ctrl+Shift+O).
                 // ToggleWindow must stay registered so the app can be brought back from tray
                 // even when the window is hidden/deactivated.
-                _hotkeyService.UnregisterAllExcept(HotkeyAction.ToggleWindow);
+                _hotkeyService.UnregisterAllExcept(HotkeyAction.ToggleWindow, HotkeyAction.ShowWindow);
                 _windowHotkeysActive = false;
-                _logging.Info("Hotkeys unregistered (window deactivated; ToggleWindow preserved)");
+                _logging.Info("Hotkeys unregistered (window deactivated; window restore hotkeys preserved)");
                 PushEvent("⌨️ Hotkeys inactive (window lost focus)");
             }
             catch (Exception ex)
@@ -4587,6 +4736,8 @@ namespace OmenCore.ViewModels
                 _hotkeyService.TogglePerformanceModeRequested -= OnHotkeyTogglePerformanceMode;
                 _hotkeyService.ToggleBoostModeRequested -= OnHotkeyToggleBoostMode;
                 _hotkeyService.ToggleQuietModeRequested -= OnHotkeyToggleQuietMode;
+                _hotkeyService.ShowWindowRequested -= OnHotkeyShowWindow;
+                _hotkeyService.OpenDashboardRequested -= OnHotkeyOpenDashboard;
                 _hotkeyService.ToggleWindowRequested -= OnHotkeyToggleWindow;
             }
             // Unsubscribe window focus handlers if attached
@@ -4742,6 +4893,40 @@ namespace OmenCore.ViewModels
                 return "Custom";
             }
 
+            return "Auto";
+        }
+
+        private string ResolveNextHotkeyFanMode(string currentCycleMode, out string targetMode)
+        {
+            // Required deterministic cycle when all modes exist:
+            // Auto -> Gaming -> Extreme -> Custom -> Quiet.
+            // If there is no saved/active custom curve, skip the Custom display slot so OSD
+            // and tray history never claim "Custom" while applying Auto as a fallback.
+            var cycle = new[] { "Auto", "Gaming", "Extreme", "Custom", "Quiet" };
+            var currentIndex = Array.IndexOf(cycle, currentCycleMode);
+            if (currentIndex < 0)
+            {
+                currentIndex = 0;
+            }
+
+            for (var offset = 1; offset <= cycle.Length; offset++)
+            {
+                var candidate = cycle[(currentIndex + offset) % cycle.Length];
+                if (!string.Equals(candidate, "Custom", StringComparison.OrdinalIgnoreCase))
+                {
+                    targetMode = candidate;
+                    return candidate;
+                }
+
+                var customPreset = ResolveQuickAccessCurvePreset();
+                if (customPreset != null)
+                {
+                    targetMode = customPreset.Name;
+                    return "Custom";
+                }
+            }
+
+            targetMode = "Auto";
             return "Auto";
         }
 

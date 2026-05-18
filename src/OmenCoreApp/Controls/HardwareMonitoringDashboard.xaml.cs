@@ -29,7 +29,7 @@ namespace OmenCore.Controls
         private double _previousPower;
         private bool _isInitialized;
         private bool _showingNoDataPlaceholders;
-        private double _cachedBatteryHealth = -1; // Cached battery health (expensive to query)
+        private double _cachedBatteryHealth = -1; // Cached battery capacity health (expensive to query)
         private DateTime _lastBatteryHealthCheck = DateTime.MinValue;
         private bool _chartsSuppressed; // True when window is minimized or page is hidden
         private DateTime _lastChartRefreshUtc = DateTime.MinValue;
@@ -302,12 +302,20 @@ namespace OmenCore.Controls
                 }
                 _previousPower = estimatedPower;
 
-                // Update battery health using REAL data from WMI
+                // Update battery capacity health using real WMI capacity data when available.
+                // Do not fall back to 100%; that confuses charge-limit users because an 80%
+                // charge cap is separate from battery wear/capacity health.
                 var batteryHealth = await GetBatteryHealthPercentAsync();
-                if (BatteryHealthValue != null) BatteryHealthValue.Text = batteryHealth.ToString("F0");
+                var hasBatteryHealth = !double.IsNaN(batteryHealth);
+                if (BatteryHealthValue != null) BatteryHealthValue.Text = hasBatteryHealth ? batteryHealth.ToString("F0") : "--";
                 if (BatteryHealthStatus != null)
                 {
-                    if (batteryHealth >= 80)
+                    if (!hasBatteryHealth)
+                    {
+                        BatteryHealthStatus.Text = "Capacity unavailable";
+                        BatteryHealthStatus.Foreground = Brushes.Gray;
+                    }
+                    else if (batteryHealth >= 80)
                     {
                         BatteryHealthStatus.Text = "Good";
                         BatteryHealthStatus.Foreground = Brushes.LimeGreen;
@@ -476,7 +484,7 @@ namespace OmenCore.Controls
             if (PowerConsumptionValue != null) PowerConsumptionValue.Text = "--";
             if (PowerConsumptionTrend != null) PowerConsumptionTrend.Text = "No data";
             if (BatteryHealthValue != null) BatteryHealthValue.Text = "--";
-            if (BatteryHealthStatus != null) BatteryHealthStatus.Text = "Unknown";
+            if (BatteryHealthStatus != null) BatteryHealthStatus.Text = "Capacity unavailable";
             if (CpuTempValue != null) CpuTempValue.Text = "--";
             if (CpuTempStatus != null) CpuTempStatus.Text = "No data";
             if (GpuTempValue != null) GpuTempValue.Text = "--";
@@ -538,7 +546,7 @@ namespace OmenCore.Controls
         private async Task<double> GetBatteryHealthPercentAsync()
         {
             // Return cached value if recent (battery health doesn't change often)
-            if (_cachedBatteryHealth >= 0 && (DateTime.Now - _lastBatteryHealthCheck).TotalMinutes < 5)
+            if (_lastBatteryHealthCheck > DateTime.MinValue && (DateTime.Now - _lastBatteryHealthCheck).TotalMinutes < 5)
             {
                 return _cachedBatteryHealth;
             }
@@ -579,16 +587,15 @@ namespace OmenCore.Controls
                         return _cachedBatteryHealth;
                     }
 
-                    // Fallback: use EstimatedChargeRemaining if above fails (less accurate)
-                    App.Logging.Debug("[Dashboard] Battery WMI data unavailable, showing 100% as fallback");
-                    _cachedBatteryHealth = 100.0;
+                    App.Logging.Debug("[Dashboard] Battery capacity WMI data unavailable; capacity health will be shown as unavailable");
+                    _cachedBatteryHealth = double.NaN;
                     _lastBatteryHealthCheck = DateTime.Now;
                     return _cachedBatteryHealth;
                 }
                 catch (Exception ex)
                 {
                     App.Logging.Debug($"[Dashboard] Failed to get battery health: {ex.Message}");
-                    _cachedBatteryHealth = 100.0; // Fallback
+                    _cachedBatteryHealth = double.NaN;
                     _lastBatteryHealthCheck = DateTime.Now;
                     return _cachedBatteryHealth;
                 }

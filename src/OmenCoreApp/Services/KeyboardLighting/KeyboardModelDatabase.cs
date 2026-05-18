@@ -303,6 +303,17 @@ namespace OmenCore.Services.KeyboardLighting
                 Notes = "Ryzen AI 9 365 + RTX 5060 - V1 WMI keyboard interface"
             });
 
+            AddModel(new KeyboardModelConfig
+            {
+                ProductId = "8E35",
+                ModelName = "OMEN 16-ap0xxx (2025) AMD",
+                KeyboardType = KeyboardType.FourZone,
+                PreferredMethod = KeyboardMethod.ColorTable2020,
+                FallbackMethods = new[] { KeyboardMethod.NewWmi2023, KeyboardMethod.EcDirect },
+                ModelYear = 2025,
+                Notes = "Discord RC1 report - ProductId 8E35 / SKU 1H85430PWY, Ryzen AI 9 365 + RTX 5060 - V1 WMI keyboard interface"
+            });
+
             // OMEN Transcend 14 (2024) - fb1xxx series
             AddModel(new KeyboardModelConfig
             {
@@ -509,6 +520,19 @@ namespace OmenCore.Services.KeyboardLighting
                 ModelYear = 2023,
                 UserVerified = false,
                 Notes = "Added from user report — ensures keyboard zones are applied instead of falling back to Victus defaults"
+            });
+
+            AddModel(new KeyboardModelConfig
+            {
+                ProductId = "8BD4",
+                ModelName = "HP Victus 16-s0xxx AMD",
+                ModelNamePattern = "16-s0",
+                KeyboardType = KeyboardType.BacklightOnly,
+                PreferredMethod = KeyboardMethod.BacklightOnly,
+                FallbackMethods = Array.Empty<KeyboardMethod>(),
+                ModelYear = 2023,
+                UserVerified = false,
+                Notes = "RC1 field log - Victus 16-s0xxx (8BD4); conservative backlight-only default pending RGB verification"
             });
 
             // Additional Victus model reported by community (PN: 8A26)

@@ -1240,17 +1240,7 @@ namespace OmenCore.Hardware
                 var entries = _primaryGpu.PowerTopologyInformation.PowerTopologyEntries;
                 foreach (var entry in entries)
                 {
-                    // PowerUsageInPercent is relative to default TDP
-                    double percent = entry.PowerUsageInPercent;
-                    int effectiveTdp = DefaultPowerLimitWatts > 0 
-                        ? DefaultPowerLimitWatts 
-                        : EstimateFallbackTdp(GpuName);
-                    
-                    if (effectiveTdp > 0)
-                    {
-                        return Math.Round((percent / 100.0) * effectiveTdp, 1);
-                    }
-                    return percent; // Return percentage if we don't know TDP
+                    return ResolvePowerTopologyWatts(entry.PowerUsageInPercent, 0);
                 }
             }
             catch (Exception ex)
@@ -1370,14 +1360,7 @@ namespace OmenCore.Hardware
                 {
                     foreach (var entry in _primaryGpu.PowerTopologyInformation.PowerTopologyEntries)
                     {
-                        double percent = entry.PowerUsageInPercent;
-                        int effectiveTdp = DefaultPowerLimitWatts > 0 
-                            ? DefaultPowerLimitWatts 
-                            : EstimateFallbackTdp(GpuName);
-                        
-                        sample.GpuPowerWatts = effectiveTdp > 0
-                            ? Math.Round((percent / 100.0) * effectiveTdp, 1)
-                            : percent;
+                        sample.GpuPowerWatts = ResolvePowerTopologyWatts(entry.PowerUsageInPercent, sample.GpuLoadPercent);
                         break;
                     }
                 }
@@ -1421,6 +1404,10 @@ namespace OmenCore.Hardware
             if (string.IsNullOrEmpty(gpuName)) return 0;
             
             // Common NVIDIA laptop GPU TDPs (default power, not max boost)
+            if (gpuName.Contains("5090", StringComparison.OrdinalIgnoreCase)) return 175;
+            if (gpuName.Contains("5080", StringComparison.OrdinalIgnoreCase)) return 150;
+            if (gpuName.Contains("5070", StringComparison.OrdinalIgnoreCase)) return 115;
+            if (gpuName.Contains("5060", StringComparison.OrdinalIgnoreCase)) return 115;
             if (gpuName.Contains("4090", StringComparison.OrdinalIgnoreCase)) return 150;
             if (gpuName.Contains("4080", StringComparison.OrdinalIgnoreCase)) return 150;
             if (gpuName.Contains("4070", StringComparison.OrdinalIgnoreCase)) return 140;
@@ -1431,6 +1418,53 @@ namespace OmenCore.Hardware
             if (gpuName.Contains("3060", StringComparison.OrdinalIgnoreCase)) return 115;
             
             return 0; // Unknown GPU — return raw percentage
+        }
+
+        private double ResolvePowerTopologyWatts(double rawUsage, double gpuLoadPercent)
+        {
+            if (rawUsage <= 0) return 0;
+
+            var fallbackTdp = EstimateFallbackTdp(GpuName);
+            var laptopGpu = IsLaptopGpuName(GpuName) || fallbackTdp > 0;
+            var plausibleMaxWatts = laptopGpu
+                ? Math.Min(210, Math.Max(150, fallbackTdp + 50))
+                : 600;
+
+            if (laptopGpu && rawUsage > plausibleMaxWatts && rawUsage / 10.0 <= plausibleMaxWatts)
+            {
+                return Math.Round(rawUsage / 10.0, 1);
+            }
+
+            if (rawUsage <= 125 && fallbackTdp > 0)
+            {
+                return Math.Round((rawUsage / 100.0) * fallbackTdp, 1);
+            }
+
+            if (DefaultPowerLimitWatts > 0 && DefaultPowerLimitWatts != 100)
+            {
+                var estimated = Math.Round((rawUsage / 100.0) * DefaultPowerLimitWatts, 1);
+                return estimated <= plausibleMaxWatts ? estimated : 0;
+            }
+
+            if (rawUsage <= plausibleMaxWatts)
+            {
+                return Math.Round(rawUsage, 1);
+            }
+
+            if (gpuLoadPercent < 50)
+            {
+                _logging.Debug($"NVAPI: Suppressed implausible laptop GPU power reading {rawUsage:F1}W at {gpuLoadPercent:F0}% load for {GpuName}");
+                return 0;
+            }
+
+            return Math.Round(Math.Min(rawUsage, plausibleMaxWatts), 1);
+        }
+
+        private static bool IsLaptopGpuName(string? gpuName)
+        {
+            return !string.IsNullOrWhiteSpace(gpuName)
+                && (gpuName.Contains("Laptop", StringComparison.OrdinalIgnoreCase)
+                    || gpuName.Contains("Mobile", StringComparison.OrdinalIgnoreCase));
         }
 
         /// <summary>

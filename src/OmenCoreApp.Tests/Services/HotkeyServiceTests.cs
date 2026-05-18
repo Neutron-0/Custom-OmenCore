@@ -56,6 +56,22 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public void RegisterDefaultHotkeys_QueuesWinF12ShowWindowFallback_WhenWindowHandleIsNotReady()
+        {
+            using var logging = new LoggingService();
+            var service = new HotkeyService(logging);
+
+            service.RegisterDefaultHotkeys();
+
+            var pending = GetPending(service);
+            pending.Should().Contain(binding =>
+                binding.Action == HotkeyAction.ShowWindow &&
+                binding.Modifiers == ModifierKeys.Windows &&
+                binding.Key == Key.F12,
+                "Win+F12 should open OmenCore even when firmware OMEN-key interception is unavailable");
+        }
+
+        [Fact]
         public void UnregisterAllHotkeys_ClearsPendingQueue()
         {
             using var logging = new LoggingService();

@@ -81,6 +81,21 @@ namespace OmenCore.ViewModels
         {
             _systemControlViewModel = systemControlViewModel;
         }
+
+        public void SyncRuntimeState(string? performanceMode, string? fanMode)
+        {
+            if (!string.IsNullOrWhiteSpace(performanceMode))
+            {
+                CurrentPerformanceMode = performanceMode;
+            }
+
+            if (!string.IsNullOrWhiteSpace(fanMode))
+            {
+                CurrentFanMode = fanMode;
+            }
+
+            DetermineActiveProfile(preferSavedPreset: false);
+        }
         
         /// <summary>
         /// Returns the brand logo path based on detected system type.
@@ -254,29 +269,32 @@ namespace OmenCore.ViewModels
         #region Profile Application Methods
 
         /// <summary>
-        /// Performance profile: Maximum power + aggressive cooling
+        /// Performance profile: maximum power with the bounded Gaming/Extreme cooling curve.
         /// </summary>
         public void ApplyPerformanceProfile()
         {
             try
             {
-                _logging.Info("Applying Performance profile (Max Power + Max Cooling)");
+                _logging.Info("Applying Performance profile (Max Power + Gaming cooling)");
 
                 // Apply Performance mode
                 _performanceModeService.SetPerformanceMode("Performance");
 
-                // Apply Max fan mode
-                _fanService.ApplyMaxCooling();
-                
-                // Sync fan preset UI if available
-                _fanControlViewModel?.SelectPresetByNameNoApply("Max");
+                var coolingPreset = _fanControlViewModel?.FanPresets.FirstOrDefault(p =>
+                    p.Name.Equals("Gaming", StringComparison.OrdinalIgnoreCase) ||
+                    p.Name.Equals("Extreme", StringComparison.OrdinalIgnoreCase))
+                    ?? CreateGamingCoolingPreset();
+
+                var fanApplied = _fanService.ApplyPreset(coolingPreset, immediate: true);
+                if (fanApplied)
+                {
+                    _fanControlViewModel?.SelectPresetByNameNoApply(coolingPreset.Name);
+                }
                 
                 // v2.8.6: Sync OMEN tab performance mode display
                 _systemControlViewModel?.SelectModeByNameNoApply("Performance");
 
-                SelectedProfile = "Performance";
-                CurrentPerformanceMode = "Performance";
-                CurrentFanMode = "Max";
+                SyncFromConfirmedRuntime("Performance profile");
 
                 _logging.Info("Performance profile applied successfully");
             }
@@ -284,6 +302,38 @@ namespace OmenCore.ViewModels
             {
                 _logging.Error($"Failed to apply Performance profile: {ex.Message}");
             }
+        }
+
+        private static FanPreset CreateGamingCoolingPreset()
+        {
+            return new FanPreset
+            {
+                Name = "Gaming",
+                Mode = FanMode.Performance,
+                IsBuiltIn = true,
+                Curve = new()
+                {
+                    new FanCurvePoint { TemperatureC = 40, FanPercent = 30 },
+                    new FanCurvePoint { TemperatureC = 50, FanPercent = 42 },
+                    new FanCurvePoint { TemperatureC = 60, FanPercent = 58 },
+                    new FanCurvePoint { TemperatureC = 70, FanPercent = 72 },
+                    new FanCurvePoint { TemperatureC = 80, FanPercent = 88 },
+                    new FanCurvePoint { TemperatureC = 90, FanPercent = 100 }
+                }
+            };
+        }
+
+        private void SyncFromConfirmedRuntime(string context)
+        {
+            var confirmedPerformanceMode = _performanceModeService.GetCurrentMode()
+                ?? CurrentPerformanceMode;
+            var confirmedFanMode = _fanService.GetCurrentFanMode()
+                ?? CurrentFanMode;
+
+            CurrentPerformanceMode = confirmedPerformanceMode;
+            CurrentFanMode = confirmedFanMode;
+            DetermineActiveProfile();
+            _logging.Info($"{context}: confirmed Performance='{confirmedPerformanceMode}', Fan='{confirmedFanMode}', GeneralProfile='{SelectedProfile}'");
         }
 
         /// <summary>
@@ -301,15 +351,15 @@ namespace OmenCore.ViewModels
                 // Apply Auto fan mode
                 _fanService.ApplyAutoMode();
                 
-                // Sync fan preset UI if available
-                _fanControlViewModel?.SelectPresetByNameNoApply("Auto");
+                if (string.Equals(_fanService.GetCurrentFanMode(), "Auto", StringComparison.OrdinalIgnoreCase))
+                {
+                    _fanControlViewModel?.SelectPresetByNameNoApply("Auto");
+                }
                 
                 // v2.8.6: Sync OMEN tab performance mode display
                 _systemControlViewModel?.SelectModeByNameNoApply("Balanced");
 
-                SelectedProfile = "Balanced";
-                CurrentPerformanceMode = "Default";
-                CurrentFanMode = "Auto";
+                SyncFromConfirmedRuntime("Balanced profile");
 
                 _logging.Info("Balanced profile applied successfully");
             }
@@ -334,15 +384,15 @@ namespace OmenCore.ViewModels
                 // Apply Quiet fan mode
                 _fanService.ApplyQuietMode();
                 
-                // Sync fan preset UI if available (use Auto as closest built-in)
-                _fanControlViewModel?.SelectPresetByNameNoApply("Auto");
+                if (string.Equals(_fanService.GetCurrentFanMode(), "Quiet", StringComparison.OrdinalIgnoreCase))
+                {
+                    _fanControlViewModel?.SelectPresetByNameNoApply("Auto");
+                }
                 
                 // v2.8.6: Sync OMEN tab performance mode display
                 _systemControlViewModel?.SelectModeByNameNoApply("Quiet");
 
-                SelectedProfile = "Quiet";
-                CurrentPerformanceMode = "Quiet";
-                CurrentFanMode = "Quiet";
+                SyncFromConfirmedRuntime("Quiet profile");
 
                 _logging.Info("Quiet profile applied successfully");
             }
@@ -402,11 +452,11 @@ namespace OmenCore.ViewModels
             }
         }
 
-        private void DetermineActiveProfile()
+        private void DetermineActiveProfile(bool preferSavedPreset = true)
         {
             // First try to match using the saved fan preset name from config
             var savedPreset = _configService.Config?.LastFanPresetName;
-            if (!string.IsNullOrEmpty(savedPreset))
+            if (preferSavedPreset && !string.IsNullOrEmpty(savedPreset))
             {
                 SelectedProfile = FanModeNameResolver.ResolveGeneralProfileFromPresetName(savedPreset);
                 if (SelectedProfile != "Custom")
@@ -414,14 +464,29 @@ namespace OmenCore.ViewModels
             }
             
             // Fallback: Match current state to a profile
-            if (CurrentPerformanceMode == "Performance" && CurrentFanMode == "Max")
+            if (CurrentPerformanceMode.Equals("Performance", StringComparison.OrdinalIgnoreCase) &&
+                (CurrentFanMode.Equals("Max", StringComparison.OrdinalIgnoreCase) ||
+                 CurrentFanMode.Equals("Gaming", StringComparison.OrdinalIgnoreCase) ||
+                 CurrentFanMode.Equals("Extreme", StringComparison.OrdinalIgnoreCase)))
+            {
                 SelectedProfile = "Performance";
-            else if (CurrentPerformanceMode == "Quiet" && CurrentFanMode == "Quiet")
+            }
+            else if (CurrentPerformanceMode.Equals("Quiet", StringComparison.OrdinalIgnoreCase) &&
+                     CurrentFanMode.Equals("Quiet", StringComparison.OrdinalIgnoreCase))
+            {
                 SelectedProfile = "Quiet";
-            else if (CurrentPerformanceMode == "Default" && CurrentFanMode == "Auto")
+            }
+            else if ((CurrentPerformanceMode.Equals("Default", StringComparison.OrdinalIgnoreCase) ||
+                      CurrentPerformanceMode.Equals("Balanced", StringComparison.OrdinalIgnoreCase)) &&
+                     (CurrentFanMode.Equals("Auto", StringComparison.OrdinalIgnoreCase) ||
+                      CurrentFanMode.Equals("Balanced", StringComparison.OrdinalIgnoreCase)))
+            {
                 SelectedProfile = "Balanced";
+            }
             else
+            {
                 SelectedProfile = "Custom";
+            }
         }
 
         private void UpdateProfileIndicators()

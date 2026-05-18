@@ -186,8 +186,7 @@ namespace OmenCore.Services.FanCalibration
             {
                 _calibrationInProgress = false;
                 
-                // Restore auto control
-                _fanController.RestoreAutoControl();
+                await RestoreAutoControlAfterCalibrationAsync(ct);
             }
         }
         
@@ -197,7 +196,35 @@ namespace OmenCore.Services.FanCalibration
         public void CancelCalibration()
         {
             _calibrationInProgress = false;
-            _fanController.RestoreAutoControl();
+            _ = RestoreAutoControlAfterCalibrationAsync(CancellationToken.None);
+        }
+
+        private async Task RestoreAutoControlAfterCalibrationAsync(CancellationToken ct)
+        {
+            for (var attempt = 1; attempt <= 3; attempt++)
+            {
+                try
+                {
+                    if (_fanController.RestoreAutoControl())
+                    {
+                        _logging.Info($"Fan calibration cleanup restored BIOS auto control (attempt {attempt}/3)");
+                        return;
+                    }
+
+                    _logging.Warn($"Fan calibration cleanup restore returned false (attempt {attempt}/3)");
+                }
+                catch (Exception ex)
+                {
+                    _logging.Warn($"Fan calibration cleanup restore failed (attempt {attempt}/3): {ex.Message}");
+                }
+
+                if (attempt < 3)
+                {
+                    await Task.Delay(1000, ct);
+                }
+            }
+
+            _logging.Warn("Fan calibration cleanup could not confirm BIOS auto control restore after 3 attempts");
         }
         
         /// <summary>

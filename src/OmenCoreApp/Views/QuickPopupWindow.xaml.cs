@@ -50,6 +50,11 @@ namespace OmenCore.Views
         /// </summary>
         public event Action<string>? PerformanceModeChangeRequested;
 
+        /// <summary>
+        /// Raised when user wants to open the full dashboard from Quick Access.
+        /// </summary>
+        public event Action? OpenDashboardRequested;
+
         public QuickPopupWindow()
         {
             InitializeComponent();
@@ -398,6 +403,12 @@ namespace OmenCore.Views
                 PerformanceModeChangeRequested?.Invoke(mode);
                 UpdatePerformanceMode(mode);
             }
+        }
+
+        private void OpenDashboard_Click(object sender, RoutedEventArgs e)
+        {
+            OpenDashboardRequested?.Invoke();
+            Hide();
         }
 
         private void DisplayOff_Click(object sender, RoutedEventArgs e)

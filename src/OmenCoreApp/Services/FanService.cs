@@ -935,6 +935,14 @@ namespace OmenCore.Services
                     {
                         EnableCurve(preset.Curve.ToList(), preset);
                         _logging.Info($"Preset '{preset.Name}' preserved controller-applied Auto policy and enabled explicit curve payload");
+
+                        if (immediate)
+                        {
+                            var temps = _thermalProvider.ReadTemperatures().ToList();
+                            var cpuTemp = temps.FirstOrDefault(t => t.Sensor.Contains("CPU"))?.Celsius ?? temps.FirstOrDefault()?.Celsius ?? 0;
+                            var gpuTemp = temps.FirstOrDefault(t => t.Sensor.Contains("GPU"))?.Celsius ?? temps.Skip(1).FirstOrDefault()?.Celsius ?? 0;
+                            _ = ForceApplyCurveNowAsync(cpuTemp, gpuTemp, immediate: true);
+                        }
                     }
                     else
                     {
@@ -966,7 +974,7 @@ namespace OmenCore.Services
                 }
 
                 // Raise event for UI synchronization (sidebar, tray, etc.)
-                PresetApplied?.Invoke(this, preset.Name);
+                PublishPresetApplied(preset.Name);
                 return true;
             }
             else
@@ -2368,6 +2376,7 @@ namespace OmenCore.Services
             {
                 RecordFanCommand("ApplyMaxCooling", "Max", true, "Already in Max mode - write skipped");
                 ScheduleDeferredMaxVerification();
+                PublishPresetApplied(_currentFanMode);
                 return;
             }
             
@@ -2403,6 +2412,7 @@ namespace OmenCore.Services
             RecordFanCommand("ApplyMaxCooling", "Max", true, "Max cooling mode active");
             ScheduleDeferredMaxVerification();
             _logging.Info("Max cooling mode applied");
+            PublishPresetApplied(_currentFanMode);
         }
 
         private void ScheduleDeferredMaxVerification()
@@ -2493,6 +2503,7 @@ namespace OmenCore.Services
             _currentFanMode = "Auto";
             RecordFanCommand("ApplyAutoMode", "Auto", true, "Auto fan mode applied");
             _logging.Info("Auto fan mode applied (BIOS control)");
+            PublishPresetApplied(_currentFanMode);
         }
 
         /// <summary>
@@ -2512,9 +2523,31 @@ namespace OmenCore.Services
             _currentFanMode = "Quiet";
             RecordFanCommand("ApplyQuietMode", "Quiet", true, "Quiet fan mode applied");
             _logging.Info("Quiet fan mode applied");
+            PublishPresetApplied(_currentFanMode);
         }
 
         private string _currentFanMode = "Auto";
+
+        private void PublishPresetApplied(string presetName)
+        {
+            var handlers = PresetApplied;
+            if (handlers == null)
+            {
+                return;
+            }
+
+            foreach (EventHandler<string> handler in handlers.GetInvocationList())
+            {
+                try
+                {
+                    handler(this, presetName);
+                }
+                catch (Exception ex)
+                {
+                    _logging.Warn($"Fan preset subscriber failed for '{presetName}': {ex.Message}");
+                }
+            }
+        }
         
         /// <summary>
         /// Get the current fan mode name.

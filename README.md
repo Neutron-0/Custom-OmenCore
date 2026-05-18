@@ -27,7 +27,7 @@
 
 ### ⚡ Quick Links
 
-[![Version](https://img.shields.io/badge/version-3.6.1-red.svg?style=for-the-badge)](docs/CHANGELOG-3.6.1.md)
+[![Version](https://img.shields.io/badge/version-3.6.2-red.svg?style=for-the-badge)](docs/CHANGELOG_v3.6.2.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=for-the-badge)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8.0-purple.svg?style=for-the-badge)](https://dotnet.microsoft.com/download/dotnet/8.0)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2.svg?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/9WhJdabGk8)
@@ -83,11 +83,11 @@ This generates a timestamped folder with:
 
 Attach those files to your GitHub issue for faster triage.
 
-## 🔥 **What's New in v3.6.1**
+## 🔥 **What's New in v3.6.2**
 
-v3.6.1 is the current stabilization release, focused on fan/performance correctness, tray/OSD consistency, lower WMI fan-control CPU pressure, EC coordination, and safer capability fallback behavior.
+v3.6.2 is the current stabilization release, focused on runtime source-of-truth correctness, fan/performance mode confirmation flow hardening, RGB fallback reliability, Linux packaging/diagnostics refinement, and lower idle/tray UI overhead.
 
-### v3.6.1 Highlights
+### v3.6.2 Highlights
 
 - **Fan/performance state stabilization** across tray, hotkeys, OSD, dashboard, and linked-mode flows.
 - **Reduced high-CPU fan-curve pressure** by bounding WMI keepalive writes and automatic curve verification.
@@ -97,11 +97,11 @@ v3.6.1 is the current stabilization release, focused on fan/performance correctn
 
 ### Release Notes
 
-Current stable release is **v3.6.1**.
+Current stable release is **v3.6.2**.
+
+→ **[v3.6.2 Changelog](docs/CHANGELOG_v3.6.2.md)**
 
 → **[v3.6.1 Changelog](docs/CHANGELOG-3.6.1.md)**
-
-→ **[v3.6.1 RC Checklist](docs/3.6.1-RC-CHECKLIST.md)**
 
 → **[Previous Stable Changelog (v3.4.1)](docs/CHANGELOG_v3.4.1.md)**
 
@@ -109,19 +109,26 @@ Current stable release is **v3.6.1**.
 
 ## 📦 **Downloads & Artifacts**
 
-**Version:** v3.6.1 | **Status:** Release candidate
+**Version:** v3.6.2 | **Status:** Stable
 
 Release artifacts:
 
 | Download | Platform | Details |
 |----------|----------|----------|
-| **OmenCoreSetup-3.6.1.exe** | Windows | Installer (Recommended) — Includes .NET 8 runtime |
-| **OmenCore-3.6.1-win-x64.zip** | Windows | Portable — Extract and run, no installation |
-| **OmenCore-3.6.1-linux-x64.zip** | Linux | CLI + Avalonia GUI, self-contained runtime |
+| **OmenCoreSetup-3.6.2.exe** | Windows | Installer (Recommended) — Includes .NET 8 runtime |
+| **OmenCore-3.6.2-win-x64.zip** | Windows | Portable — Extract and run, no installation |
+| **OmenCore-3.6.2-linux-x64.zip** | Linux | CLI + Avalonia GUI, self-contained runtime |
 
 ### SHA256
 
-Release hashes are published alongside each asset on the [GitHub Releases page](https://github.com/theantipopau/omencore/releases).
+`OmenCoreSetup-3.6.2.exe`  
+`B97E1F2D2137498DCC3B170FB9E33ADF1505FB94F7603805CCD96B1AB4E30895`
+
+`OmenCore-3.6.2-win-x64.zip`  
+`DCAAAB9103FA5D574A49990E734E76A4F1A67AE63083F7195F204A2A043630BC`
+
+`OmenCore-3.6.2-linux-x64.zip`  
+`78F571EECBE16F38882453B7281759AE4592D3DB1CCFA1ACFF39E9DDC5579C99`
 
 ---
 
@@ -298,7 +305,7 @@ cd src\OmenCoreApp\bin\Release\net8.0-windows10.0.19041.0
 ```powershell
 pwsh ./build-installer.ps1
 # Optional: -Configuration Release -Runtime win-x64 (these are the defaults)
-# Outputs: artifacts/OmenCoreSetup-3.6.1.exe and artifacts/OmenCore-3.6.1-win-x64.zip
+# Outputs: artifacts/OmenCoreSetup-3.6.2.exe and artifacts/OmenCore-3.6.2-win-x64.zip
 ```
 
 ### Tests
@@ -348,6 +355,7 @@ Detailed logs are in `%LOCALAPPDATA%\OmenCore\`. On Linux, use `sudo omencore-cl
 
 | Version | Key Changes |
 |---------|------------|
+| **v3.6.2** | Stabilization release: runtime source-of-truth hardening, fan/performance confirmation fixes, RGB fallback reliability, Linux diagnostics/package updates, and UI responsiveness cleanup |
 | **v3.6.1** | Stabilization release: fan/performance sync, tray/OSD consistency, WMI fan CPU reduction, EC coordination, capability fallback hardening |
 | **v3.6.0** | Lightweight runtime behavior, hardware-worker reliability, fan/RGB/hotkey hardening, and release packaging improvements |
 | **v3.5.0** | Reliability release: fan/tuning diagnostics clarity, requested-vs-confirmed UI hardening, conflict/recovery safety guardrails, and roadmap split for deferred scope |
@@ -375,9 +383,9 @@ Older release notes: [docs/](docs/)
 - [docs/ANTIVIRUS_FAQ.md](docs/ANTIVIRUS_FAQ.md) — Antivirus false positive handling
 - [docs/DEFENDER_FALSE_POSITIVE.md](docs/DEFENDER_FALSE_POSITIVE.md) — Windows Defender exclusion steps
 - [docs/WINRING0_SETUP.md](docs/WINRING0_SETUP.md) — WinRing0 driver setup
-- [docs/CHANGELOG-3.6.1.md](docs/CHANGELOG-3.6.1.md) — Current stabilization release changelog
-- [docs/3.6.1-RC-CHECKLIST.md](docs/3.6.1-RC-CHECKLIST.md) — Release-candidate and tester validation checklist
-- [docs/CHANGELOG_v3.4.1.md](docs/CHANGELOG_v3.4.1.md) — Latest stable release notes
+- [docs/CHANGELOG_v3.6.2.md](docs/CHANGELOG_v3.6.2.md) — Current stabilization release changelog
+- [docs/CHANGELOG-3.6.1.md](docs/CHANGELOG-3.6.1.md) — Prior stabilization release changelog
+- [docs/CHANGELOG_v3.4.1.md](docs/CHANGELOG_v3.4.1.md) — Earlier stable release notes
 
 ---
 

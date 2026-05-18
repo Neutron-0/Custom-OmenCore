@@ -447,19 +447,16 @@ namespace OmenCore.ViewModels
             }
         }
         
-        // Enhanced battery health properties
+        // Capacity-health summary. Charge-limit targets (for example 80%) are separate
+        // from battery wear/capacity health, so do not infer this from charge percent.
         public string BatteryHealthSummary
         {
             get
             {
                 if (LatestMonitoringSample == null || LatestMonitoringSample.BatteryChargePercent <= 0)
-                    return "Battery health unavailable";
+                    return "Battery capacity health unavailable";
                 
-                // Estimate battery health based on discharge rate and capacity
-                var healthPercent = 100.0; // Would need actual battery health API
-                var cycleCount = 0; // Would need battery cycle count API
-                
-                return $"Health: {healthPercent:F0}% • Cycles: {cycleCount}";
+                return "Capacity health unavailable";
             }
         }
         
@@ -539,6 +536,11 @@ namespace OmenCore.ViewModels
             _uptimeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
             _uptimeTimer.Tick += (s, e) => 
             {
+                if (!_telemetryProjectionEnabled)
+                {
+                    return;
+                }
+
                 OnPropertyChanged(nameof(SessionUptime));
                 OnPropertyChanged(nameof(LastSampleAge));
             };

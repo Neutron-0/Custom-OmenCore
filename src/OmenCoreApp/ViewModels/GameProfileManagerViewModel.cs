@@ -106,7 +106,7 @@ namespace OmenCore.ViewModels
 
         public event PropertyChangedEventHandler? PropertyChanged;
 
-        public GameProfileManagerViewModel(GameProfileService profileService, LoggingService logging)
+        public GameProfileManagerViewModel(GameProfileService profileService, LoggingService logging, GameProfile? initialProfile = null)
         {
             _profileService = profileService;
             _logging = logging;
@@ -123,6 +123,16 @@ namespace OmenCore.ViewModels
 
             // Load profiles
             LoadProfiles();
+
+            if (initialProfile != null)
+            {
+                var selected = FilteredProfiles.FirstOrDefault(p => p.Id == initialProfile.Id)
+                    ?? FilteredProfiles.FirstOrDefault(p => ReferenceEquals(p, initialProfile));
+                if (selected != null)
+                {
+                    SelectedProfile = selected;
+                }
+            }
         }
 
         private void LoadProfiles()
@@ -144,54 +154,33 @@ namespace OmenCore.ViewModels
         /// </summary>
         private void ValidateSelectedProfile()
         {
-            if (SelectedProfile == null)
-            {
-                ValidationError = null;
-                return;
-            }
-            
-            // Validate profile name
-            if (string.IsNullOrWhiteSpace(SelectedProfile.Name))
-            {
-                ValidationError = "Profile name is required";
-                return;
-            }
-            
-            if (SelectedProfile.Name.Length > 100)
-            {
-                ValidationError = "Profile name must be 100 characters or less";
-                return;
-            }
-            
-            // Validate executable name
-            if (string.IsNullOrWhiteSpace(SelectedProfile.ExecutableName))
-            {
-                ValidationError = "Executable name is required";
-                return;
-            }
-            
-            if (!SelectedProfile.ExecutableName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-            {
-                ValidationError = "Executable must end with .exe";
-                return;
-            }
-            
-            // Validate undervolt offset (if set)
-            if (SelectedProfile.CpuCoreOffsetMv < -200 || SelectedProfile.CpuCoreOffsetMv > 0)
-            {
-                ValidationError = "CPU undervolt must be between -200 and 0 mV";
-                return;
-            }
-            
-            // Validate priority
-            if (SelectedProfile.Priority < 0 || SelectedProfile.Priority > 100)
-            {
-                ValidationError = "Priority must be between 0 and 100";
-                return;
-            }
-            
-            // All validations passed
-            ValidationError = null;
+            ValidationError = ValidateProfile(SelectedProfile);
+        }
+
+        private static string? ValidateProfile(GameProfile? profile)
+        {
+            if (profile == null)
+                return null;
+
+            if (string.IsNullOrWhiteSpace(profile.Name))
+                return "Profile name is required";
+
+            if (profile.Name.Length > 100)
+                return "Profile name must be 100 characters or less";
+
+            if (string.IsNullOrWhiteSpace(profile.ExecutableName))
+                return "Executable name is required";
+
+            if (!profile.ExecutableName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                return "Executable must end with .exe";
+
+            if (profile.CpuCoreOffsetMv < -200 || profile.CpuCoreOffsetMv > 0)
+                return "CPU undervolt must be between -200 and 0 mV";
+
+            if (profile.Priority < 0 || profile.Priority > 100)
+                return "Priority must be between 0 and 100";
+
+            return null;
         }
 
         private void FilterProfiles()
@@ -328,7 +317,21 @@ namespace OmenCore.ViewModels
         {
             try
             {
-                await _profileService.SaveProfilesAsync();
+                ValidateSelectedProfile();
+                if (!IsProfileValid)
+                {
+                    MessageBox.Show(ValidationError, "Invalid Game Profile", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+
+                if (SelectedProfile != null)
+                {
+                    await _profileService.UpdateProfileAsync(SelectedProfile);
+                }
+                else
+                {
+                    await _profileService.SaveProfilesAsync();
+                }
                 _logging.Info("Saved game profiles");
                 CloseWindow();
             }

@@ -4,6 +4,7 @@ using System.Runtime.InteropServices;
 using System.Windows.Input;
 using System.Windows.Interop;
 using OmenCore.Models;
+using OmenCore.Utils;
 
 namespace OmenCore.Services
 {
@@ -120,7 +121,7 @@ namespace OmenCore.Services
             {
                 try
                 {
-                    System.Windows.Application.Current?.Dispatcher?.Invoke(() =>
+                    DispatcherHelper.RunOnUiThread(() =>
                     {
                         var h = getWindowHandle();
                         if (h != IntPtr.Zero)
@@ -190,6 +191,11 @@ namespace OmenCore.Services
             
             // Ctrl+Shift+O = Show/hide OmenCore window
             RegisterHotkey(HotkeyAction.ToggleWindow, ModifierKeys.Control | ModifierKeys.Shift, Key.O);
+
+            // Win+F12 = Show OmenCore window. Several HP keyboards expose the OMEN launch
+            // chord near F12, and this gives users a predictable fallback when firmware
+            // OMEN-key interception is not available on their model.
+            RegisterHotkey(HotkeyAction.ShowWindow, ModifierKeys.Windows, Key.F12);
             
             // v2.6.0: REMOVED Ctrl+S - it conflicts with save shortcuts in Photoshop, VSCode, etc.
             // Users can still click the Apply button or use Ctrl+Shift+Alt+A if they need a hotkey
@@ -315,12 +321,15 @@ namespace OmenCore.Services
         /// Used by window-focus mode to preserve always-on hotkeys like ToggleWindow
         /// even when the window loses focus or is hidden to tray.
         /// </summary>
-        public void UnregisterAllExcept(HotkeyAction preserveAction)
+        public void UnregisterAllExcept(params HotkeyAction[] preserveActions)
         {
+            var preserve = preserveActions.Length == 0
+                ? new HashSet<HotkeyAction>()
+                : new HashSet<HotkeyAction>(preserveActions);
             var toRemove = new List<int>();
             foreach (var kvp in _registeredHotkeys)
             {
-                if (kvp.Value.Action != preserveAction)
+                if (!preserve.Contains(kvp.Value.Action))
                 {
                     UnregisterHotKey(_windowHandle, kvp.Key);
                     toRemove.Add(kvp.Key);
@@ -328,7 +337,7 @@ namespace OmenCore.Services
             }
             foreach (var id in toRemove)
                 _registeredHotkeys.Remove(id);
-            _logging.Info($"Unregistered all hotkeys except {preserveAction}");
+            _logging.Info($"Unregistered all hotkeys except {string.Join(", ", preserve)}");
         }
 
         /// <summary>

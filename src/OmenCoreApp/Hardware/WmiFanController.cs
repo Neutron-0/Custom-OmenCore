@@ -22,6 +22,7 @@ namespace OmenCore.Hardware
     public class WmiFanController : IDisposable
     {
         private readonly IHpWmiBios _wmiBios;
+        private readonly IEcAccess? _ecAccess;
         private readonly LibreHardwareMonitorImpl? _hwMonitor;
         private readonly LoggingService? _logging;
         private bool _disposed;
@@ -75,6 +76,9 @@ namespace OmenCore.Hardware
         private const int CountdownExtendMinIntervalMs = 15000;
         private const int MaxModeHealthyRpmFloor = 2000;
         private const double MaxModeHealthyLevelRatio = 0.40;
+        private const ushort EcFanModeRegister = 0x95; // OmenMon HPCM register
+        private const int FanModeReadbackAttempts = 3;
+        private const int FanModeReadbackDelayMs = 40;
         
         // RPM debounce tracking — filters transient phantom readings during profile transitions.
         // When fans are transitioning (e.g., profile switch), BIOS may return stale/target fan levels
@@ -143,11 +147,17 @@ namespace OmenCore.Hardware
             return (byte)(percent * Math.Clamp(maxFanLevel, 1, MaxFanLevelCeiling) / 100);
         }
 
-        public WmiFanController(LibreHardwareMonitorImpl? hwMonitor, LoggingService? logging = null, int maxFanLevelOverride = 0, IHpWmiBios? injectedWmiBios = null)
+        public WmiFanController(
+            LibreHardwareMonitorImpl? hwMonitor,
+            LoggingService? logging = null,
+            int maxFanLevelOverride = 0,
+            IHpWmiBios? injectedWmiBios = null,
+            IEcAccess? ecAccess = null)
         {
             _hwMonitor = hwMonitor;
             _logging = logging;
             _wmiBios = injectedWmiBios ?? new HpWmiBios(logging);
+            _ecAccess = ecAccess;
             
             // Apply user override if set, then read the (possibly overridden) max level
             if (maxFanLevelOverride > 0 && _wmiBios is HpWmiBios concrete)
@@ -376,6 +386,12 @@ namespace OmenCore.Hardware
                 {
                     // Capture previous mode before overwriting — used below for the V1 kick.
                     var previousMode = _lastMode;
+                    if (!ConfirmFanModeReadback(mode, $"preset '{preset.Name}'"))
+                    {
+                        _logging?.Warn($"Preset '{preset.Name}' rejected: WMI command returned success but EC fan-mode readback did not match {mode}");
+                        return false;
+                    }
+
                     _lastMode = mode;
                     IsManualControlActive = false;
                     _isMaxModeActive = false;          // Clear max mode flag
@@ -414,10 +430,7 @@ namespace OmenCore.Hardware
                         // explicitly clears this, allowing the BIOS thermal curve to spin down
                         // fans to 0 RPM at idle. Safe to send after SetFanMode(Default) since
                         // BIOS auto mode is already active — this is not a hard-stop command.
-                        if (_maxFanLevel < 100)
-                        {
-                            _logging?.Info("  V1 auto-mode handoff: skipped SetFanLevel(0, 0) to avoid transient 0 RPM drop; BIOS auto mode handles release");
-                        }
+                        ClearV1AutoModeFloor("preset auto handoff");
                     }
                     else
                     {
@@ -811,6 +824,11 @@ namespace OmenCore.Hardware
 
             if (_wmiBios.SetFanMode(fanMode))
             {
+                if (!ConfirmFanModeReadback(fanMode, $"performance mode '{modeName}'"))
+                {
+                    return false;
+                }
+
                 _lastMode = fanMode;
                 IsManualControlActive = false;
                 _isMaxModeActive = false;
@@ -887,6 +905,11 @@ namespace OmenCore.Hardware
                 // Set default mode to restore automatic control
                 if (_wmiBios.SetFanMode(HpWmiBios.FanMode.Default))
                 {
+                    if (!ConfirmFanModeReadback(HpWmiBios.FanMode.Default, "restore auto control"))
+                    {
+                        return false;
+                    }
+
                     IsManualControlActive = false;
                     _isMaxModeActive = false;
                     _lastManualFanPercent = -1;
@@ -896,10 +919,7 @@ namespace OmenCore.Hardware
                     // Explicitly clear the manual fan level register so BIOS thermal
                     // management can drop fans to 0 RPM at idle. Safe here since
                     // SetFanMode(Default) already put BIOS in auto-control mode.
-                    if (_maxFanLevel < 100)
-                    {
-                        _logging?.Info("  V1 auto-mode handoff: skipped SetFanLevel(0, 0) to avoid transient 0 RPM drop; BIOS auto mode handles release");
-                    }
+                    ClearV1AutoModeFloor("restore auto control");
 
                     _logging?.Info("✓ Restored automatic fan control");
                     return true;
@@ -960,10 +980,7 @@ namespace OmenCore.Hardware
                         _logging?.Info("  Step 3: SetFanLevel(20, 20) succeeded (V1 krpm hint)");
                     }
 
-                    // Do not write explicit 0-level on V1 during reset: some firmware interprets
-                    // this as a hard stop and fans can dip to 0 RPM briefly before BIOS catches up.
-                    // We rely on SetFanMode(Default) above to restore automatic control.
-                    _logging?.Info("  Step 4: Skipped SetFanLevel(0, 0) on V1 to avoid transient 0 RPM drop; BIOS auto mode handles release");
+                    ClearV1AutoModeFloor("max-mode reset");
                 }
                 else
                 {
@@ -1077,6 +1094,11 @@ namespace OmenCore.Hardware
                 // Use WMI SetFanMode to Performance as the primary method
                 if (_wmiBios.SetFanMode(HpWmiBios.FanMode.Performance))
                 {
+                    if (!ConfirmFanModeReadback(HpWmiBios.FanMode.Performance, "throttling mitigation"))
+                    {
+                        return false;
+                    }
+
                     _logging?.Info("✓ Set WMI FanMode to Performance for throttling mitigation");
                     _lastMode = HpWmiBios.FanMode.Performance;
                     return true;
@@ -1704,6 +1726,65 @@ namespace OmenCore.Hardware
 
             _lastCountdownExtendUtc = nowUtc;
             _wmiBios.ExtendFanCountdown();
+        }
+
+        private bool ConfirmFanModeReadback(HpWmiBios.FanMode expectedMode, string operation)
+        {
+            if (_ecAccess?.IsAvailable != true)
+            {
+                _logging?.Debug($"Fan mode readback unavailable for {operation}; accepting WMI command result");
+                return true;
+            }
+
+            byte expected = (byte)expectedMode;
+            byte? lastRead = null;
+
+            for (int attempt = 1; attempt <= FanModeReadbackAttempts; attempt++)
+            {
+                try
+                {
+                    var actual = _ecAccess.ReadByte(EcFanModeRegister);
+                    lastRead = actual;
+                    if (actual == expected)
+                    {
+                        _logging?.Debug($"Fan mode readback confirmed for {operation}: EC[0x{EcFanModeRegister:X2}]=0x{actual:X2}");
+                        return true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    _logging?.Debug($"Fan mode readback unavailable for {operation}: {ex.Message}");
+                    return true;
+                }
+
+                if (attempt < FanModeReadbackAttempts)
+                {
+                    System.Threading.Thread.Sleep(FanModeReadbackDelayMs);
+                }
+            }
+
+            var actualText = lastRead.HasValue ? $"0x{lastRead.Value:X2}" : "n/a";
+            _logging?.Warn($"Fan mode readback mismatch for {operation}: expected EC[0x{EcFanModeRegister:X2}]=0x{expected:X2}, got {actualText}");
+            return false;
+        }
+
+        private void ClearV1AutoModeFloor(string context)
+        {
+            if (_maxFanLevel >= 100)
+            {
+                _logging?.Info("  V2 auto-mode handoff: skipped SetFanLevel(0, 0); percentage-scale firmware uses SetFanMode(Default) only");
+                return;
+            }
+
+            System.Threading.Thread.Sleep(50);
+            if (_wmiBios.SetFanLevel(0, 0))
+            {
+                _logging?.Info($"  V1 auto-mode floor clear: SetFanLevel(0, 0) succeeded during {context}");
+            }
+            else
+            {
+                _logging?.Warn($"  V1 auto-mode floor clear failed during {context}");
+            }
         }
 
         private bool IsMaxModeTelemetryHealthy(out string details)

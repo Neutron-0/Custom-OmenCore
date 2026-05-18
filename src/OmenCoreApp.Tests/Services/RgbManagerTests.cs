@@ -205,6 +205,73 @@ namespace OmenCoreApp.Tests.Services
             offProvider.LastEffect.Should().Be("off");
         }
 
+        [Fact]
+        public async Task TurnOffAllAsync_OnlyCallsOffCapableProviders()
+        {
+            var manager = new RgbManager();
+            var staticProvider = new TestRgbProvider("static")
+            {
+                SupportedEffects = new[] { RgbEffectType.Static }
+            };
+            var offProvider = new TestRgbProvider("off")
+            {
+                SupportedEffects = new[] { RgbEffectType.Off }
+            };
+
+            manager.RegisterProvider(staticProvider);
+            manager.RegisterProvider(offProvider);
+
+            await manager.TurnOffAllAsync();
+
+            staticProvider.LastEffect.Should().BeNull("TurnOffAllAsync should use the same Off capability gate as effect fanout");
+            offProvider.LastEffect.Should().Be("off");
+        }
+
+        [Fact]
+        public async Task ApplyEffectToAllAsync_PrepareFailure_DoesNotCommitFailedProvider()
+        {
+            var manager = new RgbManager();
+            var prepareFailingProvider = new TestRgbProvider("prepare-fails")
+            {
+                ThrowOnPrepare = true,
+                SupportedEffects = new[] { RgbEffectType.Breathing }
+            };
+            var workingProvider = new TestRgbProvider("working")
+            {
+                SupportedEffects = new[] { RgbEffectType.Breathing }
+            };
+
+            manager.RegisterProvider(prepareFailingProvider);
+            manager.RegisterProvider(workingProvider);
+
+            await manager.ApplyEffectToAllAsync("effect:breathing");
+
+            prepareFailingProvider.LastEffect.Should().BeNull("providers that fail prepare must not receive the commit write");
+            workingProvider.LastEffect.Should().Be("effect:breathing");
+            manager.LastSyncResult.Should().NotBeNull();
+            manager.LastSyncResult!.ProvidersAffected.Should().Be(2);
+            manager.LastSyncResult.ProvidersSucceeded.Should().Be(1);
+            manager.LastSyncResult.ProvidersFailed.Should().Be(1);
+        }
+
+        [Fact]
+        public async Task SyncCompleted_WhenSubscriberThrows_StillNotifiesRemainingSubscribers()
+        {
+            var manager = new RgbManager();
+            var provider = new TestRgbProvider("keyboard");
+            RgbSyncEventArgs? delivered = null;
+
+            manager.RegisterProvider(provider);
+            manager.SyncCompleted += (_, _) => throw new InvalidOperationException("subscriber failed");
+            manager.SyncCompleted += (_, args) => delivered = args;
+
+            var act = async () => await manager.SyncStaticColorAsync(Color.FromArgb(0x11, 0x22, 0x33));
+
+            await act.Should().NotThrowAsync("subscriber failures must not make a confirmed RGB sync look failed");
+            delivered.Should().NotBeNull();
+            delivered!.ProvidersSucceeded.Should().Be(1);
+        }
+
         private sealed class TestRgbProvider : IRgbProvider
         {
             public TestRgbProvider(string id)
@@ -222,6 +289,7 @@ namespace OmenCoreApp.Tests.Services
                 IsAvailable ? RgbProviderConnectionStatus.Connected : RgbProviderConnectionStatus.Disabled;
             public string StatusDetail => Detail;
             public string Detail { get; set; } = "1 device connected";
+            public bool ThrowOnPrepare { get; set; }
             public bool ThrowOnStaticColor { get; set; }
             public bool AvailableAfterInitialize { get; set; } = true;
             public int InitializeCount { get; private set; }
@@ -233,6 +301,14 @@ namespace OmenCoreApp.Tests.Services
             {
                 InitializeCount++;
                 IsAvailable = AvailableAfterInitialize;
+                return Task.CompletedTask;
+            }
+
+            public Task PrepareEffectAsync(string effectId)
+            {
+                if (ThrowOnPrepare)
+                    throw new InvalidOperationException("prepare failed");
+
                 return Task.CompletedTask;
             }
 

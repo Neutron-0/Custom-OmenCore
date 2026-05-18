@@ -170,7 +170,7 @@ namespace OmenCore.Utils
             // ═══ QUICK PROFILES (Combined Fan + Performance) ═══
             var quickProfileMenuItem = new MenuItem { Header = "⚡ Quick Profile ▶" };
 
-            var profilePerformance = new MenuItem { Header = "🚀 Performance — Max cooling + Performance mode" };
+            var profilePerformance = new MenuItem { Header = "🚀 Performance — Gaming cooling + Performance mode" };
             profilePerformance.Click += (s, e) => QuickProfileChangeRequested?.Invoke("Performance");
             var profileBalanced = new MenuItem { Header = "⚖️ Balanced — Auto cooling + Balanced mode" };
             profileBalanced.Click += (s, e) => QuickProfileChangeRequested?.Invoke("Balanced");
@@ -1084,6 +1084,7 @@ namespace OmenCore.Utils
                     _quickPopup = new QuickPopupWindow();
                     _quickPopup.FanModeChangeRequested += mode => FanModeChangeRequested?.Invoke(mode);
                     _quickPopup.PerformanceModeChangeRequested += mode => PerformanceModeChangeRequested?.Invoke(mode);
+                    _quickPopup.OpenDashboardRequested += () => _showMainWindow();
                     _quickPopup.Closed += (s, e) => _quickPopup = null;
                 }
 
@@ -1121,6 +1122,7 @@ namespace OmenCore.Utils
                     _quickPopup = new QuickPopupWindow();
                     _quickPopup.FanModeChangeRequested += mode => FanModeChangeRequested?.Invoke(mode);
                     _quickPopup.PerformanceModeChangeRequested += mode => PerformanceModeChangeRequested?.Invoke(mode);
+                    _quickPopup.OpenDashboardRequested += () => _showMainWindow();
                     _quickPopup.Closed += (s, e) => _quickPopup = null;
                 }
 

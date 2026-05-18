@@ -596,7 +596,8 @@
                                 <TextBlock Text="Start with Windows" FontSize="14" 
                                            Foreground="{StaticResource TextPrimaryBrush}"/>
                                 <TextBlock Text="Launch OmenCore automatically when Windows starts" FontSize="12" 
-                                           Foreground="{StaticResource TextSecondaryBrush}"/>
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           TextWrapping="Wrap"/>
                             </StackPanel>
                             <ToggleButton Grid.Column="1" 
                                           Style="{StaticResource ModernToggleButton}"
@@ -613,7 +614,8 @@
                                 <TextBlock Text="Start minimized to tray" FontSize="14" 
                                            Foreground="{StaticResource TextPrimaryBrush}"/>
                                 <TextBlock Text="Hide main window on startup, show only in system tray" FontSize="12" 
-                                           Foreground="{StaticResource TextSecondaryBrush}"/>
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           TextWrapping="Wrap"/>
                             </StackPanel>
                             <ToggleButton Grid.Column="1" 
                                           Style="{StaticResource ModernToggleButton}"
@@ -683,7 +685,8 @@
                                 <TextBlock Text="Minimize to tray on close" FontSize="14" 
                                            Foreground="{StaticResource TextPrimaryBrush}"/>
                                 <TextBlock Text="Close button minimizes to system tray instead of exiting" FontSize="12" 
-                                           Foreground="{StaticResource TextSecondaryBrush}"/>
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           TextWrapping="Wrap"/>
                             </StackPanel>
                             <ToggleButton Grid.Column="1" 
                                           Style="{StaticResource ModernToggleButton}"
@@ -700,7 +703,8 @@
                                 <TextBlock Text="Stay on top" FontSize="14" 
                                            Foreground="{StaticResource TextPrimaryBrush}"/>
                                 <TextBlock Text="Keep OmenCore above other windows" FontSize="12" 
-                                           Foreground="{StaticResource TextSecondaryBrush}"/>
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           TextWrapping="Wrap"/>
                             </StackPanel>
                             <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
                                 <Border Background="#1A00C8C8" CornerRadius="4" Padding="8,4" Margin="0,0,10,0"
@@ -1116,6 +1120,51 @@
                                           Style="{StaticResource ModernToggleButton}"
                                           IsChecked="{Binding LinkFanToPerformanceMode, Mode=TwoWay}"/>
                         </Grid>
+
+                        <Separator Margin="0,16,0,16" Background="{StaticResource BorderBrush}"/>
+
+                        <Grid Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Restore last hardware settings on startup" FontSize="14"
+                                           Foreground="{StaticResource TextPrimaryBrush}"/>
+                                <TextBlock Text="Reapply the saved fan preset, performance mode, GPU boost, and tuning settings after OmenCore starts." FontSize="12"
+                                           Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <ToggleButton Grid.Column="1"
+                                          Style="{StaticResource ModernToggleButton}"
+                                          IsChecked="{Binding EnableStartupHardwareRestore, Mode=TwoWay}"/>
+                        </Grid>
+
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Allow startup restore on OMEN 16/Victus" FontSize="14"
+                                           Foreground="{StaticResource TextPrimaryBrush}"/>
+                                <TextBlock Text="Overrides the extra guardrail for models that have reported firmware sensitivity during boot. Leave off unless you want automatic reapply on those systems." FontSize="12"
+                                           Foreground="{StaticResource TextSecondaryBrush}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <ToggleButton Grid.Column="1"
+                                          Style="{StaticResource ModernToggleButton}"
+                                          IsEnabled="{Binding EnableStartupHardwareRestore}"
+                                          IsChecked="{Binding AllowStartupRestoreOnOmen16OrVictus, Mode=TwoWay}"/>
+                        </Grid>
+
+                        <Border Background="#1F1F1F" CornerRadius="4" Padding="12" Margin="0,8,0,0">
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Startup restore: " FontSize="12"
+                                           Foreground="{StaticResource TextSecondaryBrush}"/>
+                                <TextBlock Text="{Binding StartupHardwareRestoreStatus}" FontSize="12" FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextPrimaryBrush}" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
                         <Border Background="#1F1F1F" CornerRadius="4" Padding="12" Margin="0,8,0,0">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="Current status: " FontSize="12" 
@@ -1275,6 +1324,7 @@
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
                                     
                                     <TextBlock Grid.Row="0" Grid.Column="0" Text="Ctrl + Shift + F" FontFamily="Consolas" 
@@ -1300,6 +1350,11 @@
                                     <TextBlock Grid.Row="4" Grid.Column="0" Text="Ctrl + Shift + O" FontFamily="Consolas" 
                                                Foreground="{StaticResource AccentBrush}" FontSize="12" Margin="0,4,0,0"/>
                                     <TextBlock Grid.Row="4" Grid.Column="1" Text="Show/hide OmenCore window" 
+                                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0"/>
+
+                                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Win + F12" FontFamily="Consolas"
+                                               Foreground="{StaticResource AccentBrush}" FontSize="12" Margin="0,4,0,0"/>
+                                    <TextBlock Grid.Row="5" Grid.Column="1" Text="Show OmenCore window"
                                                Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0"/>
                                 </Grid>
                             </StackPanel>

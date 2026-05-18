@@ -123,4 +123,36 @@ public static class LinuxSysfsPathMap
     }
 
     public static bool HasHpWmiPwmEnable(int index) => ResolveHpWmiPwmEnablePath(index) != null;
+
+    public static string? ResolveHpWmiPwmPath(int index)
+    {
+        foreach (var hwmonDir in EnumerateHpWmiHwmonDirectories())
+        {
+            var candidate = Path.Combine(hwmonDir, $"pwm{index}");
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    public static bool HasHpWmiPwm(int index) => ResolveHpWmiPwmPath(index) != null;
+
+    public static string? ResolveHpWmiFanInputPath(int index)
+    {
+        foreach (var hwmonDir in EnumerateHpWmiHwmonDirectories())
+        {
+            var candidate = Path.Combine(hwmonDir, $"fan{index}_input");
+            if (File.Exists(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    public static bool HasHpWmiFanInput(int index) => ResolveHpWmiFanInputPath(index) != null;
 }

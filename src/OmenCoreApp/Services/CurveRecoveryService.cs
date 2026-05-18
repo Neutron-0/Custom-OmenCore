@@ -1,4 +1,5 @@
 using OmenCore.Models;
+using OmenCore.Utils;
 using OmenCore.Services.Diagnostics;
 using System;
 using System.Collections.Generic;
@@ -142,7 +143,7 @@ namespace OmenCore.Services
                             _logging.Warn($"✓ Reverted to last known good preset: {_lastKnownGoodPreset.Name}");
 
                             // Notify user
-                            System.Windows.Application.Current?.Dispatcher?.Invoke(() =>
+                            DispatcherHelper.RunOnUiThread(() =>
                             {
                                 System.Windows.MessageBox.Show(
                                     $"Your fan curve caused sustained overheating!\n\n" +

@@ -404,7 +404,8 @@
                 </UniformGrid>
                 
                 <!-- Settings Row - Compact horizontal layout -->
-                <StackPanel Grid.Row="2">
+                <StackPanel Grid.Row="2"
+                            Visibility="{Binding IsCustomSelected, Converter={StaticResource BoolToVisibility}}">
                     <!-- Save Custom Preset -->
                     <WrapPanel>
                         <TextBox Text="{Binding CustomPresetName, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}" 
@@ -516,7 +517,8 @@
         </Border>
 
         <!-- Fan Curve Editor and Telemetry -->
-        <Grid Grid.Row="4">
+        <Grid Grid.Row="4"
+              Visibility="{Binding IsCustomSelected, Converter={StaticResource BoolToVisibility}}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" MinWidth="320"/>
                 <ColumnDefinition Width="300" MinWidth="220"/>

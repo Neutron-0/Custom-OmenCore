@@ -438,7 +438,7 @@ namespace OmenCoreApp.Tests.Hardware
         }
 
         [Fact]
-        public void RestoreAutoControl_V1_DoesNotWriteZeroFanLevel()
+        public void RestoreAutoControl_V1_ClearsManualFloorWithZeroLevel()
         {
             var fake = new V1AutoHandoffFakeWmiBios();
             var controller = new WmiFanController(null, null, 0, injectedWmiBios: fake);
@@ -446,20 +446,20 @@ namespace OmenCoreApp.Tests.Hardware
             controller.SetMaxFanSpeed(true).Should().BeTrue();
             controller.RestoreAutoControl().Should().BeTrue();
 
-            fake.SetFanLevelCalls.Should().NotContain(call => call.fan1 == 0 && call.fan2 == 0,
-                "V1 auto handoff must not force a transient 0 RPM dip");
+            fake.SetFanLevelCalls.Should().Contain(call => call.fan1 == 0 && call.fan2 == 0,
+                "V1 auto handoff should clear the manual fan floor so BIOS can idle fans down");
         }
 
         [Fact]
-        public void ApplyPreset_Auto_V1_DoesNotWriteZeroFanLevel()
+        public void ApplyPreset_Auto_V1_ClearsManualFloorWithZeroLevel()
         {
             var fake = new V1AutoHandoffFakeWmiBios();
             var controller = new WmiFanController(null, null, 0, injectedWmiBios: fake);
 
             controller.ApplyPreset(new FanPreset { Name = "Auto", Mode = OmenCore.Models.FanMode.Auto }).Should().BeTrue();
 
-            fake.SetFanLevelCalls.Should().NotContain(call => call.fan1 == 0 && call.fan2 == 0,
-                "Auto preset should rely on SetFanMode(Default), not an explicit SetFanLevel(0,0)");
+            fake.SetFanLevelCalls.Should().Contain(call => call.fan1 == 0 && call.fan2 == 0,
+                "Auto preset should clear the V1 manual floor after restoring BIOS control");
         }
 
         [Fact]
@@ -618,6 +618,42 @@ namespace OmenCoreApp.Tests.Hardware
                 "custom curve 100% should use the same protocol ceiling as Max mode so BIOS can clamp to the real hardware maximum");
         }
 
+        [Fact]
+        public void SetPerformanceMode_WhenEcReadbackMismatches_ReturnsFalse()
+        {
+            var fake = new ModeCaptureFakeWmiBios();
+            var ec = new FanModeReadbackEcAccess(0x30);
+            var controller = new WmiFanController(null, null, 0, injectedWmiBios: fake, ecAccess: ec);
+
+            controller.SetPerformanceMode("Performance").Should().BeFalse(
+                "available EC readback from HPCM should prevent projecting an unconfirmed mode as applied");
+        }
+
+        [Fact]
+        public void SetPerformanceMode_WhenEcReadbackMatches_ReturnsTrue()
+        {
+            var fake = new ModeCaptureFakeWmiBios();
+            var ec = new FanModeReadbackEcAccess(0x31);
+            var controller = new WmiFanController(null, null, 0, injectedWmiBios: fake, ecAccess: ec);
+
+            controller.SetPerformanceMode("Performance").Should().BeTrue();
+        }
+
+        [Fact]
+        public void ApplyPreset_V1AutoHandoff_ClearsManualFloorAfterTransitionKick()
+        {
+            var fake = new V1AutoHandoffFakeWmiBios();
+            var controller = new WmiFanController(null, null, 0, injectedWmiBios: fake);
+
+            controller.SetPerformanceMode("Performance").Should().BeTrue();
+            controller.ApplyPreset(new FanPreset { Name = "Auto", Mode = OmenCore.Models.FanMode.Auto }).Should().BeTrue();
+
+            fake.SetFanLevelCalls.Should().Contain(call => call.fan1 == 20 && call.fan2 == 20,
+                "V1 firmware needs a transition hint when leaving Performance");
+            fake.SetFanLevelCalls.Should().Contain(call => call.fan1 == 0 && call.fan2 == 0,
+                "V1 auto mode should explicitly clear the manual floor so BIOS can idle fans down");
+        }
+
         // Fake implementation to simulate V2 BIOS that does not expose RPM but reports fan levels.
         private class FallbackFakeWmiBios : IHpWmiBios
         {
@@ -639,6 +675,22 @@ namespace OmenCoreApp.Tests.Hardware
             public (bool customTgp, bool ppab, int dState)? GetGpuPower() => null;
             public bool SetGpuPower(HpWmiBios.GpuPowerLevel level) => true;
             public HpWmiBios.GpuMode? GetGpuMode() => null;
+            public void Dispose() { }
+        }
+
+        private sealed class FanModeReadbackEcAccess : IEcAccess
+        {
+            private readonly byte _fanMode;
+
+            public FanModeReadbackEcAccess(byte fanMode)
+            {
+                _fanMode = fanMode;
+            }
+
+            public bool IsAvailable => true;
+            public bool Initialize(string devicePath) => true;
+            public byte ReadByte(ushort address) => address == 0x95 ? _fanMode : (byte)0x00;
+            public void WriteByte(ushort address, byte value) { }
             public void Dispose() { }
         }
 

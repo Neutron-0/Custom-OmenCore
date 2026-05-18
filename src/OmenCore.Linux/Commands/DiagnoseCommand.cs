@@ -122,6 +122,7 @@ public static class DiagnoseCommand
         info.EcSysWriteSupport = await ReadTextAsync("/sys/module/ec_sys/parameters/write_support");
 
         info.HpWmiModuleLoaded = Directory.Exists("/sys/module/hp_wmi");
+        info.HpWmiForceMultiplex = await ReadTextAsync("/sys/module/hp_wmi/parameters/force_multiplex");
 
         // Paths
         info.EcIoPathExists = File.Exists(LinuxSysfsPathMap.EcIoPath);
@@ -136,6 +137,14 @@ public static class DiagnoseCommand
         info.HpWmiFan2OutputExists = File.Exists("/sys/devices/platform/hp-wmi/fan2_output");
         info.HpWmiFan1TargetExists = LinuxSysfsPathMap.HasHpWmiFanTarget(1);
         info.HpWmiFan2TargetExists = LinuxSysfsPathMap.HasHpWmiFanTarget(2);
+        info.HpWmiPwm1EnableExists = LinuxSysfsPathMap.HasHpWmiPwmEnable(1);
+        info.HpWmiPwm2EnableExists = LinuxSysfsPathMap.HasHpWmiPwmEnable(2);
+        info.HpWmiPwm1Exists = LinuxSysfsPathMap.HasHpWmiPwm(1);
+        info.HpWmiPwm2Exists = LinuxSysfsPathMap.HasHpWmiPwm(2);
+        info.HpWmiFan1InputExists = LinuxSysfsPathMap.HasHpWmiFanInput(1);
+        info.HpWmiFan2InputExists = LinuxSysfsPathMap.HasHpWmiFanInput(2);
+        info.HpWmiPwm1Enable = await ReadTextAsync(LinuxSysfsPathMap.ResolveHpWmiPwmEnablePath(1));
+        info.HpWmiPwm1 = await ReadTextAsync(LinuxSysfsPathMap.ResolveHpWmiPwmPath(1));
 
         // ACPI platform_profile (kernel 5.18+, used by 2025+ models)
         info.AcpiPlatformProfileExists = File.Exists(LinuxSysfsPathMap.AcpiPlatformProfilePath);
@@ -236,6 +245,27 @@ public static class DiagnoseCommand
                 info.Recommendations.Add("If your firmware supports it, test kernel parameter hp_wmi.force_multiplex=1 and reboot.");
                 info.Recommendations.Add("Arch-family optional path: test hp-omen-gaming-wmi-dkms (AUR). It often automates hp-wmi profile-path setup, but remains board-dependent and may not fix profile exposure on all models.");
             }
+        }
+
+        if (info.HpWmiPwm1EnableExists && info.HpWmiPwm1Exists)
+        {
+            info.Notes.Add("hp-wmi hwmon manual PWM duty is available. OmenCore can use pwm_enable=1 plus pwm1 duty for --speed/custom-curve writes, pwm_enable=2 for auto, and pwm_enable=0 for max fan.");
+        }
+
+        if (string.Equals(info.BoardId, "8E35", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(info.BoardId, "8D24", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(info.BoardId, "8D26", StringComparison.OrdinalIgnoreCase))
+        {
+            info.Notes.Add($"Board {info.BoardId} detected (OMEN 16 ap0xxx family): prefer upstream hp-wmi/hwmon/platform_profile interfaces and avoid legacy EC writes.");
+            if (!info.HpWmiPwm1EnableExists && !info.HpWmiThermalProfileExists && !info.AcpiPlatformProfileExists)
+            {
+                info.Recommendations.Add("This board likely needs a newer hp-wmi kernel path. Attach diagnose output, hp-wmi tree, and ACPI tables when asking upstream hp-wmi maintainers for board support.");
+            }
+        }
+
+        if (info.HpWmiPathExists && string.IsNullOrWhiteSpace(info.HpWmiForceMultiplex))
+        {
+            info.Recommendations.Add("If hp-wmi profile paths are missing or the dGPU power state is desynced, test kernel parameter hp_wmi.force_multiplex=1, reboot, then rerun diagnose.");
         }
 
         if (string.Equals(info.BoardId, "8C58", StringComparison.OrdinalIgnoreCase) ||
@@ -403,6 +433,29 @@ public static class DiagnoseCommand
                 Summary = "nvidia-powerd reports that firmware/SBIOS disabled Dynamic Boost control.",
                 Evidence = string.Join(" | ", nvidiaPowerdBoostLines),
                 Recommendation = "On OMEN Max 16 8D41 / RTX 50-series reports, this usually means the Linux hp-wmi path applied the thermal profile but did not unlock GPU thermal modes / PPAB. `nvidia-smi -pl` is expected to be blocked on these laptop GPUs; collect `journalctl -u nvidia-powerd -b`, `journalctl -k -b`, and ACPI tables for kernel-side hp-wmi follow-up."
+            });
+        }
+
+        var nvidiaGpsDsmLines = lines
+            .Where(line =>
+                (line.Contains("GPS", StringComparison.OrdinalIgnoreCase) ||
+                 line.Contains("_DSM", StringComparison.OrdinalIgnoreCase) ||
+                 line.Contains("D3cold", StringComparison.OrdinalIgnoreCase)) &&
+                (line.Contains("NVRM", StringComparison.OrdinalIgnoreCase) ||
+                 line.Contains("ACPI", StringComparison.OrdinalIgnoreCase) ||
+                 line.Contains("nvidia", StringComparison.OrdinalIgnoreCase)))
+            .Take(4)
+            .ToList();
+
+        if (nvidiaGpsDsmLines.Count > 0)
+        {
+            hints.Add(new LinuxKernelIssueHint
+            {
+                Id = "nvidia-gps-acpi-dsm-d3cold",
+                Severity = "Warning",
+                Summary = "Kernel logs mention NVIDIA/ACPI DSM or D3cold power-state problems.",
+                Evidence = string.Join(" | ", nvidiaGpsDsmLines),
+                Recommendation = "For OMEN 16 RTX 50-series shutdown drain reports, collect `journalctl -k -b`, `cat /sys/bus/pci/devices/*/power/runtime_status` for NVIDIA devices, `sudo omencore-cli diagnose --report`, and ACPI tables. Treat this as firmware/kernel/NVIDIA integration evidence rather than a normal OmenCore fan-control bug."
             });
         }
 
@@ -577,8 +630,13 @@ public static class DiagnoseCommand
         return null;
     }
 
-    private static async Task<string?> ReadTextAsync(string path)
+    private static async Task<string?> ReadTextAsync(string? path)
     {
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return null;
+        }
+
         try
         {
             if (!File.Exists(path))
@@ -767,6 +825,10 @@ public static class DiagnoseCommand
         Console.WriteLine($"| Fan 2 Output Control | {(info.HpWmiFan2OutputExists ? "✓ Present" : "✗ Missing")} |");
         Console.WriteLine($"| Fan 1 Target Control (`fan1_target`) | {(info.HpWmiFan1TargetExists ? "✓ Present" : "✗ Missing")} |");
         Console.WriteLine($"| Fan 2 Target Control (`fan2_target`) | {(info.HpWmiFan2TargetExists ? "✓ Present" : "✗ Missing")} |");
+        Console.WriteLine($"| HP-WMI pwm1_enable | {(info.HpWmiPwm1EnableExists ? $"Present ({info.HpWmiPwm1Enable ?? "?"})" : "Missing")} |");
+        Console.WriteLine($"| HP-WMI pwm1 duty | {(info.HpWmiPwm1Exists ? $"Present ({info.HpWmiPwm1 ?? "?"})" : "Missing")} |");
+        Console.WriteLine($"| HP-WMI fan inputs | {((info.HpWmiFan1InputExists || info.HpWmiFan2InputExists) ? "Present" : "Missing")} |");
+        Console.WriteLine($"| hp_wmi.force_multiplex | {(string.IsNullOrWhiteSpace(info.HpWmiForceMultiplex) ? "N/A" : info.HpWmiForceMultiplex)} |");
         Console.WriteLine();
         Console.WriteLine("## Service / Packaging Diagnostics");
         Console.WriteLine();
@@ -875,6 +937,7 @@ public class DiagnoseInfo
     public bool EcIoPathExists { get; set; }
 
     public bool HpWmiModuleLoaded { get; set; }
+    public string? HpWmiForceMultiplex { get; set; }
     public bool HpWmiPathExists { get; set; }
     public bool HpWmiThermalProfileExists { get; set; }
     public bool HpWmiPlatformProfileExists { get; set; }
@@ -885,6 +948,14 @@ public class DiagnoseInfo
     public bool HpWmiFan2OutputExists { get; set; }
     public bool HpWmiFan1TargetExists { get; set; }
     public bool HpWmiFan2TargetExists { get; set; }
+    public bool HpWmiPwm1EnableExists { get; set; }
+    public bool HpWmiPwm2EnableExists { get; set; }
+    public bool HpWmiPwm1Exists { get; set; }
+    public bool HpWmiPwm2Exists { get; set; }
+    public bool HpWmiFan1InputExists { get; set; }
+    public bool HpWmiFan2InputExists { get; set; }
+    public string? HpWmiPwm1Enable { get; set; }
+    public string? HpWmiPwm1 { get; set; }
     public string? HpWmiThermalProfile { get; set; }
     public string? HpWmiThermalProfileChoices { get; set; }
     public string? HpWmiPlatformProfile { get; set; }

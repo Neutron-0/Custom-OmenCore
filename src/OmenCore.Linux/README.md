@@ -90,6 +90,24 @@ sudo omencore-cli fan --boost
 sudo omencore-cli fan --boost false
 ```
 
+On newer hp-wmi boards that expose standard hwmon fan control, OmenCore now uses
+the same kernel interface directly:
+
+```bash
+# BIOS automatic fan control
+sudo omencore-cli fan --profile auto
+
+# Manual duty through pwm_enable=1 + pwm1/pwm2
+sudo omencore-cli fan --speed 50
+
+# Firmware max fan through pwm_enable=0
+sudo omencore-cli fan --profile max
+```
+
+The equivalent raw sysfs paths are usually under
+`/sys/devices/platform/hp-wmi/hwmon/hwmon*/pwm1_enable` and `pwm1`, but use the
+CLI first so OmenCore can block unsafe fan-off writes and restore auto mode cleanly.
+
 ### Performance Mode
 
 ```bash
@@ -210,6 +228,11 @@ sudo dmidecode -t system -t baseboard > dmi-system-baseboard.txt
 ls -R /sys/devices/platform/hp-wmi > hp-wmi-tree.txt
 ls -R /sys/class/hwmon > hwmon-tree.txt
 
+# 3b) hp-wmi hwmon fan interface snapshot, if present
+find /sys/devices/platform/hp-wmi/hwmon -maxdepth 2 -type f \
+  \( -name 'pwm*' -o -name 'fan*_input' -o -name 'name' \) \
+  -print -exec cat {} \; > hp-wmi-hwmon-fan.txt
+
 # 4) Loaded modules
 lsmod | grep -E "hp_wmi|ec_sys|wmi" > module-state.txt
 
@@ -231,6 +254,13 @@ If the kernel log contains NVIDIA lines such as `PlatformRequestHandler failed t
 `failed to get platform power mode from SBIOS`, or `NV_ERR_INVALID_DATA`, include the full
 `journalctl -k -b` output and optional ACPI dump. Those messages usually point to a firmware/kernel/NVIDIA
 ACPI integration problem rather than a normal OmenCore permission or hp-wmi path issue.
+
+For OMEN 16 ap0xxx boards (`8D24`, `8D26`, `8E35`) where hp-wmi loads but
+thermal/profile files are missing, test with the newest available kernel first and rerun
+`sudo omencore-cli diagnose --report`. If `/sys/module/hp_wmi/parameters/force_multiplex`
+is absent or false and the dGPU/profile state is desynced, also test the kernel parameter
+`hp_wmi.force_multiplex=1` and include before/after diagnostics. Do not use legacy EC
+register writes on these boards.
 
 For OMEN Max 16 board `8D41` / RTX 50-series reports where TGP stays capped around 80W and
 `nvidia-powerd` says Dynamic Boost was disabled by SBIOS/client request, include the `nvidia-powerd`

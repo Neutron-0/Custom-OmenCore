@@ -842,6 +842,7 @@ namespace OmenCore.ViewModels
             
             // Load custom presets from config file
             LoadPresetsFromConfig();
+            RestoreAdHocCustomCurveFromConfig();
 
             // Initialise GPU curve from config, or defaults if not yet saved
             var savedGpuCurve = _configService.Config.GpuFanCurve;
@@ -860,9 +861,9 @@ namespace OmenCore.ViewModels
             // Persist GPU curve changes automatically
             GpuFanCurve.CollectionChanged += (s, e) => SaveGpuCurveToConfig();
 
-            // Default to Auto without applying/saving to config
+            // Show the last user-facing preset/curve in the editor without applying it.
             _suppressApplyOnSelection = true;
-            SelectedPreset = FanPresets.FirstOrDefault(p => p.Name == "Auto") ?? FanPresets[2]; // Default to Auto
+            SelectedPreset = ResolveInitialPresetSelection();
             _suppressApplyOnSelection = false;
         }
 
@@ -1180,7 +1181,7 @@ namespace OmenCore.ViewModels
         {
             CustomFanCurve.Clear();
             
-            if (preset.Mode == FanMode.Manual && preset.Curve != null && preset.Curve.Count > 0)
+            if (preset.Curve != null && preset.Curve.Count > 0)
             {
                 foreach (var point in preset.Curve)
                 {
@@ -1204,6 +1205,51 @@ namespace OmenCore.ViewModels
             }
         }
 
+        private FanPreset ResolveInitialPresetSelection()
+        {
+            var lastPresetName = _configService.Config.LastFanPresetName;
+            if (!string.IsNullOrWhiteSpace(lastPresetName))
+            {
+                var lastPreset = FanPresets.FirstOrDefault(p =>
+                    p.Name.Equals(lastPresetName, StringComparison.OrdinalIgnoreCase));
+                if (lastPreset != null)
+                {
+                    return lastPreset;
+                }
+            }
+
+            return FanPresets.FirstOrDefault(p => p.Name == "Auto") ?? FanPresets[2];
+        }
+
+        private void RestoreAdHocCustomCurveFromConfig()
+        {
+            var savedCurve = _configService.Config.CustomFanCurve;
+            if (savedCurve == null || savedCurve.Count < 2)
+            {
+                return;
+            }
+
+            var existing = FanPresets.FirstOrDefault(p =>
+                !p.IsBuiltIn && p.Name.Equals("Custom", StringComparison.OrdinalIgnoreCase));
+
+            if (existing == null)
+            {
+                FanPresets.Add(new FanPreset
+                {
+                    Name = "Custom",
+                    Mode = FanMode.Manual,
+                    Curve = CloneCurve(savedCurve),
+                    IsBuiltIn = false
+                });
+            }
+            else
+            {
+                existing.Curve = CloneCurve(savedCurve);
+            }
+
+            _logging.Info($"Loaded last applied custom fan curve from config ({savedCurve.Count} points)");
+        }
+
         private void ApplyPreset(FanPreset preset)
         {
             if (_fanService.IsDiagnosticModeActive)
@@ -1224,8 +1270,7 @@ namespace OmenCore.ViewModels
             try
             {
                 CurveApplyStatus = $"Applying '{preset.Name}'… (transitioning)";
-                var immediateApply = preset.Name.Equals("Extreme", StringComparison.OrdinalIgnoreCase)
-                    || preset.Name.Contains("Extreme", StringComparison.OrdinalIgnoreCase);
+                var immediateApply = ImmediateApplyOnApply || (preset.Curve?.Count > 0);
                 var applied = await Task.Run(() => _fanService.ApplyPreset(preset, immediate: immediateApply));
                 if (!applied)
                 {
@@ -1346,14 +1391,22 @@ namespace OmenCore.ViewModels
             try
             {
                 CurveApplyStatus = "Applying custom curve...";
-                await Task.Run(() => _fanService.ApplyPreset(customPreset, ImmediateApplyOnApply));
+                var applied = await Task.Run(() => _fanService.ApplyPreset(customPreset, immediate: true));
+                if (!applied)
+                {
+                    CurveApplyStatus = "Custom curve failed verification";
+                    _logging.Warn("Custom curve was not saved because fan service reported apply failure");
+                    return;
+                }
+
+                PersistSelectedCustomCurveIfNeeded();
                 ActiveFanMode = "Custom";
                 OnPropertyChanged(nameof(CurrentFanModeName));
 
                 await RunCurveVerificationKickAsync(
                     sourceLabel: "Custom curve",
                     curvePoints: CustomFanCurve,
-                    reapplyCurveAction: () => _fanService.ApplyPreset(customPreset, ImmediateApplyOnApply));
+                    reapplyCurveAction: () => _fanService.ApplyPreset(customPreset, immediate: true));
             }
             catch (Exception ex)
             {
@@ -1609,6 +1662,65 @@ namespace OmenCore.ViewModels
             _logging.Info($"✓ Saved and applied custom fan preset: '{preset.Name}' with {preset.Curve.Count} points");
         }
         
+        private void PersistSelectedCustomCurveIfNeeded()
+        {
+            var curve = CloneCurve(CustomFanCurve);
+            var targetPreset = SelectedPreset is { IsBuiltIn: false, Mode: FanMode.Manual }
+                ? SelectedPreset
+                : FanPresets.FirstOrDefault(p =>
+                    !p.IsBuiltIn &&
+                    p.Mode == FanMode.Manual &&
+                    p.Name.Equals("Custom", StringComparison.OrdinalIgnoreCase));
+
+            if (targetPreset == null)
+            {
+                targetPreset = new FanPreset
+                {
+                    Name = "Custom",
+                    Mode = FanMode.Manual,
+                    IsBuiltIn = false
+                };
+                FanPresets.Add(targetPreset);
+            }
+
+            targetPreset.Curve = curve;
+
+            _suppressApplyOnSelection = true;
+            SelectedPreset = targetPreset;
+            _suppressApplyOnSelection = false;
+
+            SaveAdHocCustomCurveToConfig(curve, targetPreset.Name);
+            SavePresetsToConfig();
+            SaveLastPresetToConfig(targetPreset.Name);
+            OnPropertyChanged(nameof(SavedCustomPresets));
+            OnPropertyChanged(nameof(HasSavedPresets));
+            OnPropertyChanged(nameof(CanDeleteSelectedPreset));
+            RaisePresetCommandStateChanged();
+            _logging.Info($"Updated saved fan preset '{targetPreset.Name}' with {targetPreset.Curve.Count} curve points");
+        }
+
+        private void SaveAdHocCustomCurveToConfig(List<FanCurvePoint> curve, string presetName)
+        {
+            try
+            {
+                var config = _configService.Load();
+                config.CustomFanCurve = CloneCurve(curve);
+                config.LastFanPresetName = presetName;
+                _configService.Save(config);
+            }
+            catch (Exception ex)
+            {
+                _logging.Warn($"Failed to save last applied custom fan curve: {ex.Message}");
+            }
+        }
+
+        private static List<FanCurvePoint> CloneCurve(IEnumerable<FanCurvePoint> points)
+        {
+            return points
+                .Select(p => new FanCurvePoint { TemperatureC = p.TemperatureC, FanPercent = p.FanPercent })
+                .ToList();
+        }
+
         private void DeleteSelectedPreset()
         {
             if (SelectedPreset == null || SelectedPreset.IsBuiltIn)
@@ -1625,8 +1737,10 @@ namespace OmenCore.ViewModels
                 return;
             
             FanPresets.Remove(SelectedPreset);
-            SelectedPreset = null;
+            SelectedPreset = FanPresets.FirstOrDefault(p => p.Name.Equals("Auto", StringComparison.OrdinalIgnoreCase))
+                ?? FanPresets.FirstOrDefault();
             SavePresetsToConfig();
+            ClearDeletedPresetConfigState(presetName);
             
             // Notify UI that saved presets list changed
             OnPropertyChanged(nameof(SavedCustomPresets));
@@ -1635,6 +1749,34 @@ namespace OmenCore.ViewModels
             RaisePresetCommandStateChanged();
 
             _logging.Info($"🗑️ Deleted custom fan preset: '{presetName}'");
+        }
+
+        private void ClearDeletedPresetConfigState(string presetName)
+        {
+            try
+            {
+                var config = _configService.Load();
+                var deletedWasLastPreset = config.LastFanPresetName?.Equals(presetName, StringComparison.OrdinalIgnoreCase) == true;
+                var deletedWasAdHocCustom = presetName.Equals("Custom", StringComparison.OrdinalIgnoreCase);
+
+                if (!deletedWasLastPreset && !deletedWasAdHocCustom)
+                {
+                    return;
+                }
+
+                if (deletedWasLastPreset)
+                {
+                    config.LastFanPresetName = "Auto";
+                }
+
+                config.CustomFanCurve = null;
+                _configService.Save(config);
+                _logging.Info($"Cleared stale custom fan curve config after deleting '{presetName}'");
+            }
+            catch (Exception ex)
+            {
+                _logging.Warn($"Failed to clear deleted fan preset config state: {ex.Message}");
+            }
         }
 
         private void RaisePresetCommandStateChanged()

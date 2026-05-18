@@ -130,6 +130,15 @@ namespace OmenCoreApp.Tests.ViewModels
                 .Should().BeAssignableTo<Task>().Subject;
         }
 
+        private static Task ApplyCustomCurveAsync(OmenCore.ViewModels.FanControlViewModel vm)
+        {
+            var method = typeof(OmenCore.ViewModels.FanControlViewModel)
+                .GetMethod("ApplyCustomCurveAsync", BindingFlags.NonPublic | BindingFlags.Instance);
+            method.Should().NotBeNull();
+            return method!.Invoke(vm, Array.Empty<object>())
+                .Should().BeAssignableTo<Task>().Subject;
+        }
+
         [Fact]
         public void SettingTransitionProperties_PersistsToConfig_And_AppliesToService()
         {
@@ -207,6 +216,81 @@ namespace OmenCoreApp.Tests.ViewModels
 
             vm.IsFanCalibrationAvailable.Should().BeTrue();
             vm.FanCalibrationUnavailableReason.Should().Contain("available");
+        }
+
+        [Fact]
+        public async Task ApplyCustomCurve_PersistsAdHocCustomPresetAndLastCurve()
+        {
+            var vm = CreateViewModel();
+            vm.CustomFanCurve.Clear();
+            vm.CustomFanCurve.Add(new FanCurvePoint { TemperatureC = 40, FanPercent = 30 });
+            vm.CustomFanCurve.Add(new FanCurvePoint { TemperatureC = 60, FanPercent = 55 });
+            vm.CustomFanCurve.Add(new FanCurvePoint { TemperatureC = 85, FanPercent = 100 });
+
+            await ApplyCustomCurveAsync(vm);
+
+            var saved = new ConfigurationService().Load();
+            saved.LastFanPresetName.Should().Be("Custom");
+            saved.CustomFanCurve.Should().NotBeNull();
+            saved.CustomFanCurve!.Should().HaveCount(3);
+            saved.FanPresets.Should().ContainSingle(p => p.Name == "Custom" && !p.IsBuiltIn);
+
+            vm.SelectedPreset.Should().NotBeNull();
+            vm.SelectedPreset!.Name.Should().Be("Custom");
+            vm.SelectedPreset.IsBuiltIn.Should().BeFalse();
+        }
+
+        [Fact]
+        public void Constructor_RestoresLastAppliedAdHocCustomCurveIntoEditor()
+        {
+            var configService = new ConfigurationService();
+            var config = configService.Load();
+            config.LastFanPresetName = "Custom";
+            config.CustomFanCurve = new()
+            {
+                new FanCurvePoint { TemperatureC = 42, FanPercent = 33 },
+                new FanCurvePoint { TemperatureC = 82, FanPercent = 88 }
+            };
+            configService.Save(config);
+
+            var vm = CreateViewModel();
+
+            vm.SelectedPreset.Should().NotBeNull();
+            vm.SelectedPreset!.Name.Should().Be("Custom");
+            vm.CustomFanCurve.Select(p => p.TemperatureC).Should().Equal(42, 82);
+            vm.CustomFanCurve.Select(p => p.FanPercent).Should().Equal(33, 88);
+        }
+
+        [Fact]
+        public void ClearDeletedPresetConfigState_RemovesStaleLastCustomCurve()
+        {
+            var configService = new ConfigurationService();
+            var config = configService.Load();
+            config.LastFanPresetName = "Field curve";
+            config.CustomFanCurve = new()
+            {
+                new FanCurvePoint { TemperatureC = 42, FanPercent = 33 },
+                new FanCurvePoint { TemperatureC = 82, FanPercent = 88 }
+            };
+            config.FanPresets.Add(new FanPreset
+            {
+                Name = "Field curve",
+                IsBuiltIn = false,
+                Mode = FanMode.Manual,
+                Curve = config.CustomFanCurve.ToList()
+            });
+            configService.Save(config);
+
+            var vm = CreateViewModel();
+            var clearMethod = typeof(OmenCore.ViewModels.FanControlViewModel)
+                .GetMethod("ClearDeletedPresetConfigState", BindingFlags.Instance | BindingFlags.NonPublic);
+            clearMethod.Should().NotBeNull();
+
+            clearMethod!.Invoke(vm, new object[] { "Field curve" });
+
+            var saved = configService.Load();
+            saved.LastFanPresetName.Should().Be("Auto");
+            saved.CustomFanCurve.Should().BeNull();
         }
 
         [Fact]

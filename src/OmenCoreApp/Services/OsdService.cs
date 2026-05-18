@@ -5,6 +5,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using OmenCore.Hardware;
 using OmenCore.Models;
+using OmenCore.Utils;
 using OmenCore.Views;
 
 namespace OmenCore.Services
@@ -138,8 +139,10 @@ namespace OmenCore.Services
         {
             if (_overlayWindow == null || _isVisible) return;
             
-            Application.Current?.Dispatcher?.Invoke(() =>
+            DispatcherHelper.RunOnUiThread(() =>
             {
+                if (_overlayWindow == null || _isVisible) return;
+
                 _overlayWindow.Show();
                 if (!string.IsNullOrWhiteSpace(_lastCurrentMode))
                 {
@@ -167,8 +170,10 @@ namespace OmenCore.Services
         {
             if (_overlayWindow == null || !_isVisible) return;
             
-            Application.Current?.Dispatcher?.Invoke(() =>
+            DispatcherHelper.RunOnUiThread(() =>
             {
+                if (_overlayWindow == null || !_isVisible) return;
+
                 _overlayWindow.StopUpdates();
                 _overlayWindow.Hide();
                 NotifyVisibilityChanged(false);
@@ -194,10 +199,7 @@ namespace OmenCore.Services
         public void SetCurrentMode(string mode)
         {
             _lastCurrentMode = mode ?? string.Empty;
-            Application.Current?.Dispatcher?.Invoke(() =>
-            {
-                _overlayWindow?.SetCurrentMode(mode ?? string.Empty);
-            });
+            PostOverlayUpdate(window => window.SetCurrentMode(mode ?? string.Empty));
         }
         
         /// <summary>
@@ -206,10 +208,7 @@ namespace OmenCore.Services
         public void SetPerformanceMode(string mode)
         {
             _lastPerformanceMode = mode ?? string.Empty;
-            Application.Current?.Dispatcher?.Invoke(() =>
-            {
-                _overlayWindow?.SetPerformanceMode(mode ?? string.Empty);
-            });
+            PostOverlayUpdate(window => window.SetPerformanceMode(mode ?? string.Empty));
         }
         
         /// <summary>
@@ -218,10 +217,7 @@ namespace OmenCore.Services
         public void SetFanMode(string mode)
         {
             _lastFanMode = mode ?? string.Empty;
-            Application.Current?.Dispatcher?.Invoke(() =>
-            {
-                _overlayWindow?.SetFanMode(mode ?? string.Empty);
-            });
+            PostOverlayUpdate(window => window.SetFanMode(mode ?? string.Empty));
         }
         
         /// <summary>
@@ -229,9 +225,17 @@ namespace OmenCore.Services
         /// </summary>
         public void UpdateSettings()
         {
-            Application.Current?.Dispatcher?.Invoke(() =>
+            PostOverlayUpdate(window => window.UpdateSettings(_config.Config.Osd));
+        }
+
+        private void PostOverlayUpdate(Action<OsdOverlayWindow> update)
+        {
+            DispatcherHelper.RunOnUiThread(() =>
             {
-                _overlayWindow?.UpdateSettings(_config.Config.Osd);
+                if (_overlayWindow != null)
+                {
+                    update(_overlayWindow);
+                }
             });
         }
         
@@ -261,7 +265,7 @@ namespace OmenCore.Services
         {
             UnregisterToggleHotkey();
             
-            Application.Current?.Dispatcher?.Invoke(() =>
+            DispatcherHelper.RunOnUiThread(() =>
             {
                 _overlayWindow?.StopUpdates();
                 _overlayWindow?.Close();
@@ -371,7 +375,7 @@ namespace OmenCore.Services
             {
                 try
                 {
-                    Application.Current?.Dispatcher?.Invoke(() =>
+                    DispatcherHelper.RunOnUiThread(() =>
                     {
                         try
                         {

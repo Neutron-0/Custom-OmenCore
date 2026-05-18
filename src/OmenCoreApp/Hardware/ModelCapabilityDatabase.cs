@@ -501,6 +501,29 @@ namespace OmenCore.Hardware
                 Notes = "2025 AMD model (Ryzen AI 9 365 + RTX 5060). V1 fan control, MaxFanLevel=55. PawnIO requires reboot after first install to activate driver."
             });
 
+            // OMEN 16 (2025) - ap0xxx AMD, alternate board/ProductId reported by RC1 testers.
+            // Community report: Product ID 8E35, SKU 1H85430PWY, AMD Ryzen AI 9 365 + RTX 5060.
+            AddModel(new ModelCapabilities
+            {
+                ProductId = "8E35",
+                ModelName = "OMEN 16 (2025) ap0xxx AMD",
+                ModelNamePattern = "16-ap0",
+                ModelYear = 2025,
+                Family = OmenModelFamily.OMEN16,
+                SupportsFanControlWmi = true,
+                SupportsFanControlEc = false,
+                SupportsFanCurves = true,
+                FanZoneCount = 2,
+                MaxFanLevel = 55,
+                SupportsPerformanceModes = true,
+                HasMuxSwitch = true,
+                SupportsGpuPowerBoost = true,
+                HasFourZoneRgb = true,
+                SupportsUndervolt = false,
+                UserVerified = false,
+                Notes = "Discord RC1 report - OMEN Gaming Laptop 16-ap0xxx / ProductId 8E35 / SKU 1H85430PWY (Ryzen AI 9 365 + RTX 5060). Same WMI V1 fan profile as 8D24; EC direct remains disabled until validated."
+            });
+
             // OMEN 16 (2024) - am0xxx series (AMD Ryzen 7/8xxx + discrete GPU)
             // GitHub Issue #111: ProductId 8D2F, WMI model "OMEN Gaming Laptop 16-am0xxx"
             // Falls back to OMEN16 family defaults without a specific entry — add to give accurate capabilities.
@@ -967,6 +990,29 @@ namespace OmenCore.Hardware
                 Notes = "GitHub #66 — Victus 16-d1xxx (8A26). Capabilities inferred from nearby Victus 16 entries; awaiting user confirmation."
             });
             
+            // Victus 16-s0xxx (2023/2024) AMD Ryzen 7 7840HS + RTX 4060.
+            // RC1 field log 2026-05-16: ProductId 8BD4, BIOS F.30, V1 WMI fan control,
+            // two fan levels exposed, no confirmed MUX/GPU boost/RGB control.
+            AddModel(new ModelCapabilities
+            {
+                ProductId = "8BD4",
+                ModelName = "HP Victus 16-s0xxx AMD",
+                ModelNamePattern = "16-s0",
+                ModelYear = 2023,
+                Family = OmenModelFamily.Victus,
+                SupportsFanControlWmi = true,
+                SupportsFanCurves = true,
+                SupportsIndependentFanCurves = false,
+                FanZoneCount = 2,
+                HasMuxSwitch = false,
+                SupportsGpuPowerBoost = false,
+                SupportsUndervolt = false,
+                HasFourZoneRgb = false,
+                HasKeyboardBacklight = true,
+                UserVerified = false,
+                Notes = "RC1 field log - Victus 16-s0xxx (8BD4), Ryzen 7 7840HS + RTX 4060. Conservative WMI V1 fan profile; RGB/GPU boost disabled pending verification."
+            });
+
             // Victus 16 (2024+) Ryzen r0xxx series
             // GitHub Issue #110: Victus by HP Gaming Laptop 16-r0xxx — model not in capability database
             AddModel(new ModelCapabilities

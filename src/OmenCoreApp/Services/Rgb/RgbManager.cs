@@ -26,6 +26,7 @@ namespace OmenCore.Services.Rgb
         public event EventHandler<RgbSyncEventArgs>? SyncCompleted;
 
         public IEnumerable<IRgbProvider> Providers => _providers;
+        public RgbSyncEventArgs? LastSyncResult { get; private set; }
         
         /// <summary>
         /// Get all available providers (initialized and with devices).
@@ -143,17 +144,31 @@ namespace OmenCore.Services.Rgb
             if (available.Count == 0)
             {
                 _logging?.Warn($"RGB sync '{effectId}' skipped: no available providers support this effect");
-                SyncCompleted?.Invoke(this, new RgbSyncEventArgs(effectId, 0, 0, 0));
+                PublishSyncCompleted(new RgbSyncEventArgs(effectId, 0, 0, 0));
                 return;
             }
 
             // Phase 1: prepare — providers may pre-serialise payloads or acquire handles
-            await Task.WhenAll(available.Select(p => SafePrepareEffectAsync(p, effectId)));
+            var prepareResults = await Task.WhenAll(available.Select(async p => new
+            {
+                Provider = p,
+                Prepared = await SafePrepareEffectAsync(p, effectId)
+            }));
+            var preparedProviders = prepareResults
+                .Where(result => result.Prepared)
+                .Select(result => result.Provider)
+                .ToList();
 
             // Phase 2: commit — all providers begin their hardware/network write simultaneously
-            var results = await Task.WhenAll(available.Select(p => SafeApplyEffectAsync(p, effectId)));
+            var applyResults = await Task.WhenAll(preparedProviders.Select(p => SafeApplyEffectAsync(p, effectId)));
+            var appliedByProvider = preparedProviders
+                .Zip(applyResults, (provider, applied) => new { provider, applied })
+                .ToDictionary(result => result.provider.ProviderId, result => result.applied, StringComparer.OrdinalIgnoreCase);
+            var results = prepareResults
+                .Select(result => result.Prepared && appliedByProvider.TryGetValue(result.Provider.ProviderId, out var applied) && applied)
+                .ToList();
             
-            SyncCompleted?.Invoke(this, CreateSyncEvent(effectId, available.Count, results));
+            PublishSyncCompleted(CreateSyncEvent(effectId, available.Count, results));
         }
         
         private async Task<bool> SafePrepareEffectAsync(IRgbProvider provider, string effectId)
@@ -202,7 +217,7 @@ namespace OmenCore.Services.Rgb
             // Phase 2: commit
             var results = await Task.WhenAll(available.Select(p => SafeSetStaticColorAsync(p, color)));
             
-            SyncCompleted?.Invoke(this, CreateSyncEvent(effectId, available.Count, results));
+            PublishSyncCompleted(CreateSyncEvent(effectId, available.Count, results));
         }
         
         private async Task<bool> SafeSetStaticColorAsync(IRgbProvider provider, Color color)
@@ -230,7 +245,7 @@ namespace OmenCore.Services.Rgb
             var available = _providers.Where(p => p.IsAvailable && p.ProviderId != "system" && p.SupportedEffects.Contains(RgbEffectType.Breathing)).ToList();
             var results = await Task.WhenAll(available.Select(p => SafeSetBreathingAsync(p, color)));
             
-            SyncCompleted?.Invoke(this, CreateSyncEvent("effect:breathing", available.Count, results));
+            PublishSyncCompleted(CreateSyncEvent("effect:breathing", available.Count, results));
         }
         
         private async Task<bool> SafeSetBreathingAsync(IRgbProvider provider, Color color)
@@ -258,7 +273,7 @@ namespace OmenCore.Services.Rgb
             var available = _providers.Where(p => p.IsAvailable && p.ProviderId != "system" && p.SupportedEffects.Contains(RgbEffectType.Spectrum)).ToList();
             var results = await Task.WhenAll(available.Select(p => SafeSetSpectrumAsync(p)));
             
-            SyncCompleted?.Invoke(this, CreateSyncEvent("effect:spectrum", available.Count, results));
+            PublishSyncCompleted(CreateSyncEvent("effect:spectrum", available.Count, results));
         }
         
         private async Task<bool> SafeSetSpectrumAsync(IRgbProvider provider)
@@ -283,10 +298,10 @@ namespace OmenCore.Services.Rgb
             await EnsureProvidersInitializedAsync();
 
             // Exclude "system" provider to avoid infinite recursion (it delegates back to this manager)
-            var available = _providers.Where(p => p.IsAvailable && p.ProviderId != "system").ToList();
+            var available = GetAvailableProvidersForEffect(RgbEffectType.Off).ToList();
             var results = await Task.WhenAll(available.Select(p => SafeTurnOffAsync(p)));
             
-            SyncCompleted?.Invoke(this, CreateSyncEvent("off", available.Count, results));
+            PublishSyncCompleted(CreateSyncEvent("off", available.Count, results));
         }
         
         private async Task<bool> SafeTurnOffAsync(IRgbProvider provider)
@@ -337,6 +352,28 @@ namespace OmenCore.Services.Rgb
             }
 
             return new RgbSyncEventArgs(effectId, attempted, succeeded, failed);
+        }
+
+        private void PublishSyncCompleted(RgbSyncEventArgs args)
+        {
+            LastSyncResult = args;
+            var handlers = SyncCompleted;
+            if (handlers == null)
+            {
+                return;
+            }
+
+            foreach (EventHandler<RgbSyncEventArgs> handler in handlers.GetInvocationList())
+            {
+                try
+                {
+                    handler(this, args);
+                }
+                catch (Exception ex)
+                {
+                    _logging?.Warn($"RGB sync subscriber failed for '{args.EffectId}': {ex.Message}");
+                }
+            }
         }
 
         private void LogProviderWarning(IRgbProvider provider, string action, Exception ex)
@@ -404,6 +441,14 @@ namespace OmenCore.Services.Rgb
                 default:
                     return false;
             }
+        }
+
+        private IEnumerable<IRgbProvider> GetAvailableProvidersForEffect(RgbEffectType effectType)
+        {
+            return _providers.Where(p =>
+                p.IsAvailable &&
+                p.ProviderId != "system" &&
+                p.SupportedEffects.Contains(effectType));
         }
     }
     

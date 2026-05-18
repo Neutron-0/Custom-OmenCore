@@ -100,7 +100,7 @@
             </Border.BorderThickness>
             <StackPanel Margin="20,18">
                 <TextBlock Text="Hardware Monitoring Dashboard" FontSize="22" FontWeight="Bold" Foreground="#F5F7FF" Margin="0,0,0,8"/>
-                <TextBlock Text="Real-time monitoring of power consumption, battery health, and system performance with historical trends and alerts." FontSize="13" Foreground="#8B92A8" TextWrapping="Wrap"/>
+                <TextBlock Text="Real-time monitoring of power consumption, battery capacity, and system performance with historical trends and alerts." FontSize="13" Foreground="#8B92A8" TextWrapping="Wrap"/>
             </StackPanel>
         </Border>
 
@@ -122,13 +122,13 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- Battery Health -->
+                    <!-- Battery Capacity -->
                     <Border Style="{StaticResource MetricCardStyle}">
                         <StackPanel>
-                            <TextBlock Text="BATTERY HEALTH" Style="{StaticResource MetricTitleStyle}"/>
-                            <TextBlock x:Name="BatteryHealthValue" Text="100" Style="{StaticResource MetricValueStyle}" Foreground="#4CAF50"/>
+                            <TextBlock Text="BATTERY CAPACITY" Style="{StaticResource MetricTitleStyle}"/>
+                            <TextBlock x:Name="BatteryHealthValue" Text="--" Style="{StaticResource MetricValueStyle}" Foreground="#4CAF50"/>
                             <TextBlock Text="%" Style="{StaticResource MetricUnitStyle}"/>
-                            <TextBlock x:Name="BatteryHealthStatus" Text="Excellent" FontSize="12" FontWeight="Medium" Foreground="#66BB6A"/>
+                            <TextBlock x:Name="BatteryHealthStatus" Text="Unavailable" FontSize="12" FontWeight="Medium" Foreground="#66BB6A"/>
                         </StackPanel>
                     </Border>
 

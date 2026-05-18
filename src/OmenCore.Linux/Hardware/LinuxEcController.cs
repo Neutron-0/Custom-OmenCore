@@ -43,6 +43,8 @@ public class LinuxEcController
     // Discovered at runtime since hwmon number varies
     private string? _hwmonPwm1EnablePath;
     private string? _hwmonPwm2EnablePath;
+    private string? _hwmonPwm1Path;
+    private string? _hwmonPwm2Path;
     private string? _hwmonFan1InputPath;
     private string? _hwmonFan2InputPath;
     
@@ -80,6 +82,7 @@ public class LinuxEcController
     {
         "16t-ah0",    // OMEN MAX Gaming Laptop 16t-ah000 (2025, Intel Core Ultra 7/9)
         "16-ah0",     // OMEN MAX Gaming Laptop 16-ah0xxx (2025)
+        "16-ap0",     // OMEN 16 ap0xxx (2025) uses hp-wmi/hwmon/platform-profile paths
         "17t-ah0",    // OMEN MAX Gaming Laptop 17t-ah0xxx (2025, if exists)
         "17-ah0",     // OMEN MAX Gaming Laptop 17-ah0xxx (2025, if exists)
         "transcend 14" // Transcend variants often use non-legacy EC maps and hp-wmi flow
@@ -90,6 +93,9 @@ public class LinuxEcController
     private static readonly string[] UnsafeEcBoardIds = new[]
     {
         "8c58",
+        "8d24",
+        "8d26",
+        "8e35",
         "8e41"
     };
     
@@ -98,6 +104,7 @@ public class LinuxEcController
     public bool HasHpWmiAccess { get; }
     public bool HasAcpiProfileAccess { get; }
     public bool HasHwmonFanAccess { get; }
+    public bool HasHwmonPwmDutyAccess => _hwmonPwm1EnablePath != null && _hwmonPwm1Path != null;
     public bool IsUnsafeEcModel { get; }
     public string AccessMethod { get; }
     public string? DetectedModel { get; }
@@ -250,10 +257,18 @@ public class LinuxEcController
                 var fan2Input = Path.Combine(hwmonDir, "fan2_input");
                 if (File.Exists(fan2Input))
                     _hwmonFan2InputPath = fan2Input;
-                
+
+                var pwm1 = Path.Combine(hwmonDir, "pwm1");
+                if (File.Exists(pwm1))
+                    _hwmonPwm1Path = pwm1;
+
                 var pwm2Enable = Path.Combine(hwmonDir, "pwm2_enable");
                 if (File.Exists(pwm2Enable))
                     _hwmonPwm2EnablePath = pwm2Enable;
+
+                var pwm2 = Path.Combine(hwmonDir, "pwm2");
+                if (File.Exists(pwm2))
+                    _hwmonPwm2Path = pwm2;
                 
                 break;
             }
@@ -277,7 +292,14 @@ public class LinuxEcController
             ["distribution"] = GetDistributionInfo(),
             ["is_root"] = CheckRootAccess(),
             ["detected_model"] = DetectedModel ?? "unknown",
-            ["detected_board_id"] = DetectedBoardId ?? "unknown"
+            ["detected_board_id"] = DetectedBoardId ?? "unknown",
+            ["hwmon_pwm1_enable_path"] = _hwmonPwm1EnablePath ?? "",
+            ["hwmon_pwm2_enable_path"] = _hwmonPwm2EnablePath ?? "",
+            ["hwmon_pwm1_path"] = _hwmonPwm1Path ?? "",
+            ["hwmon_pwm2_path"] = _hwmonPwm2Path ?? "",
+            ["hwmon_fan1_input_path"] = _hwmonFan1InputPath ?? "",
+            ["hwmon_fan2_input_path"] = _hwmonFan2InputPath ?? "",
+            ["hwmon_pwm_duty_available"] = HasHwmonPwmDutyAccess
         };
         
         // Check file permissions if paths exist
@@ -714,6 +736,50 @@ public class LinuxEcController
         }
         catch { return false; }
     }
+
+    /// <summary>
+    /// Set manual fan duty through hp-wmi hwmon pwm files.
+    /// Uses pwm_enable=1 and writes pwmN in the kernel-standard 1..255 range.
+    /// </summary>
+    public bool SetHwmonPwmDutyPercent(int percent)
+    {
+        if (!HasHwmonPwmDutyAccess || _hwmonPwm1Path == null)
+            return false;
+
+        var pct = Math.Clamp(percent, 1, 100);
+        var duty = Math.Clamp((int)Math.Round(pct * 255.0 / 100.0), 1, 255);
+
+        try
+        {
+            if (!SetHwmonPwmEnable(1))
+                return false;
+
+            File.WriteAllText(_hwmonPwm1Path, duty.ToString());
+            if (_hwmonPwm2Path != null)
+                File.WriteAllText(_hwmonPwm2Path, duty.ToString());
+
+            return true;
+        }
+        catch { return false; }
+    }
+
+    public int? GetHwmonPwmDutyPercent()
+    {
+        if (_hwmonPwm1Path == null)
+            return null;
+
+        try
+        {
+            var text = ReadSysfsFile(_hwmonPwm1Path);
+            if (int.TryParse(text, out var duty))
+            {
+                return Math.Clamp((int)Math.Round(duty * 100.0 / 255.0), 0, 100);
+            }
+        }
+        catch { }
+
+        return null;
+    }
     
     /// <summary>
     /// Get current hwmon pwm_enable value.
@@ -850,6 +916,14 @@ public class LinuxEcController
     public bool SetFanSpeedPercent(int percent)
     {
         var pct = (byte)Math.Clamp(percent, 0, 100);
+
+        if (HasHwmonPwmDutyAccess)
+        {
+            return pct == 0
+                ? SetHwmonPwmEnable(2)
+                : SetHwmonPwmDutyPercent(pct);
+        }
+
         // Convert % to RPM units (assuming max ~5500 RPM = 55 units)
         var speedUnit = (byte)(pct * 55 / 100);
         

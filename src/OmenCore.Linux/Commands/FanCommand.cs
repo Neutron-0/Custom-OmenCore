@@ -200,23 +200,30 @@ public static class FanCommand
                 }
                 else
                 {
+                    if (ec.HasHwmonPwmDutyAccess)
+                    {
+                        success = ec.SetFanSpeedPercent(pct);
+                    }
+                    else
+                    {
                     // Intermediate speeds: use ACPI profile as closest match
                     Console.ForegroundColor = ConsoleColor.Yellow;
                     Console.WriteLine($"⚠ Your model ({ec.DetectedModel}) does not support precise fan speed control.");
                     Console.WriteLine($"  The OMEN Max 2025 uses BIOS-managed fan profiles instead of direct speed control.");
                     Console.ResetColor();
                     
-                    // Map percentage to closest profile
-                    if (pct <= 30)
-                        success = ec.SetFanProfile(FanProfile.Silent);
-                    else if (pct <= 60)
-                        success = ec.SetFanProfile(FanProfile.Balanced);
-                    else
-                        success = ec.SetFanProfile(FanProfile.Gaming);
+                    success = pct <= 30
+                        ? ec.SetFanProfile(FanProfile.Silent)
+                        : pct <= 60
+                            ? ec.SetFanProfile(FanProfile.Balanced)
+                            : ec.SetFanProfile(FanProfile.Gaming);
+                    }
                     
+                    var mappedProfile = ec.HasHwmonPwmDutyAccess
+                        ? $"manual {pct}% duty"
+                        : pct <= 30 ? "Silent (low-power)" : pct <= 60 ? "Balanced" : "Gaming (performance)";
                     if (success)
                     {
-                        var mappedProfile = pct <= 30 ? "Silent (low-power)" : pct <= 60 ? "Balanced" : "Gaming (performance)";
                         Console.ForegroundColor = ConsoleColor.Green;
                         Console.WriteLine($"  ✓ Applied closest profile: {mappedProfile}");
                         Console.ResetColor();
@@ -399,6 +406,12 @@ public static class FanCommand
                     _ => $"Unknown ({pwmEnable.Value})"
                 };
                 Console.WriteLine($"║  Fan Mode:      {pwmMode,-27} ║");
+            }
+
+            var pwmDuty = ec.GetHwmonPwmDutyPercent();
+            if (pwmDuty.HasValue)
+            {
+                Console.WriteLine($"PWM Duty: {pwmDuty.Value}%");
             }
         }
         else

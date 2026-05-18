@@ -28,6 +28,13 @@ namespace OmenCore.Services
         public bool LinkFanToPerformanceMode { get; set; } = false;
 
         /// <summary>
+        /// Legacy compatibility escape hatch for machines where the WMI BIOS performance policy is
+        /// the only known way to hold boost behavior. Keep disabled by default so the v3.2.5
+        /// decoupled fan/performance contract is preserved.
+        /// </summary>
+        public bool AllowDecoupledWmiThermalPolicyFallback { get; set; } = false;
+
+        /// <summary>
         /// Event raised when a performance mode is applied (for UI synchronization).
         /// </summary>
         public event EventHandler<string>? ModeApplied;
@@ -54,9 +61,9 @@ namespace OmenCore.Services
         {
             lock (_applyLock)
             {
-                _currentMode = mode;
                 // Apply model-specific TDP overrides if the database has values for this model/mode.
                 var effectiveMode = ApplyModelCapabilityOverrides(mode);
+                _currentMode = effectiveMode;
                 var hasValidCpuLimit = effectiveMode.CpuPowerLimitWatts > 0;
                 var hasValidGpuLimit = effectiveMode.GpuPowerLimitWatts > 0;
                 var hasAnyValidEcLimit = hasValidCpuLimit || hasValidGpuLimit;
@@ -171,6 +178,7 @@ namespace OmenCore.Services
                     // Preserve the user's decoupled fan preset model by using this only as a narrow
                     // fallback for non-auto modes when no valid EC limits exist.
                     var shouldUseWmiThermalPolicyFallback =
+                        AllowDecoupledWmiThermalPolicyFallback &&
                         _fanController.IsAvailable &&
                         string.Equals(_fanController.Backend, "WMI BIOS", StringComparison.OrdinalIgnoreCase) &&
                         !hasAnyValidEcLimit &&
@@ -196,7 +204,28 @@ namespace OmenCore.Services
                 _logging.Info($"✓ Performance mode '{effectiveMode.Name}' applied successfully");
                 
                 // Raise event for UI synchronization (sidebar, tray, etc.)
-                ModeApplied?.Invoke(this, effectiveMode.Name);
+                PublishModeApplied(effectiveMode.Name);
+            }
+        }
+
+        private void PublishModeApplied(string modeName)
+        {
+            var handlers = ModeApplied;
+            if (handlers == null)
+            {
+                return;
+            }
+
+            foreach (EventHandler<string> handler in handlers.GetInvocationList())
+            {
+                try
+                {
+                    handler(this, modeName);
+                }
+                catch (Exception ex)
+                {
+                    _logging.Warn($"Performance mode subscriber failed for '{modeName}': {ex.Message}");
+                }
             }
         }
 

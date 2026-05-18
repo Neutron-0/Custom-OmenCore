@@ -57,8 +57,16 @@ public class FanCurveEngine : IDisposable
             // Disable BIOS fan control for custom curves
             if (_config.Fan.Curve.Enabled)
             {
-                _ec.SetFanState(biosControl: false);
-                Log("BIOS fan control disabled");
+                if (_ec.HasHwmonPwmDutyAccess)
+                {
+                    _ec.SetHwmonPwmEnable(1);
+                    Log("hp-wmi hwmon manual PWM mode enabled");
+                }
+                else
+                {
+                    _ec.SetFanState(biosControl: false);
+                    Log("BIOS fan control disabled");
+                }
             }
             
             while (!_cts.Token.IsCancellationRequested)
@@ -90,7 +98,7 @@ public class FanCurveEngine : IDisposable
         // Restore BIOS fan control
         if (_config.Startup.RestoreOnExit)
         {
-            _ec.SetFanState(biosControl: true);
+            _ec.RestoreAutoMode();
             Log("BIOS fan control restored");
         }
         

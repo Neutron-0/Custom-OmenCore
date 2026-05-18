@@ -361,5 +361,42 @@ namespace OmenCoreApp.Tests.ViewModels
             SetMode("Quiet");
             resolver!.Invoke(vm, null).Should().Be("Quiet");
         }
+
+        [Fact]
+        public void ResolveNextHotkeyFanMode_SkipsCustomSlot_WhenNoCustomCurveExists()
+        {
+            using var vm = new MainViewModel();
+
+            var resolver = typeof(MainViewModel).GetMethod("ResolveNextHotkeyFanMode", BindingFlags.Instance | BindingFlags.NonPublic);
+            resolver.Should().NotBeNull();
+
+            var args = new object?[] { "Extreme", null };
+            resolver!.Invoke(vm, args).Should().Be("Quiet");
+            args[1].Should().Be("Quiet");
+        }
+
+        [Fact]
+        public void ResolveNextHotkeyFanMode_UsesCustomSlot_WhenCustomCurveExists()
+        {
+            using var vm = new MainViewModel();
+            vm.FanPresets.Add(new FanPreset
+            {
+                Name = "Field curve",
+                IsBuiltIn = false,
+                Mode = FanMode.Manual,
+                Curve =
+                {
+                    new FanCurvePoint { TemperatureC = 40, FanPercent = 30 },
+                    new FanCurvePoint { TemperatureC = 80, FanPercent = 80 }
+                }
+            });
+
+            var resolver = typeof(MainViewModel).GetMethod("ResolveNextHotkeyFanMode", BindingFlags.Instance | BindingFlags.NonPublic);
+            resolver.Should().NotBeNull();
+
+            var args = new object?[] { "Extreme", null };
+            resolver!.Invoke(vm, args).Should().Be("Custom");
+            args[1].Should().Be("Field curve");
+        }
     }
 }

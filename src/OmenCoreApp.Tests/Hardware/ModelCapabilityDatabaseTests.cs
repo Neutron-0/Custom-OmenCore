@@ -98,6 +98,38 @@ namespace OmenCoreApp.Tests.Hardware
         }
 
         [Fact]
+        public void GetCapabilities_8E35_Ap0xxxAmd_UsesExactV1WmiProfile()
+        {
+            var caps = ModelCapabilityDatabase.GetCapabilities("8E35");
+
+            caps.ProductId.Should().Be("8E35");
+            caps.ModelName.Should().Contain("ap0xxx");
+            caps.SupportsFanControlWmi.Should().BeTrue();
+            caps.SupportsFanControlEc.Should().BeFalse();
+            caps.SupportsFanCurves.Should().BeTrue();
+            caps.FanZoneCount.Should().Be(2);
+            caps.MaxFanLevel.Should().Be(55);
+            caps.SupportsUndervolt.Should().BeFalse();
+        }
+
+        [Fact]
+        public void GetCapabilities_8BD4_Victus16S0xxx_UsesExactConservativeProfile()
+        {
+            var caps = ModelCapabilityDatabase.GetPreferredCapabilities("8BD4", "Victus by HP Gaming Laptop 16-s0xxx");
+
+            caps.Should().NotBeNull();
+            caps!.ProductId.Should().Be("8BD4");
+            caps.ModelName.Should().Contain("16-s0");
+            caps.Family.Should().Be(OmenModelFamily.Victus);
+            caps.SupportsFanControlWmi.Should().BeTrue();
+            caps.SupportsFanCurves.Should().BeTrue();
+            caps.FanZoneCount.Should().Be(2);
+            caps.HasFourZoneRgb.Should().BeFalse();
+            caps.SupportsGpuPowerBoost.Should().BeFalse();
+            caps.SupportsUndervolt.Should().BeFalse();
+        }
+
+        [Fact]
         public void GetCapabilitiesByModelName_16Am0IntelFallback_DisablesDirectEc()
         {
             var caps = ModelCapabilityDatabase.GetCapabilitiesByModelName("OMEN Gaming Laptop 16-am0xxx");

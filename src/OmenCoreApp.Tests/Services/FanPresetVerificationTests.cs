@@ -494,6 +494,54 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public void DirectQuickFanModes_RaisePresetApplied_ForRuntimeProjectionSync()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var controller = new NoEffectController();
+            var hwMonitor = new OmenCore.Hardware.LibreHardwareMonitorImpl();
+            var thermalProvider = new OmenCore.Hardware.ThermalSensorProvider(hwMonitor);
+            var notificationService = new NotificationService(logging);
+            var fanService = new FanService(controller, thermalProvider, logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService());
+            var applied = new List<string>();
+            fanService.PresetApplied += (_, mode) => applied.Add(mode);
+
+            fanService.ApplyAutoMode();
+            fanService.ApplyQuietMode();
+            fanService.ApplyMaxCooling();
+
+            applied.Should().ContainInOrder(new[] { "Auto", "Quiet", "Max" },
+                "direct quick-mode helpers must notify tray, OSD, dashboard, and General via the same confirmed-state event as preset applies");
+
+            logging.Dispose();
+        }
+
+        [Fact]
+        public void PresetApplied_WhenSubscriberThrows_StillNotifiesRemainingSubscribers()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var controller = new NoEffectController();
+            var hwMonitor = new OmenCore.Hardware.LibreHardwareMonitorImpl();
+            var thermalProvider = new OmenCore.Hardware.ThermalSensorProvider(hwMonitor);
+            var notificationService = new NotificationService(logging);
+            var fanService = new FanService(controller, thermalProvider, logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService());
+            string? delivered = null;
+
+            fanService.PresetApplied += (_, _) => throw new InvalidOperationException("subscriber failed");
+            fanService.PresetApplied += (_, mode) => delivered = mode;
+
+            var act = () => fanService.ApplyAutoMode();
+
+            act.Should().NotThrow("subscriber failures must not make a confirmed fan apply look failed");
+            delivered.Should().Be("Auto");
+
+            logging.Dispose();
+        }
+
+        [Fact]
         public void ApplyMaxCooling_ForcedApply_AlwaysWrites()
         {
             // OmenMon-Reborn parity: forced Max apply (from preset) should always write

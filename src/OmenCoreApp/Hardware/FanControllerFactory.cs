@@ -360,7 +360,7 @@ namespace OmenCore.Hardware
         {
             try
             {
-                var controller = new WmiFanController(_libreHwMonitor!, _logging, _maxFanLevelOverride);
+                var controller = new WmiFanController(_libreHwMonitor!, _logging, _maxFanLevelOverride, ecAccess: _ecAccess);
                 if (controller.IsAvailable)
                 {
                     return new WmiFanControllerWrapper(controller, _logging);

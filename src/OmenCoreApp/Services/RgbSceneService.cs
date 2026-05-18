@@ -317,7 +317,6 @@ namespace OmenCore.Services
             try
             {
                 var previousScene = _currentScene;
-                _currentScene = scene;
 
                 await UpdateDynamicEffectsAsync(scene);
                 
@@ -342,16 +341,23 @@ namespace OmenCore.Services
                 
                 sw.Stop();
                 result.ApplyDuration = sw.Elapsed;
-                
-                // Fire event
-                SceneChanged?.Invoke(this, new RgbSceneChangedEventArgs
+
+                if (result.Success)
                 {
-                    PreviousScene = previousScene,
-                    CurrentScene = scene,
-                    Trigger = trigger
-                });
-                
-                _logging.Info($"Applied scene '{scene.Name}' ({trigger}) in {sw.ElapsedMilliseconds}ms - {result.ProvidersApplied} providers");
+                    _currentScene = scene;
+                    PublishSceneChanged(new RgbSceneChangedEventArgs
+                    {
+                        PreviousScene = previousScene,
+                        CurrentScene = scene,
+                        Trigger = trigger
+                    });
+
+                    _logging.Info($"Applied scene '{scene.Name}' ({trigger}) in {sw.ElapsedMilliseconds}ms - {result.ProvidersApplied} providers");
+                }
+                else
+                {
+                    _logging.Warn($"Scene '{scene.Name}' ({trigger}) did not apply to any selected RGB target");
+                }
             }
             catch (Exception ex)
             {
@@ -421,11 +427,33 @@ namespace OmenCore.Services
             }
         }
 
+        private void PublishSceneChanged(RgbSceneChangedEventArgs args)
+        {
+            var handlers = SceneChanged;
+            if (handlers == null)
+            {
+                return;
+            }
+
+            foreach (EventHandler<RgbSceneChangedEventArgs> handler in handlers.GetInvocationList())
+            {
+                try
+                {
+                    handler(this, args);
+                }
+                catch (Exception ex)
+                {
+                    _logging.Warn($"RGB scene subscriber failed for '{args.CurrentScene.Name}': {ex.Message}");
+                }
+            }
+        }
+
         private async Task<bool> ApplyToRgbManagerAsync(RgbScene scene)
         {
             try
             {
                 var color = ColorTranslator.FromHtml(scene.PrimaryColor);
+                var syncIssued = true;
                 
                 switch (scene.Effect)
                 {
@@ -449,10 +477,12 @@ namespace OmenCore.Services
                         
                     case RgbSceneEffect.Ambient:
                         // Ambient is handled by ScreenSamplingService
+                        syncIssued = false;
                         break;
 
                     case RgbSceneEffect.AudioReactive:
                         // Audio reactive is handled by AudioReactiveRgbService
+                        syncIssued = false;
                         break;
                         
                     default:
@@ -460,7 +490,15 @@ namespace OmenCore.Services
                         break;
                 }
                 
-                return true;
+                if (!syncIssued)
+                {
+                    return true;
+                }
+
+                var syncResult = _rgbManager.LastSyncResult;
+                return syncResult != null &&
+                       syncResult.ProvidersAffected > 0 &&
+                       syncResult.ProvidersSucceeded > 0;
             }
             catch (Exception ex)
             {

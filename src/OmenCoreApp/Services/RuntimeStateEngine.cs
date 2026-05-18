@@ -58,7 +58,25 @@ namespace OmenCore.Services
                     _isFanPerformanceLinked);
             }
 
-            StateChanged?.Invoke(this, changedSnapshot);
+            var handlers = StateChanged;
+            if (handlers == null)
+            {
+                return;
+            }
+
+            foreach (EventHandler<RuntimeStateSnapshot> handler in handlers.GetInvocationList())
+            {
+                try
+                {
+                    handler(this, changedSnapshot);
+                }
+                catch (Exception ex)
+                {
+                    // Projection subscribers are read-only surfaces. A broken tray/OSD/dashboard
+                    // listener must not prevent other surfaces from receiving confirmed runtime state.
+                    System.Diagnostics.Debug.WriteLine($"RuntimeStateEngine subscriber failed: {ex.Message}");
+                }
+            }
         }
     }
 

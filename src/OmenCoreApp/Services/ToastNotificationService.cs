@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Threading;
+using OmenCore.Utils;
 
 namespace OmenCore.Services;
 
@@ -44,7 +45,7 @@ public class ToastNotificationService : IDisposable
     {
         if (!IsEnabled) return;
         
-        Application.Current?.Dispatcher?.Invoke(() =>
+        DispatcherHelper.RunOnUiThread(() =>
         {
             try
             {

@@ -100,7 +100,9 @@ namespace OmenCore.Hardware
         private string _cpuTemperatureAuthoritySource = "WMI BIOS";
         private string _cpuTemperatureAuthorityReason = "Startup default";
         private DateTime _cpuTemperatureAuthorityLastSwitchUtc = DateTime.MinValue;
+        private DateTime _cpuTemperatureAuthorityLastWarnUtc = DateTime.MinValue;
         private int _cpuTemperatureAuthoritySwitchCount;
+        private const int CpuAuthoritySwitchWarnCooldownSeconds = 30;
         
         // GPU temperature freeze detection (similar to CPU temp)
         private double _lastGpuTempReading;
@@ -616,7 +618,10 @@ namespace OmenCore.Hardware
 
                                     var nvapiPowerWatts = _nvapi.GetGpuPowerWatts();
                                     var normalizedMahmPowerWatts = NormalizeAfterburnerPowerToWatts(abData.GpuPower, abData.GpuPowerUnit);
-                                    double chosenPowerWatts = nvapiPowerWatts > 0.1 ? nvapiPowerWatts : normalizedMahmPowerWatts;
+                                    double chosenPowerWatts = NormalizeGpuPowerWatts(
+                                        nvapiPowerWatts > 0.1 ? nvapiPowerWatts : normalizedMahmPowerWatts,
+                                        _cachedGpuLoad,
+                                        nvapiPowerWatts > 0.1 ? "NVAPI" : "MAHM");
 
                                     _cachedGpuPowerWatts = StabilizePowerReading(
                                         chosenPowerWatts,
@@ -667,7 +672,7 @@ namespace OmenCore.Hardware
                         _cachedGpuLoad = gpuSample.GpuLoadPercent;
                         _gpuLoadSource = "NVAPI";
                         _cachedGpuPowerWatts = StabilizePowerReading(
-                            gpuSample.GpuPowerWatts,
+                            NormalizeGpuPowerWatts(gpuSample.GpuPowerWatts, gpuSample.GpuLoadPercent, "NVAPI"),
                             ref _lastValidGpuPowerWatts,
                             ref _consecutiveZeroGpuPowerReads,
                             gpuSample.GpuLoadPercent,
@@ -1163,8 +1168,21 @@ namespace OmenCore.Hardware
             if (!string.Equals(_cpuTemperatureAuthoritySource, normalizedSource, StringComparison.Ordinal))
             {
                 _cpuTemperatureAuthoritySwitchCount++;
-                _cpuTemperatureAuthorityLastSwitchUtc = DateTime.UtcNow;
-                _logging?.Warn($"[WmiBiosMonitor] CPU thermal authority switched: {_cpuTemperatureAuthoritySource} -> {normalizedSource}; reason: {normalizedReason}");
+                var now = DateTime.UtcNow;
+                _cpuTemperatureAuthorityLastSwitchUtc = now;
+                var message = $"[WmiBiosMonitor] CPU thermal authority switched: {_cpuTemperatureAuthoritySource} -> {normalizedSource}; reason: {normalizedReason}";
+                var shouldWarn = _cpuTemperatureAuthoritySwitchCount <= 3 ||
+                    now - _cpuTemperatureAuthorityLastWarnUtc >= TimeSpan.FromSeconds(CpuAuthoritySwitchWarnCooldownSeconds);
+
+                if (shouldWarn)
+                {
+                    _cpuTemperatureAuthorityLastWarnUtc = now;
+                    _logging?.Warn(message);
+                }
+                else
+                {
+                    _logging?.Debug(message);
+                }
             }
 
             _cpuTemperatureAuthoritySource = normalizedSource;
@@ -1360,6 +1378,78 @@ namespace OmenCore.Hardware
             return defaultTdp * 1.5;
         }
 
+        private double NormalizeGpuPowerWatts(double rawPowerWatts, double gpuLoadPercent, string source)
+        {
+            if (!double.IsFinite(rawPowerWatts) || rawPowerWatts <= 0)
+            {
+                return 0;
+            }
+
+            var gpuName = _nvapi?.GpuName ?? _cachedGpuName;
+            var defaultTdp = _nvapi?.DefaultPowerLimitWatts > 0
+                ? _nvapi.DefaultPowerLimitWatts
+                : EstimateLaptopGpuTdp(gpuName);
+            if (defaultTdp <= 0)
+            {
+                defaultTdp = 150;
+            }
+
+            var laptopGpu = IsLaptopGpuName(gpuName) || EstimateLaptopGpuTdp(gpuName) > 0;
+            var plausibleMaxWatts = laptopGpu
+                ? Math.Min(210, Math.Max(150, defaultTdp + 50))
+                : 600;
+
+            if (rawPowerWatts <= plausibleMaxWatts)
+            {
+                return Math.Round(rawPowerWatts, 1);
+            }
+
+            if (laptopGpu && rawPowerWatts / 10.0 <= plausibleMaxWatts)
+            {
+                var converted = Math.Round(rawPowerWatts / 10.0, 1);
+                _logging?.Debug($"[WmiBiosMonitor] Normalized implausible {source} GPU power reading {rawPowerWatts:F1}W -> {converted:F1}W for {gpuName}");
+                return converted;
+            }
+
+            if (gpuLoadPercent < 50)
+            {
+                _logging?.Debug($"[WmiBiosMonitor] Suppressed implausible {source} GPU power reading {rawPowerWatts:F1}W at {gpuLoadPercent:F0}% load for {gpuName}");
+                return 0;
+            }
+
+            _logging?.Debug($"[WmiBiosMonitor] Clamped implausible {source} GPU power reading {rawPowerWatts:F1}W to {plausibleMaxWatts:F1}W for {gpuName}");
+            return plausibleMaxWatts;
+        }
+
+        private static bool IsLaptopGpuName(string? gpuName)
+        {
+            return !string.IsNullOrWhiteSpace(gpuName) &&
+                   gpuName.Contains("Laptop", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static int EstimateLaptopGpuTdp(string? gpuName)
+        {
+            if (string.IsNullOrWhiteSpace(gpuName))
+            {
+                return 0;
+            }
+
+            if (gpuName.Contains("5090", StringComparison.OrdinalIgnoreCase)) return 175;
+            if (gpuName.Contains("5080", StringComparison.OrdinalIgnoreCase)) return 150;
+            if (gpuName.Contains("5070", StringComparison.OrdinalIgnoreCase)) return 115;
+            if (gpuName.Contains("5060", StringComparison.OrdinalIgnoreCase)) return 115;
+            if (gpuName.Contains("4090", StringComparison.OrdinalIgnoreCase)) return 150;
+            if (gpuName.Contains("4080", StringComparison.OrdinalIgnoreCase)) return 150;
+            if (gpuName.Contains("4070", StringComparison.OrdinalIgnoreCase)) return 140;
+            if (gpuName.Contains("4060", StringComparison.OrdinalIgnoreCase)) return 115;
+            if (gpuName.Contains("4050", StringComparison.OrdinalIgnoreCase)) return 115;
+            if (gpuName.Contains("3080", StringComparison.OrdinalIgnoreCase)) return 150;
+            if (gpuName.Contains("3070", StringComparison.OrdinalIgnoreCase)) return 125;
+            if (gpuName.Contains("3060", StringComparison.OrdinalIgnoreCase)) return 115;
+
+            return 0;
+        }
+
         private double TryReadWindowsGpuEngineLoadPercent()
         {
             try
@@ -1487,7 +1577,10 @@ namespace OmenCore.Hardware
 
                 if (gpuNeedsFallback)
                 {
-                    double gpuPowerFallback = fallbackMonitor.GetGpuPowerWatts();
+                    double gpuPowerFallback = NormalizeGpuPowerWatts(
+                        fallbackMonitor.GetGpuPowerWatts(),
+                        _cachedGpuLoad,
+                        "LHM fallback");
                     if (gpuPowerFallback > 0.1)
                     {
                         _cachedGpuPowerWatts = gpuPowerFallback;

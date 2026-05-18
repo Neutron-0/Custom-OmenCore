@@ -94,6 +94,32 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public void GetConfig_ReturnsConfig_For_ProductId_8E35()
+        {
+            var cfg = KeyboardModelDatabase.GetConfig("8E35");
+
+            cfg.Should().NotBeNull();
+            cfg!.ModelName.Should().Contain("ap0xxx");
+            cfg.PreferredMethod.Should().Be(KeyboardMethod.ColorTable2020);
+            cfg.KeyboardType.Should().Be(KeyboardType.FourZone);
+            cfg.UserVerified.Should().BeFalse();
+            cfg.Notes.Should().Contain("1H85430PWY");
+        }
+
+        [Fact]
+        public void GetConfig_ReturnsConfig_For_ProductId_8BD4()
+        {
+            var cfg = KeyboardModelDatabase.GetConfig("8BD4");
+
+            cfg.Should().NotBeNull();
+            cfg!.ProductId.Should().Be("8BD4");
+            cfg.ModelName.Should().Contain("16-s0");
+            cfg.PreferredMethod.Should().Be(KeyboardMethod.BacklightOnly);
+            cfg.KeyboardType.Should().Be(KeyboardType.BacklightOnly);
+            cfg.UserVerified.Should().BeFalse();
+        }
+
+        [Fact]
         public void GetConfigByModelName_ReturnsIntelAm0Fallback_ForIssue124()
         {
             var cfg = KeyboardModelDatabase.GetConfigByModelName("OMEN Gaming Laptop 16-am0xxx");

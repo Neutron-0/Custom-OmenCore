@@ -269,7 +269,7 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
-        public void Apply_LinkDisabled_AndNoValidEcLimits_UsesWmiThermalPolicyFallback_ForPerformance()
+        public void Apply_LinkDisabled_AndNoValidEcLimits_DoesNotUseWmiThermalPolicyFallback_ByDefault()
         {
             var fan = new RecordingWmiFanController();
             var service = BuildService(fan);
@@ -282,9 +282,49 @@ namespace OmenCoreApp.Tests.Services
                 GpuPowerLimitWatts = 0
             });
 
+            fan.SetPerformanceModeCallCount.Should().Be(0,
+                "performance-mode changes must preserve the decoupled fan policy unless the legacy fallback is explicitly enabled");
+            fan.LastPerformanceModeName.Should().BeNull();
+        }
+
+        [Fact]
+        public void Apply_LinkDisabled_AndNoValidEcLimits_UsesWmiThermalPolicyFallback_WhenExplicitlyEnabled()
+        {
+            var fan = new RecordingWmiFanController();
+            var service = BuildService(fan);
+
+            service.LinkFanToPerformanceMode = false;
+            service.AllowDecoupledWmiThermalPolicyFallback = true;
+            service.Apply(new PerformanceMode
+            {
+                Name = "Performance",
+                CpuPowerLimitWatts = 0,
+                GpuPowerLimitWatts = 0
+            });
+
             fan.SetPerformanceModeCallCount.Should().Be(1,
-                "WMI thermal policy hold is needed to maintain boost on affected systems when EC limits are unavailable");
+                "the legacy WMI thermal-policy fallback remains available for explicitly opted-in compatibility profiles");
             fan.LastPerformanceModeName.Should().Be("Performance");
+        }
+
+        [Fact]
+        public void ModeApplied_WhenSubscriberThrows_StillNotifiesRemainingSubscribers()
+        {
+            var service = BuildService();
+            string? delivered = null;
+
+            service.ModeApplied += (_, _) => throw new InvalidOperationException("subscriber failed");
+            service.ModeApplied += (_, mode) => delivered = mode;
+
+            var act = () => service.Apply(new PerformanceMode
+            {
+                Name = "Performance",
+                CpuPowerLimitWatts = 65,
+                GpuPowerLimitWatts = 100
+            });
+
+            act.Should().NotThrow("subscriber failures must not make a confirmed performance apply look failed");
+            delivered.Should().Be("Performance");
         }
 
         [Fact]

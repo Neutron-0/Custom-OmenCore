@@ -135,7 +135,7 @@ namespace OmenCore.ViewModels
         private void OnCalibrationStepCompleted(object? sender, CalibrationStep step)
         {
             // Update UI on UI thread
-            App.Current?.Dispatcher.Invoke(() =>
+            DispatcherHelper.RunOnUiThread(() =>
             {
                 CalibrationSteps.Add(new CalibrationStepItem
                 {
@@ -152,7 +152,7 @@ namespace OmenCore.ViewModels
 
         private void OnCalibrationCompleted(object? sender, FanCalibrationProfile profile)
         {
-            App.Current?.Dispatcher.Invoke(() =>
+            DispatcherHelper.RunOnUiThread(() =>
             {
                 Status = "✓ Calibration complete!";
                 Progress = 100;
@@ -164,7 +164,7 @@ namespace OmenCore.ViewModels
 
         private void OnCalibrationError(object? sender, string error)
         {
-            App.Current?.Dispatcher.Invoke(() =>
+            DispatcherHelper.RunOnUiThread(() =>
             {
                 Status = $"⚠ Error: {error}";
                 IsCalibrating = false;

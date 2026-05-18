@@ -16,10 +16,11 @@ namespace OmenCoreApp.Tests.ViewModels
     {
         private sealed class StubFanController : IFanController
         {
-            public bool IsAvailable => true;
+            public bool IsAvailable { get; set; } = true;
             public string Status => "Stub";
             public string Backend => "Stub";
-            public bool ApplyPreset(FanPreset preset) => true;
+            public bool ApplyPresetResult { get; set; } = true;
+            public bool ApplyPreset(FanPreset preset) => ApplyPresetResult;
             public bool ApplyCustomCurve(IEnumerable<FanCurvePoint> curve) => true;
             public bool SetFanSpeed(int percent) => true;
             public bool SetFanSpeeds(int cpuPercent, int gpuPercent) => true;
@@ -34,6 +35,82 @@ namespace OmenCoreApp.Tests.ViewModels
             public bool VerifyMaxApplied(out string details) { details = "stub"; return true; }
             public bool ApplyThrottlingMitigation() => true;
             public void Dispose() { }
+        }
+
+        private static GeneralViewModel CreateViewModel(out LoggingService logging)
+            => CreateViewModel(out logging, out _);
+
+        private static GeneralViewModel CreateViewModel(out LoggingService logging, out StubFanController controller)
+        {
+            var tmp = Path.Combine(Path.GetTempPath(), "OmenCoreTests", Guid.NewGuid().ToString());
+            Directory.CreateDirectory(tmp);
+            Environment.SetEnvironmentVariable("OMENCORE_CONFIG_DIR", tmp);
+
+            logging = new LoggingService();
+            logging.Initialize();
+            controller = new StubFanController();
+            var thermalProvider = new ThermalSensorProvider(new LibreHardwareMonitorImpl());
+            var fanService = new FanService(
+                controller,
+                thermalProvider,
+                logging,
+                new NotificationService(logging),
+                1000,
+                new ResumeRecoveryDiagnosticsService());
+            var performanceService = new PerformanceModeService(
+                controller,
+                new PowerPlanService(logging),
+                null,
+                logging);
+
+            return new GeneralViewModel(
+                fanService,
+                performanceService,
+                new ConfigurationService(),
+                logging);
+        }
+
+        [Fact]
+        public void SyncRuntimeState_UpdatesGeneralProfileFromConfirmedModes()
+        {
+            var vm = CreateViewModel(out var logging);
+            try
+            {
+                vm.SyncRuntimeState("Performance", "Gaming");
+
+                vm.CurrentPerformanceMode.Should().Be("Performance");
+                vm.CurrentFanMode.Should().Be("Gaming");
+                vm.SelectedProfile.Should().Be("Performance");
+
+                vm.SyncRuntimeState("Balanced", "Auto");
+                vm.SelectedProfile.Should().Be("Balanced");
+            }
+            finally
+            {
+                logging.Dispose();
+            }
+        }
+
+        [Fact]
+        public void ApplyPerformanceProfile_WhenFanPresetRejected_UsesConfirmedFanState()
+        {
+            var vm = CreateViewModel(out var logging, out var controller);
+            controller.ApplyPresetResult = false;
+
+            try
+            {
+                vm.ApplyPerformanceProfile();
+
+                vm.CurrentPerformanceMode.Should().Be("Performance");
+                vm.CurrentFanMode.Should().Be("Auto",
+                    "General must report the confirmed FanService state instead of the requested Gaming preset when fan apply is rejected");
+                vm.SelectedProfile.Should().Be("Custom",
+                    "Performance+Auto is a mixed confirmed state rather than the full Performance quick profile");
+            }
+            finally
+            {
+                logging.Dispose();
+            }
         }
 
         [Fact]

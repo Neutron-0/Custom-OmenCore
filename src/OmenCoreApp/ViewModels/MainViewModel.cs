@@ -7,6 +7,7 @@ using OmenCore.Services.Diagnostics;
 using OmenCore.Utils;
 using OmenCore.Views;
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
 using System.ComponentModel;
@@ -435,7 +436,9 @@ namespace OmenCore.ViewModels
         private readonly RelayCommand _openReleaseNotesCommand;
         private readonly RelayCommand _openGameProfileManagerCommand;
         private readonly INotifyCollectionChanged? _macroBufferNotifier;
-        private readonly StringBuilder _logBuffer = new();
+        private const int MaxUiLogLines = 200;
+        private readonly Queue<string> _logLines = new();
+        private string _logBufferText = string.Empty;
 
         private FanPreset? _selectedPreset;
         private PerformanceMode? _selectedPerformanceMode;
@@ -446,6 +449,7 @@ namespace OmenCore.ViewModels
         private LogitechDevice? _selectedLogitechDevice;
         private string _customPresetName = "Custom";
         private bool _gamingModeActive;
+        private bool _logsCollapsed = true;
         private UndervoltStatus _undervoltStatus = UndervoltStatus.CreateUnknown();
         private double _requestedCoreOffset;
         private double _requestedCacheOffset;
@@ -1261,7 +1265,23 @@ namespace OmenCore.ViewModels
             }
         }
 
-        public string LogBuffer => _logBuffer.ToString();
+        public string LogBuffer => _logBufferText;
+
+        public bool LogsCollapsed
+        {
+            get => _logsCollapsed;
+            set
+            {
+                if (_logsCollapsed != value)
+                {
+                    _logsCollapsed = value;
+                    OnPropertyChanged(nameof(LogsCollapsed));
+                    OnPropertyChanged(nameof(LogsToggleText));
+                }
+            }
+        }
+
+        public string LogsToggleText => LogsCollapsed ? "Show activity log" : "Hide activity log";
 
         public bool RestorePointInProgress
         {
@@ -1426,6 +1446,7 @@ namespace OmenCore.ViewModels
         public ICommand ApplyPerformanceModeCommand { get; }
         public ICommand ApplyLightingProfileCommand { get; }
         public ICommand ToggleAnimationsCommand { get; }
+        public ICommand ToggleLogsCommand { get; }
         public ICommand GamingModeCommand { get; }
         public ICommand RestoreDefaultsCommand { get; }
         public ICommand SwitchGpuCommand { get; }
@@ -1596,10 +1617,10 @@ namespace OmenCore.ViewModels
             DetectedCapabilities = capabilities;
             
             // Set capability warning if functionality is limited
-            if (capabilities.IsDesktop)
+            if (capabilities.FanWritesBlockedForSafety)
             {
-                CapabilityWarning = $"Desktop PC detected ({capabilities.Chassis}). Fan control uses WMI — EC-based curves are not available on desktops.";
-                _logging.Info("Desktop OMEN PC — WMI fan control active. Desktop RGB available via USB HID.");
+                CapabilityWarning = $"Desktop PC detected ({capabilities.Chassis}). Fan writes are disabled in v3.6.3 safety mode; monitoring and supported performance controls remain available.";
+                _logging.Warn("Desktop OMEN PC - fan writes disabled by v3.6.3 safety gate. Desktop RGB remains available via USB HID where supported.");
             }
             else if (capabilities.CanUndervolt && !capabilities.UndervoltRuntimeReady)
             {
@@ -1672,7 +1693,7 @@ namespace OmenCore.ViewModels
             _thermalMonitoringService.GpuCriticalThreshold = ta.GpuCriticalC;
             _thermalMonitoringService.SsdWarningThreshold = ta.SsdWarningC;
             
-            _fanService = new FanService(fanController, new ThermalSensorProvider(monitorBridge), _logging, _notificationService, _config.MonitoringIntervalMs, _resumeRecoveryDiagnostics, _ecOperationCoordinator);
+            _fanService = new FanService(fanController, new ThermalSensorProvider(monitorBridge), _logging, _notificationService, _config.MonitoringIntervalMs, _resumeRecoveryDiagnostics, _ecOperationCoordinator, capabilities);
             _fanService.SetHysteresis(_config.FanHysteresis);
             _fanService.ThermalProtectionEnabled = _config.FanHysteresis?.ThermalProtectionEnabled ?? true;
             // Configure smoothing/transition settings for fan ramping
@@ -1882,6 +1903,7 @@ namespace OmenCore.ViewModels
             }, _ => SystemControl?.SelectedPerformanceMode != null);
             ApplyLightingProfileCommand = new AsyncRelayCommand(_ => ApplyLightingProfile(), _ => SelectedLightingProfile != null);
             ToggleAnimationsCommand = new RelayCommand(param => _systemOptimizationService.ApplyWindowsAnimations(param as string == "Enable"));
+            ToggleLogsCommand = new RelayCommand(_ => LogsCollapsed = !LogsCollapsed);
             GamingModeCommand = new RelayCommand(_ => GamingModeActive = !GamingModeActive);
             RestoreDefaultsCommand = new RelayCommand(_ => RestoreDefaults());
             SwitchGpuCommand = new RelayCommand(mode =>
@@ -3306,21 +3328,16 @@ namespace OmenCore.ViewModels
             // Skip empty entries to reduce log clutter
             if (string.IsNullOrWhiteSpace(entry)) return;
             
+            var line = entry.TrimEnd();
             Application.Current?.Dispatcher?.BeginInvoke(() =>
             {
-                // Append without extra newline padding
-                if (_logBuffer.Length > 0)
-                    _logBuffer.Append('\n');
-                _logBuffer.Append(entry.TrimEnd());
-                
-                // Keep only last 200 lines to prevent memory growth
-                var content = _logBuffer.ToString();
-                var lines = content.Split('\n');
-                if (lines.Length > 200)
+                _logLines.Enqueue(line);
+                while (_logLines.Count > MaxUiLogLines)
                 {
-                    _logBuffer.Clear();
-                    _logBuffer.Append(string.Join("\n", lines.Skip(lines.Length - 200)));
+                    _logLines.Dequeue();
                 }
+
+                _logBufferText = string.Join("\n", _logLines);
                 OnPropertyChanged(nameof(LogBuffer));
             });
         }
@@ -3453,7 +3470,8 @@ namespace OmenCore.ViewModels
 
         private void ReloadRecentBuffer()
         {
-            _logBuffer.Clear();
+            _logLines.Clear();
+            _logBufferText = string.Empty;
             OnPropertyChanged(nameof(LogBuffer));
         }
 
@@ -4535,6 +4553,24 @@ namespace OmenCore.ViewModels
         }
 
         /// <summary>
+        /// Initialize the OSD overlay independently from the rest of hotkey setup.
+        /// Startup-minimized launches still need this service ready even if another
+        /// global hotkey is already reserved by Windows or another app.
+        /// </summary>
+        public void EnsureOsdInitialized()
+        {
+            try
+            {
+                _osdService?.SetMonitoringSampleSource(() => LatestMonitoringSample);
+                _osdService?.Initialize();
+            }
+            catch (Exception ex)
+            {
+                _logging.Warn($"Failed to initialize OSD: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// Initialize hotkeys after window handle is available
         /// </summary>
         public void InitializeHotkeys(IntPtr windowHandle)
@@ -4616,10 +4652,7 @@ namespace OmenCore.ViewModels
                     _logging.Info("OMEN key interception started");
                 }
                 
-                // Initialize OSD overlay (if enabled in settings)
-                // Pass monitoring sample source for accurate CPU/GPU load data
-                _osdService?.SetMonitoringSampleSource(() => LatestMonitoringSample);
-                _osdService?.Initialize();
+                EnsureOsdInitialized();
 
                 _hotkeysInitialized = true;
             }

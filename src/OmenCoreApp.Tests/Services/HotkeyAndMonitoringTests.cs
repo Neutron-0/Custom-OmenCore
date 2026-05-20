@@ -494,7 +494,7 @@ namespace OmenCoreApp.Tests.Services
             historyField.Should().NotBeNull();
 
             var history = (System.Collections.Generic.List<HardwareMetrics>)historyField!.GetValue(svc)!;
-            for (var i = 0; i < 7210; i++)
+            for (var i = 0; i < 3610; i++)
             {
                 history.Add(new HardwareMetrics
                 {
@@ -514,7 +514,38 @@ namespace OmenCoreApp.Tests.Services
                 }
             });
 
-            history.Count.Should().Be(7200, "dashboard metrics should be count-capped even at active 1s cadence");
+            history.Count.Should().Be(3600, "dashboard metrics should be count-capped to the active dashboard history window");
+        }
+
+        [Fact]
+        public async Task GetHistoricalDataAsync_DownsamplesLargeChartQueries()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var bridge = new AdaptiveBridgeStub();
+            var prefs = new MonitoringPreferences();
+            var svc = new HardwareMonitoringService(bridge, logging, prefs, new ResumeRecoveryDiagnosticsService());
+            var historyField = typeof(HardwareMonitoringService).GetField("_metricsHistory", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            historyField.Should().NotBeNull();
+
+            var history = (System.Collections.Generic.List<HardwareMetrics>)historyField!.GetValue(svc)!;
+            var start = DateTime.Now.AddMinutes(-59);
+            for (var i = 0; i < 1200; i++)
+            {
+                history.Add(new HardwareMetrics
+                {
+                    Timestamp = start.AddSeconds(i * 3),
+                    PowerConsumption = 40 + (i % 10)
+                });
+            }
+
+            var points = (await svc.GetHistoricalDataAsync(ChartType.PowerConsumption, TimeSpan.FromHours(1))).ToList();
+
+            points.Count.Should().BeLessThanOrEqualTo(601, "chart refresh should not allocate or draw every raw telemetry point");
+            points[0].Timestamp.Should().Be(history[0].Timestamp);
+            points[^1].Timestamp.Should().Be(history[^1].Timestamp);
         }
 
         [Fact]

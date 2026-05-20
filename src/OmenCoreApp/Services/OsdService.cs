@@ -29,6 +29,7 @@ namespace OmenCore.Services
         private RtssIntegrationService? _rtssService;
         private HwndSource? _hotkeySource;
         private bool _isVisible;
+        private bool _initialized;
         private bool _disposed;
         private System.Threading.Timer? _retryTimer;
         private int _retryAttempts = 0;
@@ -101,6 +102,12 @@ namespace OmenCore.Services
                 _logging.Info("OSD: Disabled in settings (no background process)");
                 return;
             }
+
+            if (_initialized && _overlayWindow != null)
+            {
+                _logging.Debug("OSD: Initialize skipped; overlay already initialized");
+                return;
+            }
             
             try
             {
@@ -123,6 +130,8 @@ namespace OmenCore.Services
                 
                 // Register global hotkey
                 RegisterToggleHotkey();
+
+                _initialized = true;
                 
                 _logging.Info($"OSD: Initialized (hotkey: {_config.Config.Osd.ToggleHotkey}, position: {_config.Config.Osd.Position})");
             }
@@ -137,6 +146,12 @@ namespace OmenCore.Services
         /// </summary>
         public void Show()
         {
+            if (_overlayWindow == null && _config.Config.Osd.Enabled)
+            {
+                _logging.Info("OSD: Lazy initialization requested before show");
+                Initialize();
+            }
+
             if (_overlayWindow == null || _isVisible) return;
             
             DispatcherHelper.RunOnUiThread(() =>
@@ -272,6 +287,7 @@ namespace OmenCore.Services
                 _overlayWindow = null;
             });
 
+            _initialized = false;
             NotifyVisibilityChanged(false);
             _logging.Info("OSD: Shutdown");
         }

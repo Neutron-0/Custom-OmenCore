@@ -11,7 +11,7 @@ namespace OmenCore.ViewModels
     {
         /// <summary>Maximum number of thermal samples to keep (30 minutes at 1 sample/second).</summary>
         private const int MaxThermalSampleHistory = 1800;
-        private static readonly TimeSpan UiProjectionMinInterval = TimeSpan.FromMilliseconds(750);
+        private static readonly TimeSpan UiProjectionMinInterval = TimeSpan.FromMilliseconds(1000);
         private const double UiProjectionTempDelta = 0.5;
         private const double UiProjectionLoadDelta = 2.0;
         private const double UiProjectionPowerDelta = 1.0;
@@ -237,6 +237,7 @@ namespace OmenCore.ViewModels
         public void SetTelemetryProjectionEnabled(bool enabled)
         {
             MonitoringSample? resumeSample = null;
+            var changed = false;
 
             lock (_sampleUpdateLock)
             {
@@ -246,6 +247,7 @@ namespace OmenCore.ViewModels
                 }
 
                 _telemetryProjectionEnabled = enabled;
+                changed = true;
                    // v3.6.2: Track dormancy activation for field validation
                    if (!enabled)
                    {
@@ -257,6 +259,11 @@ namespace OmenCore.ViewModels
                     _pendingUIUpdate = true;
                     resumeSample = _queuedSample;
                 }
+            }
+
+            if (changed)
+            {
+                SetUptimeTimerEnabled(enabled);
             }
 
             if (resumeSample != null)
@@ -546,6 +553,26 @@ namespace OmenCore.ViewModels
             };
             _uptimeTimer.Start();
         }
+
+        private void SetUptimeTimerEnabled(bool enabled)
+        {
+            if (_uptimeTimer == null)
+            {
+                return;
+            }
+
+            if (enabled)
+            {
+                if (!_uptimeTimer.IsEnabled)
+                {
+                    _uptimeTimer.Start();
+                }
+            }
+            else if (_uptimeTimer.IsEnabled)
+            {
+                _uptimeTimer.Stop();
+            }
+        }
         
         // Monitoring health status properties (v2.7.0)
         /// <summary>
@@ -662,6 +689,8 @@ namespace OmenCore.ViewModels
 
                 if (_pendingUIUpdate)
                 {
+                    RuntimeUiPerformanceCounters.RecordDashboardSampleSkipped();
+                    RuntimeUiPerformanceCounters.RecordLatestSampleReplacement();
                     return;
                 }
 

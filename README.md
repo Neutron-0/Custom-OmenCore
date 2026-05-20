@@ -27,7 +27,7 @@
 
 ### ⚡ Quick Links
 
-[![Version](https://img.shields.io/badge/version-3.6.2-red.svg?style=for-the-badge)](docs/CHANGELOG_v3.6.2.md)
+[![Version](https://img.shields.io/badge/version-3.6.3-red.svg?style=for-the-badge)](docs/CHANGELOG_v3.6.3.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=for-the-badge)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8.0-purple.svg?style=for-the-badge)](https://dotnet.microsoft.com/download/dotnet/8.0)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2.svg?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/9WhJdabGk8)
@@ -83,52 +83,52 @@ This generates a timestamped folder with:
 
 Attach those files to your GitHub issue for faster triage.
 
-## 🔥 **What's New in v3.6.2**
+## 🔥 **What's New in v3.6.3**
 
-v3.6.2 is the current stabilization release, focused on runtime source-of-truth correctness, fan/performance mode confirmation flow hardening, RGB fallback reliability, Linux packaging/diagnostics refinement, and lower idle/tray UI overhead.
+v3.6.3 is the current safety and stability hotfix rollup, focused on post-v3.6.2 field reports: desktop fan-write safety, conservative WMI fan handoff, model identity corrections, OSD startup reliability, UI responsiveness, and lower CPU/RAM overhead while OmenCore is running.
 
-### v3.6.2 Highlights
+### v3.6.3 Highlights
 
-- **Fan/performance state stabilization** across tray, hotkeys, OSD, dashboard, and linked-mode flows.
-- **Reduced high-CPU fan-curve pressure** by bounding WMI keepalive writes and automatic curve verification.
-- **EC coordination hardening** for fan, performance, keyboard, power verification, diagnostics, and GPU boost fallback paths.
-- **Capability truth improvements** for undervolt readiness, unknown model fallback messaging, and Linux profile/fan capability reporting.
-- **UI responsiveness and layout fixes** for tray/OSD state freshness, low-overhead dashboard updates, and high-DPI/narrow-window clipping.
+- **Desktop fan-write safety gate** for OMEN desktop systems while preserving telemetry and safe performance controls.
+- **Conservative WMI fan handoff** for Victus and unverified WMI-only profiles to avoid manual-zero fan stops and false EC readback rejection.
+- **Model identity fixes** for shared OMEN 16-am0xxx ProductId `8D2F` and conservative fallback behavior.
+- **OSD and UI polish** with hardened startup initialization, icon-led tabs, lighter logo decoding, and log rendering throttles.
+- **Runtime CPU/RAM overhead reductions** in dashboard history, chart sampling, telemetry projection, and ambient RGB screen sampling.
 
 ### Release Notes
 
-Current stable release is **v3.6.2**.
+Current release is **v3.6.3**.
+
+→ **[v3.6.3 Changelog](docs/CHANGELOG_v3.6.3.md)**
 
 → **[v3.6.2 Changelog](docs/CHANGELOG_v3.6.2.md)**
 
 → **[v3.6.1 Changelog](docs/CHANGELOG-3.6.1.md)**
 
-→ **[Previous Stable Changelog (v3.4.1)](docs/CHANGELOG_v3.4.1.md)**
-
 ---
 
 ## 📦 **Downloads & Artifacts**
 
-**Version:** v3.6.2 | **Status:** Stable
+**Version:** v3.6.3 | **Status:** In Progress
 
 Release artifacts:
 
 | Download | Platform | Details |
 |----------|----------|----------|
-| **OmenCoreSetup-3.6.2.exe** | Windows | Installer (Recommended) — Includes .NET 8 runtime |
-| **OmenCore-3.6.2-win-x64.zip** | Windows | Portable — Extract and run, no installation |
-| **OmenCore-3.6.2-linux-x64.zip** | Linux | CLI + Avalonia GUI, self-contained runtime |
+| **OmenCoreSetup-3.6.3.exe** | Windows | Installer (Recommended) — Includes .NET 8 runtime |
+| **OmenCore-3.6.3-win-x64.zip** | Windows | Portable — Extract and run, no installation |
+| **OmenCore-3.6.3-linux-x64.zip** | Linux | CLI + Avalonia GUI, self-contained runtime |
 
 ### SHA256
 
-`OmenCoreSetup-3.6.2.exe`  
-`B97E1F2D2137498DCC3B170FB9E33ADF1505FB94F7603805CCD96B1AB4E30895`
+`OmenCoreSetup-3.6.3.exe`  
+`3EC5D7E59C0018F0845ED8B8A44C35AEE55C919F1B9E6692F61FF7B498A06346`
 
-`OmenCore-3.6.2-win-x64.zip`  
-`DCAAAB9103FA5D574A49990E734E76A4F1A67AE63083F7195F204A2A043630BC`
+`OmenCore-3.6.3-win-x64.zip`  
+`31DE619954DC31B5ECA0394CDB43DF1D0BA93C88347A18E39AE11E7B50BFAF45`
 
-`OmenCore-3.6.2-linux-x64.zip`  
-`78F571EECBE16F38882453B7281759AE4592D3DB1CCFA1ACFF39E9DDC5579C99`
+`OmenCore-3.6.3-linux-x64.zip`  
+`1A02ACF34AD073AD044DD2FB5EA6233AC430978CBE90F947A78D3E30B2E0A735`
 
 ---
 
@@ -305,7 +305,7 @@ cd src\OmenCoreApp\bin\Release\net8.0-windows10.0.19041.0
 ```powershell
 pwsh ./build-installer.ps1
 # Optional: -Configuration Release -Runtime win-x64 (these are the defaults)
-# Outputs: artifacts/OmenCoreSetup-3.6.2.exe and artifacts/OmenCore-3.6.2-win-x64.zip
+# Outputs: artifacts/OmenCoreSetup-3.6.3.exe and artifacts/OmenCore-3.6.3-win-x64.zip
 ```
 
 ### Tests
@@ -355,6 +355,7 @@ Detailed logs are in `%LOCALAPPDATA%\OmenCore\`. On Linux, use `sudo omencore-cl
 
 | Version | Key Changes |
 |---------|------------|
+| **v3.6.3** | Safety hotfix rollup: desktop fan-write gate, conservative WMI fan handoff, OSD startup hardening, 8D2F identity correction, UI polish, and runtime CPU/RAM reductions |
 | **v3.6.2** | Stabilization release: runtime source-of-truth hardening, fan/performance confirmation fixes, RGB fallback reliability, Linux diagnostics/package updates, and UI responsiveness cleanup |
 | **v3.6.1** | Stabilization release: fan/performance sync, tray/OSD consistency, WMI fan CPU reduction, EC coordination, capability fallback hardening |
 | **v3.6.0** | Lightweight runtime behavior, hardware-worker reliability, fan/RGB/hotkey hardening, and release packaging improvements |
@@ -383,9 +384,9 @@ Older release notes: [docs/](docs/)
 - [docs/ANTIVIRUS_FAQ.md](docs/ANTIVIRUS_FAQ.md) — Antivirus false positive handling
 - [docs/DEFENDER_FALSE_POSITIVE.md](docs/DEFENDER_FALSE_POSITIVE.md) — Windows Defender exclusion steps
 - [docs/WINRING0_SETUP.md](docs/WINRING0_SETUP.md) — WinRing0 driver setup
-- [docs/CHANGELOG_v3.6.2.md](docs/CHANGELOG_v3.6.2.md) — Current stabilization release changelog
-- [docs/CHANGELOG-3.6.1.md](docs/CHANGELOG-3.6.1.md) — Prior stabilization release changelog
-- [docs/CHANGELOG_v3.4.1.md](docs/CHANGELOG_v3.4.1.md) — Earlier stable release notes
+- [docs/CHANGELOG_v3.6.3.md](docs/CHANGELOG_v3.6.3.md) — Current safety and stability hotfix changelog
+- [docs/CHANGELOG_v3.6.2.md](docs/CHANGELOG_v3.6.2.md) — Prior stabilization release changelog
+- [docs/CHANGELOG-3.6.1.md](docs/CHANGELOG-3.6.1.md) — Earlier stabilization release changelog
 
 ---
 

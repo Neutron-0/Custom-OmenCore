@@ -205,5 +205,62 @@ namespace OmenCoreApp.Tests.Hardware
         }
 
         #endregion
+
+        #region Fan write safety gating
+
+        [Fact]
+        public void FanWritesBlockedForSafety_IsTrue_ForDesktopChassis()
+        {
+            var caps = new DeviceCapabilities
+            {
+                Chassis = ChassisType.Tower,
+                CanSetFanSpeed = true,
+                ModelConfig = new ModelCapabilities
+                {
+                    SupportsFanCurves = true
+                }
+            };
+
+            caps.FanWritesBlockedForSafety.Should().BeTrue();
+            caps.ShowFanCurveEditor.Should().BeFalse("desktop fan writes are blocked by the v3.6.3 safety gate");
+        }
+
+        [Fact]
+        public void FanWritesBlockedForSafety_IsTrue_ForDesktopModelFamily()
+        {
+            var caps = new DeviceCapabilities
+            {
+                Chassis = ChassisType.Unknown,
+                ModelFamily = OmenModelFamily.Desktop,
+                CanSetFanSpeed = true,
+                ModelConfig = new ModelCapabilities
+                {
+                    SupportsFanCurves = true
+                }
+            };
+
+            caps.FanWritesBlockedForSafety.Should().BeTrue();
+            caps.ShowFanCurveEditor.Should().BeFalse();
+        }
+
+        [Fact]
+        public void ShowFanCurveEditor_RemainsTrue_ForWritableLaptopProfile()
+        {
+            var caps = new DeviceCapabilities
+            {
+                Chassis = ChassisType.Laptop,
+                ModelFamily = OmenModelFamily.Legacy,
+                CanSetFanSpeed = true,
+                ModelConfig = new ModelCapabilities
+                {
+                    SupportsFanCurves = true
+                }
+            };
+
+            caps.FanWritesBlockedForSafety.Should().BeFalse();
+            caps.ShowFanCurveEditor.Should().BeTrue();
+        }
+
+        #endregion
     }
 }

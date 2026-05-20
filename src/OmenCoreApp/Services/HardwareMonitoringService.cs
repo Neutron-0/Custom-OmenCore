@@ -46,8 +46,11 @@ namespace OmenCore.Services
         private const int ReadSampleTimeoutMs = 10000; // 10 second timeout for sample reads
         private int _consecutiveTimeouts = 0; // Track consecutive timeouts for diagnostics
         private static readonly TimeSpan DashboardMetricsRetention = TimeSpan.FromHours(24);
-        private const int MaxDashboardMetricsHistory = 7200; // Keeps at least 2h at active 1s cadence.
+        private static readonly TimeSpan DashboardMetricAgePruneInterval = TimeSpan.FromMinutes(1);
+        private const int MaxDashboardMetricsHistory = 3600; // Keeps at least 2h at active 2s cadence.
+        private const int MaxHistoricalDataPoints = 600;
         private const int PowerTrendSampleCount = 5;
+        private DateTime _nextDashboardMetricAgePruneUtc = DateTime.MinValue;
         
         // Monitoring health tracking (v2.7.0)
         private DateTime _lastSuccessfulSampleTime = DateTime.MinValue;
@@ -712,15 +715,45 @@ namespace OmenCore.Services
 
             lock (_dashboardLock)
             {
-                var realData = _metricsHistory
-                    .Where(m => m.Timestamp >= cutoffTime)
-                    .Select(m => new HistoricalDataPoint
+                var matchingCount = 0;
+                for (var i = 0; i < _metricsHistory.Count; i++)
+                {
+                    if (_metricsHistory[i].Timestamp >= cutoffTime)
                     {
-                        Timestamp = m.Timestamp,
-                        Value = GetValueForChartType(m, chartType),
-                        Label = GetLabelForChartType(chartType)
-                    })
-                    .ToList();
+                        matchingCount++;
+                    }
+                }
+
+                if (matchingCount == 0)
+                {
+                    return Task.FromResult<IEnumerable<HistoricalDataPoint>>(Array.Empty<HistoricalDataPoint>());
+                }
+
+                var step = Math.Max(1, (int)Math.Ceiling(matchingCount / (double)MaxHistoricalDataPoints));
+                var label = GetLabelForChartType(chartType);
+                var realData = new List<HistoricalDataPoint>(Math.Min(matchingCount, MaxHistoricalDataPoints));
+                var seen = 0;
+
+                for (var i = 0; i < _metricsHistory.Count; i++)
+                {
+                    var metric = _metricsHistory[i];
+                    if (metric.Timestamp < cutoffTime)
+                    {
+                        continue;
+                    }
+
+                    if (seen % step == 0 || seen == matchingCount - 1)
+                    {
+                        realData.Add(new HistoricalDataPoint
+                        {
+                            Timestamp = metric.Timestamp,
+                            Value = GetValueForChartType(metric, chartType),
+                            Label = label
+                        });
+                    }
+
+                    seen++;
+                }
 
                 // v2.7.0: Return empty list instead of synthetic data to show proper empty state
                 // Synthetic data can mask telemetry failures and confuse users
@@ -748,7 +781,15 @@ namespace OmenCore.Services
             lock (_dashboardLock)
             {
                 var cutoffTime = DateTime.Now - timeRange;
-                return _metricsHistory.Any(m => m.Timestamp >= cutoffTime);
+                for (var i = _metricsHistory.Count - 1; i >= 0; i--)
+                {
+                    if (_metricsHistory[i].Timestamp >= cutoffTime)
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
             }
         }
 
@@ -857,9 +898,10 @@ namespace OmenCore.Services
 
         private void UpdateDashboardMetrics(MonitoringSample sample)
         {
+            var now = DateTime.Now;
             var metrics = new HardwareMetrics
             {
-                Timestamp = DateTime.Now,
+                Timestamp = now,
                 CpuTemperature = sample.CpuTemperatureC,
                 GpuTemperature = sample.GpuTemperatureC,
                 PowerConsumption = CalculateEstimatedPowerConsumption(sample),
@@ -877,12 +919,13 @@ namespace OmenCore.Services
                     : 0
             };
 
-            _logging.Debug($"UpdateDashboardMetrics: Created metrics - CPU: {metrics.CpuTemperature}°C, GPU: {metrics.GpuTemperature}°C, Power: {metrics.PowerConsumption}W");
+            if (_logging.Level >= LogLevel.Debug)
+            {
+                _logging.Debug($"UpdateDashboardMetrics: Created metrics - CPU: {metrics.CpuTemperature:F1}C, GPU: {metrics.GpuTemperature:F1}C, Power: {metrics.PowerConsumption:F1}W");
+            }
 
             lock (_dashboardLock)
             {
-                PruneDashboardMetricHistory(metrics.Timestamp);
-
                 // Calculate trend without per-sample LINQ/list allocations in the monitor loop.
                 if (_metricsHistory.Count >= 2)
                 {
@@ -909,13 +952,21 @@ namespace OmenCore.Services
                 CheckForAlerts(metrics);
             }
 
-            _logging.Debug("UpdateDashboardMetrics: _lastMetrics updated successfully");
+            if (_logging.Level >= LogLevel.Debug)
+            {
+                _logging.Debug("UpdateDashboardMetrics: _lastMetrics updated successfully");
+            }
         }
 
         private void PruneDashboardMetricHistory(DateTime now)
         {
-            var cutoffTime = now - DashboardMetricsRetention;
-            _metricsHistory.RemoveAll(m => m.Timestamp < cutoffTime);
+            var nowUtc = now.ToUniversalTime();
+            if (nowUtc >= _nextDashboardMetricAgePruneUtc)
+            {
+                var cutoffTime = now - DashboardMetricsRetention;
+                _metricsHistory.RemoveAll(m => m.Timestamp < cutoffTime);
+                _nextDashboardMetricAgePruneUtc = nowUtc + DashboardMetricAgePruneInterval;
+            }
 
             var excessCount = _metricsHistory.Count - MaxDashboardMetricsHistory;
             if (excessCount > 0)

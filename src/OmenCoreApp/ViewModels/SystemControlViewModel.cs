@@ -2976,6 +2976,17 @@ namespace OmenCore.ViewModels
                 CpuPl2Watts = (int)Math.Round(pl2);
                 CpuPowerLimitsLocked = isLocked;
 
+                if (pl1 <= 0 && pl2 <= 0)
+                {
+                    CpuPowerLimitsAvailable = true;
+                    CpuPowerLimitsLocked = true;
+                    CpuPl1Watts = Math.Max(CpuPl1Watts, 15);
+                    CpuPl2Watts = Math.Max(CpuPl2Watts, 25);
+                    CpuPowerLimitsStatus = "MSR package limits unavailable - HP firmware may require OMEN performance modes/Unleashed mode";
+                    _logging.Warn("CPU power limit MSR readback returned 0W/0W; treating direct PL1/PL2 sliders as unavailable instead of projecting writable limits");
+                    return;
+                }
+
                 if (isLocked)
                 {
                     CpuPowerLimitsAvailable = true;

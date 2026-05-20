@@ -30,6 +30,8 @@ namespace OmenCore.Services
         private int _stableFrameCount;     // Consecutive frames below change threshold
         private bool _inSlowMode;          // True when back-off is active
         private volatile bool _isHostMinimized; // Set by host window state changes
+        private int _sampleInProgress;
+        private int _applyInProgress;
         
         /// <summary>
         /// Whether ambient sampling is currently active.
@@ -139,6 +141,7 @@ namespace OmenCore.Services
         private void SampleScreen(object? state)
         {
             if (!_isRunning || _isDisposed) return;
+            if (Interlocked.Exchange(ref _sampleInProgress, 1) == 1) return;
             
             try
             {
@@ -182,6 +185,10 @@ namespace OmenCore.Services
             {
                 // Don't spam logs, sampling can fail occasionally
                 System.Diagnostics.Debug.WriteLine($"Screen sampling error: {ex.Message}");
+            }
+            finally
+            {
+                Interlocked.Exchange(ref _sampleInProgress, 0);
             }
         }
 
@@ -323,6 +330,11 @@ namespace OmenCore.Services
 
         private void ApplyColorToDevices(Color color)
         {
+            if (Interlocked.Exchange(ref _applyInProgress, 1) == 1)
+            {
+                return;
+            }
+
             _ = Task.Run(async () =>
             {
                 try
@@ -340,6 +352,10 @@ namespace OmenCore.Services
                 catch
                 {
                     // Ignore apply errors in ambient mode
+                }
+                finally
+                {
+                    Interlocked.Exchange(ref _applyInProgress, 0);
                 }
             });
         }

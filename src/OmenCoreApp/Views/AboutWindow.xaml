@@ -23,7 +23,11 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <DockPanel Grid.Column="0">
-                    <Image Source="/Assets/logo.png" Width="80" Height="80" DockPanel.Dock="Left" Margin="0,0,20,0" />
+                    <Image Width="80" Height="80" DockPanel.Dock="Left" Margin="0,0,20,0" RenderOptions.BitmapScalingMode="HighQuality">
+                        <Image.Source>
+                            <BitmapImage UriSource="/Assets/logo-small.png" DecodePixelWidth="160" CacheOption="OnLoad"/>
+                        </Image.Source>
+                    </Image>
                     <StackPanel VerticalAlignment="Center">
                         <TextBlock Text="OmenCore" FontSize="28" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" />
                         <TextBlock Text="Gaming Laptop and Desktop Control Center" FontSize="14" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,4,0,0" />

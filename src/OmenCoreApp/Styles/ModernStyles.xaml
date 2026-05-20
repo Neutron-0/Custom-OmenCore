@@ -560,6 +560,7 @@
         <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
         <Setter Property="FontFamily" Value="{StaticResource AppFontFamily}" />
         <Setter Property="TextOptions.TextFormattingMode" Value="Display" />
+        <Setter Property="TextOptions.TextRenderingMode" Value="ClearType" />
     </Style>
 
     <!-- Monospace style for numeric values (temps, speeds, voltages) -->
@@ -1200,11 +1201,17 @@
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
                         <!-- Scrollable tab header row -->
-                        <ScrollViewer Grid.Row="0" 
+                        <Border Grid.Row="0"
+                                Background="#660E1018"
+                                BorderBrush="#332F3448"
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                Padding="4"
+                                Margin="0,0,0,10">
+                        <ScrollViewer
                                       HorizontalScrollBarVisibility="Auto" 
                                       VerticalScrollBarVisibility="Disabled"
                                       CanContentScroll="False"
-                                      Margin="0,0,0,8"
                                       Style="{x:Null}">
                             <ScrollViewer.Resources>
                                 <!-- Hide the scrollbar but keep scroll functionality (mouse wheel / drag) -->
@@ -1215,6 +1222,7 @@
                             </ScrollViewer.Resources>
                             <TabPanel IsItemsHost="True" />
                         </ScrollViewer>
+                        </Border>
                         <!-- Tab content area -->
                         <Border Grid.Row="1"
                                 Background="{TemplateBinding Background}"
@@ -1232,18 +1240,22 @@
     <!-- Modern TabItem Style -->
     <Style x:Key="ModernTabItem" TargetType="TabItem">
         <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
-        <Setter Property="FontSize" Value="13" />
+        <Setter Property="FontSize" Value="12" />
         <Setter Property="FontWeight" Value="SemiBold" />
-        <Setter Property="Padding" Value="10,10" />
+        <Setter Property="Padding" Value="12,7" />
+        <Setter Property="MinHeight" Value="34" />
         <Setter Property="Cursor" Value="Hand" />
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="TabItem">
                     <Border x:Name="Border"
                             Background="Transparent"
-                            CornerRadius="6"
-                            Margin="0,0,2,0"
-                            Padding="{TemplateBinding Padding}">
+                            BorderBrush="Transparent"
+                            BorderThickness="1"
+                            CornerRadius="7"
+                            Margin="0,0,5,0"
+                            Padding="{TemplateBinding Padding}"
+                            MinHeight="{TemplateBinding MinHeight}">
                         <StackPanel>
                             <ContentPresenter x:Name="ContentSite"
                                               VerticalAlignment="Center"
@@ -1263,8 +1275,9 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsSelected" Value="True">
-                            <!-- Active State: White Text, pill-like subtle background if desired, or just clean text -->
                             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                            <Setter TargetName="Border" Property="Background" Value="{StaticResource SurfaceMediumBrush}" />
+                            <Setter TargetName="Border" Property="BorderBrush" Value="#6645C7FF" />
                             <Setter TargetName="AccentUnderline" Property="Background" Value="{StaticResource AccentBrush}" />
                             <!-- Animate underline width -->
                             <Trigger.EnterActions>
@@ -1284,11 +1297,32 @@
                         <Trigger Property="IsMouseOver" Value="True">
                              <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
                              <Setter TargetName="Border" Property="Background" Value="{StaticResource SurfaceHighlightBrush}" />
+                             <Setter TargetName="Border" Property="BorderBrush" Value="#552F3448" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                             <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+                             <Setter Property="Opacity" Value="0.55" />
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
+    </Style>
+
+    <Style x:Key="Omen.TabHeaderIcon" TargetType="Path">
+        <Setter Property="Width" Value="13"/>
+        <Setter Property="Height" Value="13"/>
+        <Setter Property="Stretch" Value="Uniform"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="Margin" Value="0,0,7,0"/>
+        <Setter Property="Fill" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}"/>
+    </Style>
+
+    <Style x:Key="Omen.TabHeaderText" TargetType="TextBlock">
+        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="VerticalAlignment" Value="Center"/>
+        <Setter Property="Foreground" Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType=TabItem}}"/>
     </Style>
 
     <!-- Modern TextBox Style -->

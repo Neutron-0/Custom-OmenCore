@@ -268,6 +268,29 @@ namespace OmenCore.Hardware
                 UserVerified = false,
                 Notes = "GitHub #120 - HP OMEN Laptop 15-en0038ur, ProductId 8787. Initial support from diagnostics; fan RPM readback remains pending verification."
             });
+
+            AddModel(new ModelCapabilities
+            {
+                ProductId = "88D2",
+                ModelName = "OMEN by HP Laptop 15z-en100 (2021) AMD",
+                ModelNamePattern = "15z-en100",
+                ModelYear = 2021,
+                Family = OmenModelFamily.Legacy,
+                SupportsFanControlWmi = true,
+                SupportsFanControlEc = false,
+                SupportsFanCurves = true,
+                SupportsIndependentFanCurves = false,
+                SupportsRpmReadback = true,
+                FanZoneCount = 2,
+                MaxFanLevel = 55,
+                SupportsPerformanceModes = true,
+                HasMuxSwitch = false,
+                SupportsGpuPowerBoost = false,
+                HasFourZoneRgb = true,
+                SupportsUndervolt = false,
+                UserVerified = false,
+                Notes = "GitHub #132 - ProductId 88D2 / 15z-en100. Conservative legacy WMI V1 profile; direct EC writes disabled and independent curves held off pending field verification."
+            });
             
             AddModel(new ModelCapabilities
             {
@@ -530,20 +553,22 @@ namespace OmenCore.Hardware
             AddModel(new ModelCapabilities
             {
                 ProductId = "8D2F",
-                ModelName = "OMEN 16 (2024) am0xxx AMD",
-                ModelYear = 2024,
+                ModelName = "OMEN 16 am0xxx shared AMD/Intel",
+                ModelYear = 2025,
                 Family = OmenModelFamily.OMEN16,
                 SupportsFanControlWmi = true,
+                SupportsFanControlEc = false,
                 SupportsFanCurves = true,
+                SupportsIndependentFanCurves = false,
                 FanZoneCount = 2,
                 MaxFanLevel = 55,
                 SupportsPerformanceModes = true,
                 HasMuxSwitch = true,
                 SupportsGpuPowerBoost = true,
                 HasFourZoneRgb = true,
-                SupportsUndervolt = false, // AMD — no Intel MSR undervolt
+                SupportsUndervolt = false,
                 UserVerified = false,
-                Notes = "GitHub #111 — OMEN Gaming Laptop 16-am0xxx (2024 AMD). Capabilities inferred from 16-xd0 sibling; verify EC fan control before enabling."
+                Notes = "GitHub #111 / Discord 2026-05-20 - OMEN Gaming Laptop 16-am0xxx, ProductId 8D2F. ProductId observed on AMD and Intel Core Ultra variants; WMI V1 fan profile retained, direct EC writes disabled, and identity label kept neutral pending field verification.",
             });
 
             // OMEN 16 (2025) - am0xxx Intel Core Ultra H + RTX 50-series
@@ -699,6 +724,7 @@ namespace OmenCore.Hardware
                 SupportsAdvancedOptimus = true,
                 HasKeyboardBacklight = true,
                 HasFourZoneRgb = true,
+                HasPerKeyRgb = true,
                 SupportsUndervolt = false, // AMD Ryzen — Intel-style undervolt unsupported
                 UserVerified = false,
                 Notes = "OMEN MAX 16 ak0003nr — AMD HX 375 + RTX 5080. ThermalPolicy V2 (WMI V2) support; avoid EC writes that target legacy registers."
@@ -1001,6 +1027,7 @@ namespace OmenCore.Hardware
                 ModelYear = 2023,
                 Family = OmenModelFamily.Victus,
                 SupportsFanControlWmi = true,
+                SupportsFanControlEc = false,
                 SupportsFanCurves = true,
                 SupportsIndependentFanCurves = false,
                 FanZoneCount = 2,
@@ -1081,16 +1108,16 @@ namespace OmenCore.Hardware
                 ModelName = "OMEN 25L Desktop",
                 ModelYear = 2021,
                 Family = OmenModelFamily.Desktop,
-                SupportsFanControlWmi = true, // WMI fan control works on OMEN desktops
+                SupportsFanControlWmi = false, // v3.6.3 safety gate: desktop fan writes disabled pending validation
                 SupportsFanControlEc = false, // Desktop EC registers differ from laptops
-                SupportsFanCurves = true, // Via WMI fan level commands
+                SupportsFanCurves = false,
                 SupportsRpmReadback = true, // WMI RPM readback available
                 SupportsPerformanceModes = true,
                 HasMuxSwitch = false,
                 SupportsGpuPowerBoost = false,
                 HasKeyboardBacklight = false,
                 HasFourZoneRgb = false,
-                Notes = "OMEN 25L Desktop — WMI fan control supported, desktop RGB via USB HID"
+                Notes = "OMEN 25L Desktop - fan writes disabled by v3.6.3 safety gate; RPM telemetry/performance modes only pending hardware validation."
             });
             
             AddModel(new ModelCapabilities
@@ -1099,13 +1126,13 @@ namespace OmenCore.Hardware
                 ModelName = "OMEN 30L Desktop",
                 ModelYear = 2022,
                 Family = OmenModelFamily.Desktop,
-                SupportsFanControlWmi = true,
+                SupportsFanControlWmi = false,
                 SupportsFanControlEc = false,
-                SupportsFanCurves = true,
+                SupportsFanCurves = false,
                 SupportsRpmReadback = true,
                 SupportsPerformanceModes = true,
                 HasKeyboardBacklight = false,
-                Notes = "OMEN 30L Desktop — WMI fan control supported, desktop RGB via USB HID"
+                Notes = "OMEN 30L Desktop - fan writes disabled by v3.6.3 safety gate; RPM telemetry/performance modes only pending hardware validation."
             });
             
             AddModel(new ModelCapabilities
@@ -1114,13 +1141,13 @@ namespace OmenCore.Hardware
                 ModelName = "OMEN 35L Desktop",
                 ModelYear = 2023,
                 Family = OmenModelFamily.Desktop,
-                SupportsFanControlWmi = true,
+                SupportsFanControlWmi = false,
                 SupportsFanControlEc = false,
-                SupportsFanCurves = true,
+                SupportsFanCurves = false,
                 SupportsRpmReadback = true,
                 SupportsPerformanceModes = true,
                 HasKeyboardBacklight = false,
-                Notes = "OMEN 35L Desktop — WMI fan control supported, desktop RGB via USB HID"
+                Notes = "OMEN 35L Desktop - fan writes disabled by v3.6.3 safety gate; RPM telemetry/performance modes only pending hardware validation."
             });
             
             AddModel(new ModelCapabilities
@@ -1129,13 +1156,13 @@ namespace OmenCore.Hardware
                 ModelName = "OMEN 40L Desktop",
                 ModelYear = 2023,
                 Family = OmenModelFamily.Desktop,
-                SupportsFanControlWmi = true,
+                SupportsFanControlWmi = false,
                 SupportsFanControlEc = false,
-                SupportsFanCurves = true,
+                SupportsFanCurves = false,
                 SupportsRpmReadback = true,
                 SupportsPerformanceModes = true,
                 HasKeyboardBacklight = false,
-                Notes = "OMEN 40L Desktop — WMI fan control supported, desktop RGB via USB HID"
+                Notes = "OMEN 40L Desktop - fan writes disabled by v3.6.3 safety gate; RPM telemetry/performance modes only pending hardware validation."
             });
             
             AddModel(new ModelCapabilities
@@ -1144,13 +1171,13 @@ namespace OmenCore.Hardware
                 ModelName = "OMEN 45L Desktop",
                 ModelYear = 2023,
                 Family = OmenModelFamily.Desktop,
-                SupportsFanControlWmi = true,
+                SupportsFanControlWmi = false,
                 SupportsFanControlEc = false,
-                SupportsFanCurves = true,
+                SupportsFanCurves = false,
                 SupportsRpmReadback = true,
                 SupportsPerformanceModes = true,
                 HasKeyboardBacklight = false,
-                Notes = "OMEN 45L Desktop — WMI fan control supported, desktop RGB via USB HID"
+                Notes = "OMEN 45L Desktop - fan writes disabled by v3.6.3 safety gate; RPM telemetry/performance modes only pending hardware validation."
             });
         }
         

@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -14,6 +15,9 @@ namespace OmenCore.Views
     {
         private bool _forceClose = false; // Flag for actual shutdown vs hide-to-tray
         private readonly HashSet<TabItem> _initializedTabs = new();
+        private static readonly TimeSpan LogAutoScrollMinInterval = TimeSpan.FromMilliseconds(250);
+        private bool _logAutoScrollPending;
+        private DateTime _lastLogAutoScrollUtc = DateTime.MinValue;
         
         public MainWindow(MainViewModel viewModel)
         {
@@ -39,15 +43,39 @@ namespace OmenCore.Views
         {
             if (e.PropertyName == nameof(MainViewModel.LogBuffer))
             {
-                // Auto-scroll the system log to the latest entry
-                Dispatcher.InvokeAsync(() =>
-                {
-                    if (SystemLogScrollViewer != null)
-                    {
-                        SystemLogScrollViewer.ScrollToEnd();
-                    }
-                });
+                ScheduleSystemLogAutoScroll();
             }
+        }
+
+        private void ScheduleSystemLogAutoScroll()
+        {
+            if (_logAutoScrollPending)
+            {
+                return;
+            }
+
+            if (DataContext is MainViewModel { LogsCollapsed: true })
+            {
+                return;
+            }
+
+            _logAutoScrollPending = true;
+            Dispatcher.InvokeAsync(async () =>
+            {
+                var elapsed = DateTime.UtcNow - _lastLogAutoScrollUtc;
+                if (elapsed < LogAutoScrollMinInterval)
+                {
+                    await Task.Delay(LogAutoScrollMinInterval - elapsed);
+                }
+
+                _logAutoScrollPending = false;
+                if (SystemLogScrollViewer != null &&
+                    DataContext is not MainViewModel { LogsCollapsed: true })
+                {
+                    SystemLogScrollViewer.ScrollToEnd();
+                    _lastLogAutoScrollUtc = DateTime.UtcNow;
+                }
+            }, System.Windows.Threading.DispatcherPriority.Background);
         }
 
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
@@ -56,60 +84,38 @@ namespace OmenCore.Views
             _ = e;
             UpdateMaximizedBounds();
             
-            // Initialize global hotkeys
+            // Initialize the OSD separately so a hotkey registration failure cannot leave
+            // startup-minimized launches without their overlay service.
+            (DataContext as MainViewModel)?.EnsureOsdInitialized();
+
+            // Initialize global hotkeys.
             var windowHandle = new WindowInteropHelper(this).Handle;
             (DataContext as MainViewModel)?.InitializeHotkeys(windowHandle);
-            
-            // CRITICAL FIX: Create and inject Dashboard to display monitoring data
-            // Using Dispatcher to ensure this happens after window layout is complete
+
             _ = Dispatcher.InvokeAsync(() =>
             {
                 try
                 {
-                    // Ensure MainWindow's DataContext is properly set
-                    var mainViewModel = this.DataContext as MainViewModel;
-                    if (mainViewModel == null)
+                    if (this.TabControlMain == null)
                     {
-                        App.Logging.Error("[MainWindow] DataContext is not MainViewModel!");
                         return;
                     }
-                    
-                    // Create the Dashboard with the MainViewModel
-                    var dashboard = new HardwareMonitoringDashboard
-                    {
-                        DataContext = mainViewModel
-                    };
-                    
-                    // Inject it into the Monitoring tab
-                    if (this.MonitoringTabItem != null)
-                    {
-                        this.MonitoringTabItem.Content = dashboard;
-                        App.Logging.Info("[MainWindow] Created HardwareMonitoringDashboard with MainViewModel and injected into Monitoring tab");
-                        
-                        // Force the Dashboard to apply its template and render
-                        dashboard.ApplyTemplate();
-                        dashboard.UpdateLayout();
-                        App.Logging.Info("[MainWindow] Called ApplyTemplate() and UpdateLayout() on Dashboard");
-                    }
-                    else
-                    {
-                        App.Logging.Error("[MainWindow] MonitoringTabItem not found!");
-                    }
-                    
-                    // Select the General tab to make it visible and force rendering
-                    if (this.TabControlMain != null)
+
+                    if (this.TabControlMain.SelectedIndex < 0)
                     {
                         this.TabControlMain.SelectedIndex = 0;
-                        EnsureTabContentCreated(this.GeneralTabItem);
-                        this.TabControlMain.UpdateLayout();
-                        App.Logging.Info("[MainWindow] Set TabControl.SelectedIndex = 0 (General tab) and called UpdateLayout()");
+                    }
+
+                    if (this.TabControlMain.SelectedItem is TabItem selectedTab)
+                    {
+                        EnsureTabContentCreated(selectedTab);
                     }
                 }
                 catch (Exception ex)
                 {
-                    App.Logging.Error($"[MainWindow] ERROR creating Dashboard: {ex.Message}\n{ex.StackTrace}");
+                    App.Logging.Error($"[MainWindow] ERROR creating initial tab content: {ex.Message}\n{ex.StackTrace}");
                 }
-            }, System.Windows.Threading.DispatcherPriority.Normal);
+            }, System.Windows.Threading.DispatcherPriority.ContextIdle);
         }
 
         private void MainWindow_Closing(object? sender, CancelEventArgs e)
@@ -157,11 +163,21 @@ namespace OmenCore.Views
 
             if (ReferenceEquals(tab, MonitoringTabItem))
             {
-                if (tab.Content != null)
+                if (tab.Content == null)
                 {
-                    _initializedTabs.Add(tab);
+                    if (DataContext is not MainViewModel viewModel)
+                    {
+                        return;
+                    }
+
+                    tab.Content = new HardwareMonitoringDashboard
+                    {
+                        DataContext = viewModel
+                    };
+                    App.Logging.Info("[MainWindow] Created HardwareMonitoringDashboard for Monitoring tab");
                 }
 
+                _initializedTabs.Add(tab);
                 return;
             }
 
@@ -177,10 +193,50 @@ namespace OmenCore.Views
             }
             catch (Exception ex)
             {
-                App.Logging.Error($"[MainWindow] Failed to create tab '{tab.Header}': {ex}");
-                tab.Content = BuildTabLoadFailureContent(tab.Header?.ToString() ?? "Unknown", ex);
+                var tabName = GetTabHeaderText(tab);
+                App.Logging.Error($"[MainWindow] Failed to create tab '{tabName}': {ex}");
+                tab.Content = BuildTabLoadFailureContent(tabName, ex);
                 _initializedTabs.Add(tab);
             }
+        }
+
+        private static string GetTabHeaderText(TabItem tab)
+        {
+            if (tab.Header is string text)
+            {
+                return text;
+            }
+
+            if (tab.Header is DependencyObject header)
+            {
+                var textBlock = FindVisualChild<TextBlock>(header);
+                if (!string.IsNullOrWhiteSpace(textBlock?.Text))
+                {
+                    return textBlock.Text;
+                }
+            }
+
+            return tab.Name?.Replace("TabItem", string.Empty) ?? "Unknown";
+        }
+
+        private static T? FindVisualChild<T>(DependencyObject parent) where T : DependencyObject
+        {
+            if (parent is T match)
+            {
+                return match;
+            }
+
+            var childCount = VisualTreeHelper.GetChildrenCount(parent);
+            for (var i = 0; i < childCount; i++)
+            {
+                var result = FindVisualChild<T>(VisualTreeHelper.GetChild(parent, i));
+                if (result != null)
+                {
+                    return result;
+                }
+            }
+
+            return null;
         }
 
         private FrameworkElement? CreateTabContent(TabItem tab)

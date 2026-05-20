@@ -268,7 +268,7 @@ namespace OmenCore.Services.KeyboardLighting
             AddModel(new KeyboardModelConfig
             {
                 ProductId = "8D2F",
-                ModelName = "OMEN 16-am0xxx (2024) AMD",
+                ModelName = "OMEN 16-am0xxx shared AMD/Intel",
                 KeyboardType = KeyboardType.FourZone,
                 PreferredMethod = KeyboardMethod.ColorTable2020,
                 FallbackMethods = new[] { KeyboardMethod.NewWmi2023, KeyboardMethod.EcDirect },

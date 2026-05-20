@@ -899,6 +899,12 @@ namespace OmenCore.Services
                 return true;
             }
 
+            if (vkCode == VK_F12 && IsDedicatedOmenLaunchScan(scanCode))
+            {
+                reason = string.Empty;
+                return false;
+            }
+
             if (vkCode >= VK_F1 && vkCode <= VK_F23)
             {
                 reason = "never-intercept-function-key";
@@ -908,6 +914,9 @@ namespace OmenCore.Services
             reason = string.Empty;
             return false;
         }
+
+        private static bool IsDedicatedOmenLaunchScan(uint scanCode) =>
+            OmenLaunchAppScanCodes.Contains((int)scanCode);
 
         private void LogRejectedCandidate(string source, uint vkCode, uint scanCode, uint? flags, string reason)
         {

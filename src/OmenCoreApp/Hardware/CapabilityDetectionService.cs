@@ -175,6 +175,11 @@ namespace OmenCore.Hardware
             // Apply model-specific overrides
             
             // Fan control
+            if (Capabilities.FanWritesBlockedForSafety)
+            {
+                ForceMonitoringOnlyFanControl("Desktop fan writes disabled by v3.6.3 safety gate");
+            }
+
             if (!model.SupportsFanControlWmi && !model.SupportsFanControlEc)
             {
                 // Model is known to not support fan control (e.g., desktops)
@@ -234,6 +239,20 @@ namespace OmenCore.Hardware
                 Capabilities.HasOemPerformanceModes = true;
                 _logging?.Info($"  Performance modes set from model database: {string.Join(", ", model.PerformanceModes)}");
             }
+        }
+
+        private void ForceMonitoringOnlyFanControl(string reason)
+        {
+            if (Capabilities.FanControl != FanControlMethod.MonitoringOnly || Capabilities.CanSetFanSpeed)
+            {
+                _logging?.Warn($"  {reason}; forcing fan control to monitoring-only");
+            }
+
+            Capabilities.FanControl = FanControlMethod.MonitoringOnly;
+            Capabilities.CanSetFanSpeed = false;
+            Capabilities.CanReadRpm = true;
+            Capabilities.HasFanModes = false;
+            Capabilities.AvailableFanModes = Array.Empty<string>();
         }
 
         private void DetectDeviceInfo()
@@ -635,6 +654,12 @@ namespace OmenCore.Hardware
         private void DetermineFanControlMethod()
         {
             _logging?.Info("Phase 6: Determining fan control method...");
+
+            if (Capabilities.FanWritesBlockedForSafety)
+            {
+                ForceMonitoringOnlyFanControl("Desktop fan writes disabled by v3.6.3 safety gate");
+                return;
+            }
             
             // OmenCore is designed to be FULLY INDEPENDENT from OMEN Gaming Hub.
             // Priority order (OGH-independent methods first):

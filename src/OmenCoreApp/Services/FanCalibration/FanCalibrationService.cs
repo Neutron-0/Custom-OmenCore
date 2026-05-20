@@ -22,6 +22,7 @@ namespace OmenCore.Services.FanCalibration
         private readonly IFanController _fanController;
         private readonly SystemInfoService _systemInfo;
         private readonly LoggingService _logging;
+        private readonly DeviceCapabilities? _capabilities;
         private FanCalibrationProfile? _activeProfile;
         
         // Calibration wizard state
@@ -48,14 +49,20 @@ namespace OmenCore.Services.FanCalibration
         public event EventHandler<FanCalibrationProfile>? CalibrationCompleted;
         public event EventHandler<string>? CalibrationError;
 
+        private bool FanWritesAvailable => _fanController.IsAvailable && _capabilities?.FanWritesBlockedForSafety != true;
+
+        private const string FanWritesBlockedMessage = "Fan calibration blocked because fan writes are disabled by the active safety profile";
+
         public FanCalibrationService(
             IFanController fanController,
             SystemInfoService systemInfo,
-            LoggingService logging)
+            LoggingService logging,
+            DeviceCapabilities? capabilities = null)
         {
             _fanController = fanController;
             _systemInfo = systemInfo;
             _logging = logging;
+            _capabilities = capabilities;
             
             LoadKnownProfiles();
         }
@@ -91,6 +98,13 @@ namespace OmenCore.Services.FanCalibration
             if (_calibrationInProgress)
             {
                 _logging.Warn("Calibration already in progress");
+                return;
+            }
+
+            if (!FanWritesAvailable)
+            {
+                _logging.Warn(FanWritesBlockedMessage);
+                CalibrationError?.Invoke(this, FanWritesBlockedMessage);
                 return;
             }
             
@@ -201,6 +215,12 @@ namespace OmenCore.Services.FanCalibration
 
         private async Task RestoreAutoControlAfterCalibrationAsync(CancellationToken ct)
         {
+            if (!FanWritesAvailable)
+            {
+                _logging.Info("Fan calibration cleanup skipped; fan writes unavailable");
+                return;
+            }
+
             for (var attempt = 1; attempt <= 3; attempt++)
             {
                 try
@@ -237,6 +257,12 @@ namespace OmenCore.Services.FanCalibration
                 FanIndex = fanIndex,
                 RequestedPercent = targetPercent
             };
+
+            if (!FanWritesAvailable)
+            {
+                _logging.Warn(FanWritesBlockedMessage);
+                return result;
+            }
             
             // Get calibration data
             var profile = _activeProfile ?? CreateDefaultProfile(GetCurrentProductId());

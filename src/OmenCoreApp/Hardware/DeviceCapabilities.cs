@@ -42,7 +42,7 @@ namespace OmenCore.Hardware
         // ═══════════════════════════════════════════════════════════════════════════════════
         
         /// <summary>Whether to show fan curve editor in UI.</summary>
-        public bool ShowFanCurveEditor => CanSetFanSpeed && (ModelConfig?.SupportsFanCurves ?? true);
+        public bool ShowFanCurveEditor => CanSetFanSpeed && !FanWritesBlockedForSafety && (ModelConfig?.SupportsFanCurves ?? true);
         
         /// <summary>Whether to show independent CPU/GPU curves in UI.</summary>
         public bool ShowIndependentFanCurves => ShowFanCurveEditor && (ModelConfig?.SupportsIndependentFanCurves ?? true);
@@ -93,6 +93,15 @@ namespace OmenCore.Hardware
                                   Chassis == ChassisType.MiniTower || Chassis == ChassisType.AllInOne;
         public bool IsLaptop => Chassis == ChassisType.Laptop || Chassis == ChassisType.Notebook || 
                                  Chassis == ChassisType.Portable || Chassis == ChassisType.SubNotebook;
+
+        /// <summary>
+        /// Desktop OMEN fan write paths are blocked pending per-model validation.
+        /// RPM telemetry and performance modes may still be available.
+        /// </summary>
+        public bool FanWritesBlockedForSafety =>
+            IsDesktop ||
+            ModelFamily == OmenModelFamily.Desktop ||
+            ModelConfig?.Family == OmenModelFamily.Desktop;
         
         // Fan control capabilities
         public FanControlMethod FanControl { get; set; } = FanControlMethod.None;

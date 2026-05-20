@@ -27,6 +27,7 @@ namespace OmenCore.Services
         private readonly NotificationService _notificationService;
         private readonly ResumeRecoveryDiagnosticsService _resumeDiagnostics; // Always non-null; STEP-12 Option A
         private readonly RuntimeEcOperationCoordinator _ecOperationCoordinator;
+        private readonly DeviceCapabilities? _capabilities;
         private TimeSpan _monitorPollPeriod;
         private readonly ObservableCollection<ThermalSample> _thermalSamples = new();
         private readonly ObservableCollection<FanTelemetry> _fanTelemetry = new();
@@ -52,10 +53,14 @@ namespace OmenCore.Services
         // v2.7.0: Reduced intervals to combat BIOS fan reversion on OMEN 16/Max models
         private const int CurveUpdateIntervalMs = 5000;  // 5 seconds between curve updates (reduced from 10)
         private const int CurveForceRefreshMs = 30000;   // Force re-apply every 30 seconds (reduced from 60)
+        private const int ConservativeCurveForceRefreshMs = 60000;
+        private const int ConservativeCurveMinWriteIntervalMs = 10000;
+        private const int ConservativeCurveMinDeltaPercent = 5;
         private const int MonitorMinIntervalMs = 1000;   // 1 second minimum for UI updates
         private const int MonitorMaxIntervalMs = 5000;   // 5 seconds when temps stable
         private DateTime _lastCurveUpdate = DateTime.MinValue;
         private DateTime _lastCurveForceRefresh = DateTime.MinValue;
+        private DateTime _lastCurveWriteUtc = DateTime.MinValue;
         private int _lastAppliedFanPercent = -1;
         private int _lastAppliedCpuFanPercent = -1;      // For independent curves
         private int _lastAppliedGpuFanPercent = -1;      // For independent curves
@@ -712,7 +717,7 @@ namespace OmenCore.Services
         /// <summary>
         /// Create FanService with the new IFanController interface.
         /// </summary>
-        public FanService(IFanController controller, ThermalSensorProvider thermalProvider, LoggingService logging, NotificationService notificationService, int pollMs, ResumeRecoveryDiagnosticsService resumeDiagnostics, RuntimeEcOperationCoordinator? ecOperationCoordinator = null)
+        public FanService(IFanController controller, ThermalSensorProvider thermalProvider, LoggingService logging, NotificationService notificationService, int pollMs, ResumeRecoveryDiagnosticsService resumeDiagnostics, RuntimeEcOperationCoordinator? ecOperationCoordinator = null, DeviceCapabilities? capabilities = null)
         {
             _fanController = controller;
             _thermalProvider = thermalProvider;
@@ -720,6 +725,7 @@ namespace OmenCore.Services
             _notificationService = notificationService;
             _resumeDiagnostics = resumeDiagnostics;
             _ecOperationCoordinator = ecOperationCoordinator ?? new RuntimeEcOperationCoordinator(logging);
+            _capabilities = capabilities;
             _monitorPollPeriod = TimeSpan.FromMilliseconds(Math.Max(MonitorMinIntervalMs, pollMs));
             ThermalSamples = new ReadOnlyObservableCollection<ThermalSample>(_thermalSamples);
             FanTelemetry = new ReadOnlyObservableCollection<FanTelemetry>(_fanTelemetry);
@@ -730,8 +736,8 @@ namespace OmenCore.Services
         /// <summary>
         /// Legacy constructor for compatibility with existing FanController.
         /// </summary>
-        public FanService(FanController controller, ThermalSensorProvider thermalProvider, LoggingService logging, NotificationService notificationService, int pollMs, ResumeRecoveryDiagnosticsService resumeDiagnostics, RuntimeEcOperationCoordinator? ecOperationCoordinator = null)
-            : this(new EcFanControllerWrapper(controller, null!, logging), thermalProvider, logging, notificationService, pollMs, resumeDiagnostics, ecOperationCoordinator)
+        public FanService(FanController controller, ThermalSensorProvider thermalProvider, LoggingService logging, NotificationService notificationService, int pollMs, ResumeRecoveryDiagnosticsService resumeDiagnostics, RuntimeEcOperationCoordinator? ecOperationCoordinator = null, DeviceCapabilities? capabilities = null)
+            : this(new EcFanControllerWrapper(controller, null!, logging), thermalProvider, logging, notificationService, pollMs, resumeDiagnostics, ecOperationCoordinator, capabilities)
         {
         }
 
@@ -1333,7 +1339,50 @@ namespace OmenCore.Services
                 await ApplyCurveIfNeededAsync(cpuTemp, gpuTemp, immediate, ct);
             }, ct);
         }
-        public bool FanWritesAvailable => _fanController.IsAvailable;
+        public bool FanWritesAvailable => _fanController.IsAvailable && !DesktopFanWritesBlocked;
+
+        private bool DesktopFanWritesBlocked => _capabilities?.FanWritesBlockedForSafety == true;
+
+        private const string DesktopFanWriteBlockedMessage = "Desktop fan writes disabled by v3.6.3 safety gate; telemetry only";
+
+        private bool ConservativeLegacyFanPolicy =>
+            IsModelProduct("88D2") ||
+            (_capabilities?.ModelConfig?.Family == OmenModelFamily.Legacy &&
+             _capabilities.ModelConfig.UserVerified == false &&
+             _capabilities.ModelConfig.SupportsFanControlEc == false);
+
+        private bool IsModelProduct(string productId) =>
+            string.Equals(_capabilities?.ProductId, productId, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(_capabilities?.ModelConfig?.ProductId, productId, StringComparison.OrdinalIgnoreCase);
+
+        private bool ShouldSkipConservativeCurveWrite(int targetFanPercent, DateTime now, bool forceRefresh, bool immediate)
+        {
+            if (!ConservativeLegacyFanPolicy || forceRefresh || immediate || _lastAppliedFanPercent < 0)
+            {
+                return false;
+            }
+
+            var delta = Math.Abs(targetFanPercent - _lastAppliedFanPercent);
+            if (delta > 0 && delta < ConservativeCurveMinDeltaPercent)
+            {
+                _logging.Debug($"Conservative fan policy: skipped {delta}% curve delta below {ConservativeCurveMinDeltaPercent}% minimum");
+                return true;
+            }
+
+            if (_lastCurveWriteUtc != DateTime.MinValue &&
+                (now - _lastCurveWriteUtc).TotalMilliseconds < ConservativeCurveMinWriteIntervalMs)
+            {
+                _logging.Debug($"Conservative fan policy: skipped curve write inside {ConservativeCurveMinWriteIntervalMs}ms dwell window");
+                return true;
+            }
+
+            return false;
+        }
+
+        private void MarkCurveWrite(DateTime now)
+        {
+            _lastCurveWriteUtc = now;
+        }
 
         // Serialize controller write operations so concurrent triggers (monitor loop, tray,
         // hotkeys, automation) do not interleave EC/WMI fan writes unpredictably.
@@ -1341,6 +1390,13 @@ namespace OmenCore.Services
 
         private bool SetFanSpeedSerialized(int percent)
         {
+            if (DesktopFanWritesBlocked)
+            {
+                RecordFanCommand("SetFanSpeed", $"{percent}%", false, DesktopFanWriteBlockedMessage);
+                _logging.Warn(DesktopFanWriteBlockedMessage);
+                return false;
+            }
+
             lock (_fanWriteLock)
             {
                 return _ecOperationCoordinator.Execute("FanService", "SetFanSpeed", () => _fanController.SetFanSpeed(percent));
@@ -1349,6 +1405,13 @@ namespace OmenCore.Services
 
         private bool SetFanSpeedsSerialized(int cpuPercent, int gpuPercent)
         {
+            if (DesktopFanWritesBlocked)
+            {
+                RecordFanCommand("SetFanSpeeds", $"CPU {cpuPercent}% / GPU {gpuPercent}%", false, DesktopFanWriteBlockedMessage);
+                _logging.Warn(DesktopFanWriteBlockedMessage);
+                return false;
+            }
+
             lock (_fanWriteLock)
             {
                 return _ecOperationCoordinator.Execute("FanService", "SetFanSpeeds", () => _fanController.SetFanSpeeds(cpuPercent, gpuPercent));
@@ -1357,6 +1420,13 @@ namespace OmenCore.Services
 
         private bool ApplyPresetSerialized(FanPreset preset)
         {
+            if (DesktopFanWritesBlocked)
+            {
+                RecordFanCommand("ApplyPreset", preset.Name, false, DesktopFanWriteBlockedMessage);
+                _logging.Warn(DesktopFanWriteBlockedMessage);
+                return false;
+            }
+
             lock (_fanWriteLock)
             {
                 return _ecOperationCoordinator.Execute("FanService", "ApplyPreset", () => _fanController.ApplyPreset(preset));
@@ -1365,6 +1435,13 @@ namespace OmenCore.Services
 
         private bool ApplyCustomCurveSerialized(List<FanCurvePoint> curve)
         {
+            if (DesktopFanWritesBlocked)
+            {
+                RecordFanCommand("ApplyCustomCurve", $"{curve.Count} point(s)", false, DesktopFanWriteBlockedMessage);
+                _logging.Warn(DesktopFanWriteBlockedMessage);
+                return false;
+            }
+
             lock (_fanWriteLock)
             {
                 return _ecOperationCoordinator.Execute("FanService", "ApplyCustomCurve", () => _fanController.ApplyCustomCurve(curve));
@@ -1373,6 +1450,13 @@ namespace OmenCore.Services
 
         private void ApplyMaxCoolingSerialized()
         {
+            if (DesktopFanWritesBlocked)
+            {
+                RecordFanCommand("ApplyMaxCooling", "Max", false, DesktopFanWriteBlockedMessage);
+                _logging.Warn(DesktopFanWriteBlockedMessage);
+                return;
+            }
+
             lock (_fanWriteLock)
             {
                 _ecOperationCoordinator.Execute("FanService", "ApplyMaxCooling", () => _fanController.ApplyMaxCooling());
@@ -1381,6 +1465,13 @@ namespace OmenCore.Services
 
         private void ApplyAutoModeSerialized()
         {
+            if (DesktopFanWritesBlocked)
+            {
+                RecordFanCommand("ApplyAutoMode", "Auto", false, DesktopFanWriteBlockedMessage);
+                _logging.Warn(DesktopFanWriteBlockedMessage);
+                return;
+            }
+
             lock (_fanWriteLock)
             {
                 _ecOperationCoordinator.Execute("FanService", "ApplyAutoMode", () => _fanController.ApplyAutoMode());
@@ -1389,6 +1480,13 @@ namespace OmenCore.Services
 
         private void ApplyQuietModeSerialized()
         {
+            if (DesktopFanWritesBlocked)
+            {
+                RecordFanCommand("ApplyQuietMode", "Quiet", false, DesktopFanWriteBlockedMessage);
+                _logging.Warn(DesktopFanWriteBlockedMessage);
+                return;
+            }
+
             lock (_fanWriteLock)
             {
                 _ecOperationCoordinator.Execute("FanService", "ApplyQuietMode", () => _fanController.ApplyQuietMode());
@@ -1397,6 +1495,13 @@ namespace OmenCore.Services
 
         private bool RestoreAutoControlSerialized()
         {
+            if (DesktopFanWritesBlocked)
+            {
+                RecordFanCommand("RestoreAutoControl", "BIOS auto", false, DesktopFanWriteBlockedMessage);
+                _logging.Warn(DesktopFanWriteBlockedMessage);
+                return false;
+            }
+
             lock (_fanWriteLock)
             {
                 return _ecOperationCoordinator.Execute("FanService", "RestoreAutoControl", () => _fanController.RestoreAutoControl());
@@ -2060,6 +2165,7 @@ namespace OmenCore.Services
                 _pendingFanPercent = -1;
                 _lastCurveUpdate = now;
                 _lastCurveForceRefresh = now;
+                MarkCurveWrite(now);
             }
 
             return success;
@@ -2087,10 +2193,11 @@ namespace OmenCore.Services
             var now = DateTime.Now;
             var timeSinceLastUpdate = (now - _lastCurveUpdate).TotalMilliseconds;
             var timeSinceForceRefresh = (now - _lastCurveForceRefresh).TotalMilliseconds;
+            var forceRefreshIntervalMs = ConservativeLegacyFanPolicy ? ConservativeCurveForceRefreshMs : CurveForceRefreshMs;
             
             // Check if we need to force a refresh (re-apply even if unchanged)
             // This combats BIOS countdown timer that may reset fan control
-            bool forceRefresh = timeSinceForceRefresh >= CurveForceRefreshMs;
+            bool forceRefresh = timeSinceForceRefresh >= forceRefreshIntervalMs;
             
             if (timeSinceLastUpdate < CurveUpdateIntervalMs && !forceRefresh && !immediate)
                 return Task.CompletedTask;
@@ -2130,6 +2237,7 @@ namespace OmenCore.Services
                             _lastHysteresisTemp = maxTemp;
                             _pendingFanPercent = -1;
                             _lastCurveUpdate = now;
+                            MarkCurveWrite(now);
                             _logging.Info($"Immediate curve applied: {targetFanPercent}% @ {maxTemp:F1}°C (GPU boost: {_gpuPowerBoostLevel})");
                         }
 
@@ -2138,6 +2246,13 @@ namespace OmenCore.Services
 
                     if (TryApplyCurveZeroRpmWakeKick((int)Math.Round(targetFanPercent), maxTemp, now))
                     {
+                        return Task.CompletedTask;
+                    }
+
+                    var roundedTargetFanPercent = (int)Math.Round(targetFanPercent);
+                    if (ShouldSkipConservativeCurveWrite(roundedTargetFanPercent, now, forceRefresh, immediate))
+                    {
+                        _lastCurveUpdate = now;
                         return Task.CompletedTask;
                     }
 
@@ -2194,6 +2309,7 @@ namespace OmenCore.Services
                                 _lastAppliedFanPercent = (int)targetFanPercent;
                                 _lastHysteresisTemp = maxTemp;
                                 _pendingFanPercent = -1;
+                                MarkCurveWrite(now);
                                 
                                 if (forceRefresh)
                                 {
@@ -2215,6 +2331,7 @@ namespace OmenCore.Services
                             // Ramp to the new target asynchronously so we don't block the monitor loop
                             var cancellationToken = CancellationToken.None;
                             _ = RampFanToPercentAsync((int)targetFanPercent, cancellationToken);
+                            MarkCurveWrite(now);
                             _lastHysteresisTemp = maxTemp;
                         }
                     }
@@ -2269,13 +2386,14 @@ namespace OmenCore.Services
                     }
                     
                     // Apply using the dual fan speed method
-                    if (_fanController is WmiFanController wmiFanController)
+                    if (_fanController is WmiFanController)
                     {
-                        if (wmiFanController.SetFanSpeeds(cpuFanPercent, gpuFanPercent))
+                        if (SetFanSpeedsSerialized(cpuFanPercent, gpuFanPercent))
                         {
                             _lastAppliedCpuFanPercent = cpuFanPercent;
                             _lastAppliedGpuFanPercent = gpuFanPercent;
                             _lastCurveUpdate = now;
+                            MarkCurveWrite(now);
                             
                             if (forceRefresh)
                             {
@@ -2564,6 +2682,13 @@ namespace OmenCore.Services
             _logging.Info("═══════════════════════════════════════════════════");
             _logging.Info("FanService: Initiating EC Reset to Defaults...");
             _logging.Info("═══════════════════════════════════════════════════");
+
+            if (DesktopFanWritesBlocked)
+            {
+                RecordFanCommand("ResetEcToDefaults", "EC factory defaults", false, DesktopFanWriteBlockedMessage);
+                _logging.Warn(DesktopFanWriteBlockedMessage);
+                return false;
+            }
             
             // First, disable any active fan curve
             DisableCurve();
@@ -2703,7 +2828,7 @@ namespace OmenCore.Services
             // This returns fans to BIOS/Windows default control instead of staying at last manual setting
             try
             {
-                if (_fanController.IsAvailable)
+                if (FanWritesAvailable)
                 {
                     // Use full EC reset which is more thorough than RestoreAutoControl
                     // This resets fan state, timer, and BIOS control registers
@@ -2727,7 +2852,9 @@ namespace OmenCore.Services
                 }
                 else
                 {
-                    _logging.Info("FanService disposed (fan controller not available, no auto-control restoration)");
+                    _logging.Info(DesktopFanWritesBlocked
+                        ? "FanService disposed (desktop fan writes blocked, no auto-control restoration)"
+                        : "FanService disposed (fan controller not available, no auto-control restoration)");
                 }
             }
             catch (Exception ex)

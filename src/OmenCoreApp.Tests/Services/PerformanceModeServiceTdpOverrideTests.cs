@@ -47,10 +47,15 @@ namespace OmenCoreApp.Tests.Services
             public string Status => "ok";
             public string Backend => "WMI BIOS";
             public int SetPerformanceModeCallCount { get; private set; }
+            public int ApplyCustomCurveCallCount { get; private set; }
             public string? LastPerformanceModeName { get; private set; }
 
             public bool ApplyPreset(FanPreset preset) => false;
-            public bool ApplyCustomCurve(IEnumerable<FanCurvePoint> curve) => false;
+            public bool ApplyCustomCurve(IEnumerable<FanCurvePoint> curve)
+            {
+                ApplyCustomCurveCallCount++;
+                return true;
+            }
             public bool SetFanSpeed(int percent) => false;
             public bool SetFanSpeeds(int cpu, int gpu) => false;
             public bool SetMaxFanSpeed(bool enabled) => false;
@@ -346,6 +351,56 @@ namespace OmenCoreApp.Tests.Services
         }
 
         // ─── aliases ("Extreme", "Turbo") map to Performance overrides ───────────────
+
+        [Fact]
+        public void Apply_LinkEnabled_DoesNotWriteFanPolicy_WhenModelBlocksFanControl()
+        {
+            var fan = new RecordingWmiFanController();
+            var desktopCaps = new ModelCapabilities
+            {
+                Family = OmenModelFamily.Desktop,
+                SupportsFanControlWmi = false,
+                SupportsFanControlEc = false
+            };
+            var service = BuildService(fan, desktopCaps);
+
+            service.LinkFanToPerformanceMode = true;
+            service.Apply(new PerformanceMode
+            {
+                Name = "Performance",
+                CpuPowerLimitWatts = 0,
+                GpuPowerLimitWatts = 0
+            });
+
+            fan.SetPerformanceModeCallCount.Should().Be(0);
+            fan.ApplyCustomCurveCallCount.Should().Be(0);
+            service.ControlCapabilityDescription.Should().NotContain("Fan Policy");
+        }
+
+        [Fact]
+        public void Apply_LegacyWmiThermalFallback_DoesNotWriteFanPolicy_WhenModelBlocksFanControl()
+        {
+            var fan = new RecordingWmiFanController();
+            var desktopCaps = new ModelCapabilities
+            {
+                Family = OmenModelFamily.Desktop,
+                SupportsFanControlWmi = false,
+                SupportsFanControlEc = false
+            };
+            var service = BuildService(fan, desktopCaps);
+
+            service.LinkFanToPerformanceMode = false;
+            service.AllowDecoupledWmiThermalPolicyFallback = true;
+            service.Apply(new PerformanceMode
+            {
+                Name = "Performance",
+                CpuPowerLimitWatts = 0,
+                GpuPowerLimitWatts = 0
+            });
+
+            fan.SetPerformanceModeCallCount.Should().Be(0);
+            fan.ApplyCustomCurveCallCount.Should().Be(0);
+        }
 
         [Theory]
         [InlineData("extreme")]

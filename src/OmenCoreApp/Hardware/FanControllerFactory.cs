@@ -205,6 +205,13 @@ namespace OmenCore.Hardware
         /// </summary>
         private IFanController CreateFromCapabilities()
         {
+            if (_capabilities!.FanWritesBlockedForSafety)
+            {
+                ActiveBackend = "Monitoring Only";
+                _logging?.Warn("Desktop fan writes disabled by v3.6.3 safety gate - using monitoring-only fan controller");
+                return new FallbackFanController(_libreHwMonitor, _logging);
+            }
+
             switch (_capabilities!.FanControl)
             {
                 case FanControlMethod.OghProxy:
@@ -360,9 +367,22 @@ namespace OmenCore.Hardware
         {
             try
             {
-                var controller = new WmiFanController(_libreHwMonitor!, _logging, _maxFanLevelOverride, ecAccess: _ecAccess);
+                var conservativeWmiProfile = _capabilities?.ModelConfig != null &&
+                    (!_capabilities.ModelConfig.SupportsFanControlEc || !_capabilities.ModelConfig.UserVerified);
+                var controller = new WmiFanController(
+                    _libreHwMonitor!,
+                    _logging,
+                    _maxFanLevelOverride,
+                    ecAccess: _ecAccess,
+                    strictFanModeReadback: !conservativeWmiProfile,
+                    allowV1AutoModeFloorClear: !conservativeWmiProfile);
                 if (controller.IsAvailable)
                 {
+                    if (conservativeWmiProfile)
+                    {
+                        _logging?.Info("WMI fan controller using conservative handoff policy (non-strict EC readback, no V1 manual-zero floor clear)");
+                    }
+
                     return new WmiFanControllerWrapper(controller, _logging);
                 }
                 controller.Dispose();

@@ -16,6 +16,7 @@ namespace OmenCoreApp.Tests.Hardware
             caps.SupportsFanControlWmi.Should().BeTrue();
             caps.SupportsFanControlEc.Should().BeFalse();
             caps.FanZoneCount.Should().Be(2);
+            caps.HasPerKeyRgb.Should().BeTrue();
         }
 
         [Theory]
@@ -28,6 +29,7 @@ namespace OmenCoreApp.Tests.Hardware
         [InlineData("8E41", OmenModelFamily.Transcend)]
         [InlineData("8D87", OmenModelFamily.OMEN2024Plus)]
         [InlineData("8787", OmenModelFamily.Legacy)]
+        [InlineData("88D2", OmenModelFamily.Legacy)]
         public void GetCapabilities_Returns_NewlyAdded_ModelEntries(string productId, OmenModelFamily expectedFamily)
         {
             var caps = ModelCapabilityDatabase.GetCapabilities(productId);
@@ -76,6 +78,43 @@ namespace OmenCoreApp.Tests.Hardware
             caps.SupportsFanControlEc.Should().BeFalse();
             caps.SupportsRpmReadback.Should().BeFalse("GitHub #120 reports accepted fan commands but 0 RPM readback");
             caps.MaxFanLevel.Should().Be(55);
+        }
+
+        [Fact]
+        public void GetPreferredCapabilities_88D2_Omen15zEn100_UsesConservativeLegacyProfile()
+        {
+            var caps = ModelCapabilityDatabase.GetPreferredCapabilities("88D2", "OMEN by HP Laptop 15z-en100");
+
+            caps.Should().NotBeNull();
+            caps!.ProductId.Should().Be("88D2");
+            caps.ModelName.Should().Contain("15z-en100");
+            caps.Family.Should().Be(OmenModelFamily.Legacy);
+            caps.SupportsFanControlWmi.Should().BeTrue();
+            caps.SupportsFanControlEc.Should().BeFalse();
+            caps.SupportsIndependentFanCurves.Should().BeFalse();
+            caps.MaxFanLevel.Should().Be(55);
+            caps.SupportsGpuPowerBoost.Should().BeFalse();
+            caps.SupportsUndervolt.Should().BeFalse();
+            caps.UserVerified.Should().BeFalse();
+        }
+
+        [Theory]
+        [InlineData("DESKTOP-25L")]
+        [InlineData("DESKTOP-30L")]
+        [InlineData("DESKTOP-35L")]
+        [InlineData("DESKTOP-40L")]
+        [InlineData("DESKTOP-45L")]
+        public void GetCapabilities_DesktopProfiles_DisableFanWritesForSafetyGate(string productId)
+        {
+            var caps = ModelCapabilityDatabase.GetCapabilities(productId);
+
+            caps.Family.Should().Be(OmenModelFamily.Desktop);
+            caps.SupportsFanControlWmi.Should().BeFalse();
+            caps.SupportsFanControlEc.Should().BeFalse();
+            caps.SupportsFanCurves.Should().BeFalse();
+            caps.SupportsRpmReadback.Should().BeTrue();
+            caps.SupportsPerformanceModes.Should().BeTrue();
+            caps.Notes.Should().Contain("v3.6.3 safety gate");
         }
 
         [Fact]
@@ -143,13 +182,17 @@ namespace OmenCoreApp.Tests.Hardware
         }
 
         [Fact]
-        public void GetPreferredCapabilities_8D2F_StillUsesExactAmdProfile()
+        public void GetPreferredCapabilities_8D2F_UsesSharedConservativeAm0Profile()
         {
             var caps = ModelCapabilityDatabase.GetPreferredCapabilities("8D2F", "OMEN Gaming Laptop 16-am0xxx");
 
             caps.Should().NotBeNull();
             caps!.ProductId.Should().Be("8D2F");
-            caps.ModelName.Should().Contain("AMD");
+            caps.ModelName.Should().Contain("shared");
+            caps.SupportsFanControlWmi.Should().BeTrue();
+            caps.SupportsFanControlEc.Should().BeFalse();
+            caps.SupportsIndependentFanCurves.Should().BeFalse();
+            caps.SupportsUndervolt.Should().BeFalse();
         }
 
         [Fact]

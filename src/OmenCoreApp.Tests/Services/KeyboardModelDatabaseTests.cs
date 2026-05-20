@@ -94,6 +94,16 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public void GetConfigByModelName_ReturnsPerKeyConfig_ForOmenMaxAk0003nr()
+        {
+            var cfg = KeyboardModelDatabase.GetConfigByModelName("OMEN MAX 16 ak0003nr");
+
+            cfg.Should().NotBeNull();
+            cfg!.KeyboardType.Should().Be(KeyboardType.PerKeyRgb);
+            cfg.PreferredMethod.Should().Be(KeyboardMethod.HidPerKey);
+        }
+
+        [Fact]
         public void GetConfig_ReturnsConfig_For_ProductId_8E35()
         {
             var cfg = KeyboardModelDatabase.GetConfig("8E35");

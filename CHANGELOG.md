@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.6.3] - 2026-05-19 - Safety and Stability Hotfix Rollup
+
+### Development Status
+
+- Version metadata corrected to `3.6.3` across the Windows app, hardware worker, Linux CLI, Avalonia GUI, installer, and `VERSION.txt`.
+- Rolling hotfix changelog: [docs/CHANGELOG_v3.6.3.md](docs/CHANGELOG_v3.6.3.md).
+- Current focus: post-v3.6.2 field reports covering desktop fan-write safety, conservative WMI fan handoff, OSD startup reliability, model identity corrections, UI polish, and runtime CPU/RAM overhead.
+
+---
+
 ## [3.6.0] - 2026-05-10 - Lightweight Resource Usage and Reliability Follow-up
 
 ### Development Status

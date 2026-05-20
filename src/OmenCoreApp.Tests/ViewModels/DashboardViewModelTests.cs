@@ -101,5 +101,42 @@ namespace OmenCoreApp.Tests.ViewModels
                 logging.Dispose();
             }
         }
+
+        [Fact]
+        public void SetTelemetryProjectionEnabled_DisablesUptimeTimerDuringDormancy()
+        {
+            var tmp = Path.Combine(Path.GetTempPath(), "OmenCoreTests", Guid.NewGuid().ToString());
+            Directory.CreateDirectory(tmp);
+            Environment.SetEnvironmentVariable("OMENCORE_CONFIG_DIR", tmp);
+
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            try
+            {
+                var monitoring = new HardwareMonitoringService(
+                    new MonitoringBridgeStub(),
+                    logging,
+                    new MonitoringPreferences(),
+                    new ResumeRecoveryDiagnosticsService());
+                using var vm = new DashboardViewModel(monitoring);
+
+                var timerField = typeof(DashboardViewModel).GetField("_uptimeTimer", BindingFlags.Instance | BindingFlags.NonPublic);
+                timerField.Should().NotBeNull();
+
+                var timer = (System.Windows.Threading.DispatcherTimer)timerField!.GetValue(vm)!;
+                timer.IsEnabled.Should().BeTrue();
+
+                vm.SetTelemetryProjectionEnabled(false);
+                timer.IsEnabled.Should().BeFalse("dormant dashboard projection should not keep a dispatcher timer alive");
+
+                vm.SetTelemetryProjectionEnabled(true);
+                timer.IsEnabled.Should().BeTrue("visible dashboard projection should resume live uptime labels");
+            }
+            finally
+            {
+                logging.Dispose();
+            }
+        }
     }
 }

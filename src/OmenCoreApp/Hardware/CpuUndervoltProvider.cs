@@ -230,7 +230,7 @@ namespace OmenCore.Hardware
             }
             else if (!canReadMsr)
             {
-                status.Warning = "Cannot verify applied voltage offsets (WinRing0 unavailable). Showing last requested values.";
+                status.Warning = "Cannot verify applied voltage offsets because the MSR backend is unavailable. Showing last requested values.";
             }
 
             return Task.FromResult(status);

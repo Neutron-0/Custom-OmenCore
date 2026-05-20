@@ -25,6 +25,8 @@ namespace OmenCore.Hardware
         private readonly IEcAccess? _ecAccess;
         private readonly LibreHardwareMonitorImpl? _hwMonitor;
         private readonly LoggingService? _logging;
+        private readonly bool _strictFanModeReadback;
+        private readonly bool _allowV1AutoModeFloorClear;
         private bool _disposed;
 
         // Manual fan control state
@@ -152,12 +154,16 @@ namespace OmenCore.Hardware
             LoggingService? logging = null,
             int maxFanLevelOverride = 0,
             IHpWmiBios? injectedWmiBios = null,
-            IEcAccess? ecAccess = null)
+            IEcAccess? ecAccess = null,
+            bool strictFanModeReadback = true,
+            bool allowV1AutoModeFloorClear = true)
         {
             _hwMonitor = hwMonitor;
             _logging = logging;
             _wmiBios = injectedWmiBios ?? new HpWmiBios(logging);
             _ecAccess = ecAccess;
+            _strictFanModeReadback = strictFanModeReadback;
+            _allowV1AutoModeFloorClear = allowV1AutoModeFloorClear;
             
             // Apply user override if set, then read the (possibly overridden) max level
             if (maxFanLevelOverride > 0 && _wmiBios is HpWmiBios concrete)
@@ -1765,6 +1771,12 @@ namespace OmenCore.Hardware
 
             var actualText = lastRead.HasValue ? $"0x{lastRead.Value:X2}" : "n/a";
             _logging?.Warn($"Fan mode readback mismatch for {operation}: expected EC[0x{EcFanModeRegister:X2}]=0x{expected:X2}, got {actualText}");
+            if (!_strictFanModeReadback)
+            {
+                _logging?.Warn($"Fan mode readback mismatch ignored for {operation}; model profile does not allow direct EC fan-mode verification");
+                return true;
+            }
+
             return false;
         }
 
@@ -1773,6 +1785,12 @@ namespace OmenCore.Hardware
             if (_maxFanLevel >= 100)
             {
                 _logging?.Info("  V2 auto-mode handoff: skipped SetFanLevel(0, 0); percentage-scale firmware uses SetFanMode(Default) only");
+                return;
+            }
+
+            if (!_allowV1AutoModeFloorClear)
+            {
+                _logging?.Info($"  V1 auto-mode handoff: skipped SetFanLevel(0, 0) during {context}; conservative WMI profile avoids manual-zero fan stops");
                 return;
             }
 

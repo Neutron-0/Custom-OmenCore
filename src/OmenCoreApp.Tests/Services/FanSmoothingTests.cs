@@ -209,6 +209,99 @@ namespace OmenCoreApp.Tests.Services
             logging.Dispose();
         }
 
+        [Fact]
+        public async Task ConservativeLegacyProfile_SuppressesSmallCurveTargetChanges()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var controller = new RecordingFanController();
+            var thermalProvider = new OmenCore.Hardware.ThermalSensorProvider(new OmenCore.Hardware.LibreHardwareMonitorImpl());
+            var notificationService = new NotificationService(logging);
+            var capabilities = new OmenCore.Hardware.DeviceCapabilities
+            {
+                ProductId = "88D2",
+                Chassis = OmenCore.Hardware.ChassisType.Laptop,
+                ModelFamily = OmenCore.Hardware.OmenModelFamily.Legacy,
+                ModelConfig = new OmenCore.Hardware.ModelCapabilities
+                {
+                    ProductId = "88D2",
+                    Family = OmenCore.Hardware.OmenModelFamily.Legacy,
+                    UserVerified = false,
+                    SupportsFanControlEc = false
+                }
+            };
+
+            var fanService = new FanService(controller, thermalProvider, logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService(), capabilities: capabilities);
+            fanService.SetHysteresis(new FanHysteresisSettings { Enabled = false });
+            fanService.SetSmoothingSettings(new FanTransitionSettings { EnableSmoothing = false });
+
+            var curve = new List<FanCurvePoint>
+            {
+                new FanCurvePoint { TemperatureC = 40, FanPercent = 30 },
+                new FanCurvePoint { TemperatureC = 70, FanPercent = 60 }
+            };
+
+            fanService.ApplyCustomCurve(curve, immediate: false);
+            await fanService.ForceApplyCurveNowAsync(cpuTemp: 60, gpuTemp: 0, immediate: true);
+            controller.SetCalls.Should().Contain(50);
+
+            controller.SetCalls.Clear();
+            SetPrivateField(fanService, "_lastCurveUpdate", DateTime.Now.AddSeconds(-10));
+            SetPrivateField(fanService, "_lastCurveForceRefresh", DateTime.Now);
+
+            await fanService.ForceApplyCurveNowAsync(cpuTemp: 62, gpuTemp: 0, immediate: false);
+
+            controller.SetCalls.Should().BeEmpty("88D2 conservative policy should avoid tiny curve deltas that cause fan hunting");
+            logging.Dispose();
+        }
+
+        [Fact]
+        public async Task NonConservativeProfile_AllowsSmallCurveTargetChanges()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var controller = new RecordingFanController();
+            var thermalProvider = new OmenCore.Hardware.ThermalSensorProvider(new OmenCore.Hardware.LibreHardwareMonitorImpl());
+            var notificationService = new NotificationService(logging);
+            var capabilities = new OmenCore.Hardware.DeviceCapabilities
+            {
+                ProductId = "8C76",
+                Chassis = OmenCore.Hardware.ChassisType.Laptop,
+                ModelFamily = OmenCore.Hardware.OmenModelFamily.OMEN16,
+                ModelConfig = new OmenCore.Hardware.ModelCapabilities
+                {
+                    ProductId = "8C76",
+                    Family = OmenCore.Hardware.OmenModelFamily.OMEN16,
+                    UserVerified = false,
+                    SupportsFanControlEc = false
+                }
+            };
+
+            var fanService = new FanService(controller, thermalProvider, logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService(), capabilities: capabilities);
+            fanService.SetHysteresis(new FanHysteresisSettings { Enabled = false });
+            fanService.SetSmoothingSettings(new FanTransitionSettings { EnableSmoothing = false });
+
+            var curve = new List<FanCurvePoint>
+            {
+                new FanCurvePoint { TemperatureC = 40, FanPercent = 30 },
+                new FanCurvePoint { TemperatureC = 70, FanPercent = 60 }
+            };
+
+            fanService.ApplyCustomCurve(curve, immediate: false);
+            await fanService.ForceApplyCurveNowAsync(cpuTemp: 60, gpuTemp: 0, immediate: true);
+
+            controller.SetCalls.Clear();
+            SetPrivateField(fanService, "_lastCurveUpdate", DateTime.Now.AddSeconds(-10));
+            SetPrivateField(fanService, "_lastCurveForceRefresh", DateTime.Now);
+
+            await fanService.ForceApplyCurveNowAsync(cpuTemp: 62, gpuTemp: 0, immediate: false);
+
+            controller.SetCalls.Should().Contain(52);
+            logging.Dispose();
+        }
+
         private static void SetPrivateField<T>(object target, string fieldName, T value)
         {
             var field = target.GetType().GetField(

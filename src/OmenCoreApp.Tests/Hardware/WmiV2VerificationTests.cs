@@ -640,6 +640,23 @@ namespace OmenCoreApp.Tests.Hardware
         }
 
         [Fact]
+        public void SetPerformanceMode_WhenReadbackNonStrict_IgnoresEcMismatch()
+        {
+            var fake = new ModeCaptureFakeWmiBios();
+            var ec = new FanModeReadbackEcAccess(0x30);
+            var controller = new WmiFanController(
+                null,
+                null,
+                0,
+                injectedWmiBios: fake,
+                ecAccess: ec,
+                strictFanModeReadback: false);
+
+            controller.SetPerformanceMode("Performance").Should().BeTrue(
+                "WMI-only/conservative profiles should not reject WMI fan commands using unsupported EC fan-mode readback");
+        }
+
+        [Fact]
         public void ApplyPreset_V1AutoHandoff_ClearsManualFloorAfterTransitionKick()
         {
             var fake = new V1AutoHandoffFakeWmiBios();
@@ -652,6 +669,26 @@ namespace OmenCoreApp.Tests.Hardware
                 "V1 firmware needs a transition hint when leaving Performance");
             fake.SetFanLevelCalls.Should().Contain(call => call.fan1 == 0 && call.fan2 == 0,
                 "V1 auto mode should explicitly clear the manual floor so BIOS can idle fans down");
+        }
+
+        [Fact]
+        public void ApplyPreset_V1AutoHandoff_WhenFloorClearDisabled_DoesNotSendManualZero()
+        {
+            var fake = new V1AutoHandoffFakeWmiBios();
+            var controller = new WmiFanController(
+                null,
+                null,
+                0,
+                injectedWmiBios: fake,
+                allowV1AutoModeFloorClear: false);
+
+            controller.SetPerformanceMode("Performance").Should().BeTrue();
+            controller.ApplyPreset(new FanPreset { Name = "Auto", Mode = OmenCore.Models.FanMode.Auto }).Should().BeTrue();
+
+            fake.SetFanLevelCalls.Should().Contain(call => call.fan1 == 20 && call.fan2 == 20,
+                "conservative V1 handoff still keeps the transition hint");
+            fake.SetFanLevelCalls.Should().NotContain(call => call.fan1 == 0 && call.fan2 == 0,
+                "conservative WMI profiles avoid manual-zero writes that can leave Victus fans stopped until emergency thermal protection");
         }
 
         // Fake implementation to simulate V2 BIOS that does not expose RPM but reports fan levels.

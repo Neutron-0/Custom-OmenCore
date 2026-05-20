@@ -34,6 +34,14 @@ namespace OmenCore.Services
         /// </summary>
         public bool AllowDecoupledWmiThermalPolicyFallback { get; set; } = false;
 
+        private bool FanPolicyWritesBlocked =>
+            _modelCapabilities?.Family == OmenModelFamily.Desktop ||
+            (_modelCapabilities != null &&
+             !_modelCapabilities.SupportsFanControlWmi &&
+             !_modelCapabilities.SupportsFanControlEc);
+
+        private bool FanPolicyAvailable => _fanController.IsAvailable && !FanPolicyWritesBlocked;
+
         /// <summary>
         /// Event raised when a performance mode is applied (for UI synchronization).
         /// </summary>
@@ -147,10 +155,10 @@ namespace OmenCore.Services
                 // existing fan presets or curves set by the user are left untouched.
                 if (LinkFanToPerformanceMode)
                 {
-                    if (_fanController.IsAvailable)
+                    if (FanPolicyAvailable)
                     {
                         // Try to set performance mode via WMI BIOS first
-                        if (_fanController.SetPerformanceMode(effectiveMode.Name))
+                        if (SetFanPerformanceModeSerialized(effectiveMode.Name))
                         {
                             _logging.Info($"🌀 Fan mode set to '{effectiveMode.Name}' via {_fanController.Backend}");
                         }
@@ -158,7 +166,7 @@ namespace OmenCore.Services
                         {
                             // Fallback to custom curve
                             var fanPercent = Math.Max(20, effectiveMode.CpuPowerLimitWatts / 2);
-                            _fanController.ApplyCustomCurve(new[]
+                            ApplyLinkedFanCurveSerialized(new[]
                             {
                                 new FanCurvePoint { TemperatureC = 0, FanPercent = fanPercent }
                             });
@@ -179,14 +187,14 @@ namespace OmenCore.Services
                     // fallback for non-auto modes when no valid EC limits exist.
                     var shouldUseWmiThermalPolicyFallback =
                         AllowDecoupledWmiThermalPolicyFallback &&
-                        _fanController.IsAvailable &&
+                        FanPolicyAvailable &&
                         string.Equals(_fanController.Backend, "WMI BIOS", StringComparison.OrdinalIgnoreCase) &&
                         !hasAnyValidEcLimit &&
                         !FanModeNameResolver.IsAutoAlias(effectiveMode.Name);
 
                     if (shouldUseWmiThermalPolicyFallback)
                     {
-                        if (_fanController.SetPerformanceMode(effectiveMode.Name))
+                        if (SetFanPerformanceModeSerialized(effectiveMode.Name))
                         {
                             _logging.Info($"🌀 Applied decoupled WMI thermal policy hold for '{effectiveMode.Name}' because EC power limits are unavailable");
                         }
@@ -228,6 +236,18 @@ namespace OmenCore.Services
                 }
             }
         }
+
+        private bool SetFanPerformanceModeSerialized(string modeName) =>
+            _ecOperationCoordinator.Execute(
+                "PerformanceModeService",
+                "SetFanPerformanceMode",
+                () => _fanController.SetPerformanceMode(modeName));
+
+        private bool ApplyLinkedFanCurveSerialized(IEnumerable<FanCurvePoint> curve) =>
+            _ecOperationCoordinator.Execute(
+                "PerformanceModeService",
+                "ApplyLinkedFanCurve",
+                () => _fanController.ApplyCustomCurve(curve));
 
         /// <summary>
         /// Returns a copy of <paramref name="mode"/> with TDP values overridden by model-specific
@@ -412,7 +432,7 @@ namespace OmenCore.Services
             {
                 var capabilities = new List<string> { "Windows Power Plan" };
                 
-                if (_fanController.IsAvailable)
+                if (FanPolicyAvailable)
                     capabilities.Add("Fan Policy");
                     
                 if (_powerLimitController != null && _powerLimitController.IsAvailable)

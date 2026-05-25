@@ -12,6 +12,8 @@ namespace OmenCore.ViewModels
     /// </summary>
     public class GeneralViewModel : ViewModelBase
     {
+        private static readonly Brush SelectedProfileBorderBrush = CreateSelectedProfileBorderBrush();
+
         private readonly FanService _fanService;
         private readonly PerformanceModeService _performanceModeService;
         private readonly LoggingService _logging;
@@ -23,6 +25,7 @@ namespace OmenCore.ViewModels
         private string _currentPerformanceMode = "Default";
         private string _currentFanMode = "Auto";
         private string _selectedProfile = "Balanced";
+        private bool _isQuietSafetyOverrideActive;
         private double _cpuTemp;
         private double _gpuTemp;
         private int _cpuFanPercent;
@@ -38,6 +41,14 @@ namespace OmenCore.ViewModels
         private double _ramUsedGb;
         private double _ramTotalGb;
         private MonitoringSample? _lastProjectedSample;
+
+        private static Brush CreateSelectedProfileBorderBrush()
+        {
+            var brush = new SolidColorBrush(Color.FromRgb(0xFF, 0x00, 0x5C));
+            brush.Freeze();
+            return brush;
+        }
+
         private DateTime _lastUiProjectionUtc = DateTime.MinValue;
         private bool _telemetryProjectionEnabled = true;
 
@@ -259,31 +270,46 @@ namespace OmenCore.ViewModels
         public bool IsCustomSelected => SelectedProfile == "Custom";
 
         // Border colors for selection highlighting
-        public Brush SelectedProfileBorder_Performance => IsPerformanceSelected ? (Brush)new BrushConverter().ConvertFrom("#FF005C")! : Brushes.Transparent;
-        public Brush SelectedProfileBorder_Balanced => IsBalancedSelected ? (Brush)new BrushConverter().ConvertFrom("#FF005C")! : Brushes.Transparent;
-        public Brush SelectedProfileBorder_Quiet => IsQuietSelected ? (Brush)new BrushConverter().ConvertFrom("#FF005C")! : Brushes.Transparent;
-        public Brush SelectedProfileBorder_Custom => IsCustomSelected ? (Brush)new BrushConverter().ConvertFrom("#FF005C")! : Brushes.Transparent;
+        public Brush SelectedProfileBorder_Performance => IsPerformanceSelected ? SelectedProfileBorderBrush : Brushes.Transparent;
+        public Brush SelectedProfileBorder_Balanced => IsBalancedSelected ? SelectedProfileBorderBrush : Brushes.Transparent;
+        public Brush SelectedProfileBorder_Quiet => IsQuietSelected ? SelectedProfileBorderBrush : Brushes.Transparent;
+        public Brush SelectedProfileBorder_Custom => IsCustomSelected ? SelectedProfileBorderBrush : Brushes.Transparent;
+
+        // v3.7.0: Quiet thermal safety override state
+        public bool IsQuietSafetyOverrideActive
+        {
+            get => _isQuietSafetyOverrideActive;
+            private set
+            {
+                if (_isQuietSafetyOverrideActive == value) return;
+                _isQuietSafetyOverrideActive = value;
+                OnPropertyChanged();
+            }
+        }
+
+        /// <summary>
+        /// Raised when the user clicks the Custom profile card and the profile should
+        /// navigate to the Custom tab for configuration.
+        /// </summary>
+        public event EventHandler? CustomTabNavigationRequested;
 
         #endregion
 
         #region Profile Application Methods
 
         /// <summary>
-        /// Performance profile: maximum power with the bounded Gaming/Extreme cooling curve.
+        /// Performance profile: maximum power with an aggressive cooling curve.
         /// </summary>
         public void ApplyPerformanceProfile()
         {
             try
             {
-                _logging.Info("Applying Performance profile (Max Power + Gaming cooling)");
+                _logging.Info("Applying Performance profile (Max Power + Performance cooling)");
 
                 // Apply Performance mode
                 _performanceModeService.SetPerformanceMode("Performance");
 
-                var coolingPreset = _fanControlViewModel?.FanPresets.FirstOrDefault(p =>
-                    p.Name.Equals("Gaming", StringComparison.OrdinalIgnoreCase) ||
-                    p.Name.Equals("Extreme", StringComparison.OrdinalIgnoreCase))
-                    ?? CreateGamingCoolingPreset();
+                var coolingPreset = CreatePerformanceCoolingPreset();
 
                 var fanApplied = _fanService.ApplyPreset(coolingPreset, immediate: true);
                 if (fanApplied)
@@ -304,21 +330,19 @@ namespace OmenCore.ViewModels
             }
         }
 
-        private static FanPreset CreateGamingCoolingPreset()
+        private static FanPreset CreatePerformanceCoolingPreset()
         {
             return new FanPreset
             {
-                Name = "Gaming",
+                Name = "Performance",
                 Mode = FanMode.Performance,
                 IsBuiltIn = true,
                 Curve = new()
                 {
-                    new FanCurvePoint { TemperatureC = 40, FanPercent = 30 },
-                    new FanCurvePoint { TemperatureC = 50, FanPercent = 42 },
-                    new FanCurvePoint { TemperatureC = 60, FanPercent = 58 },
-                    new FanCurvePoint { TemperatureC = 70, FanPercent = 72 },
-                    new FanCurvePoint { TemperatureC = 80, FanPercent = 88 },
-                    new FanCurvePoint { TemperatureC = 90, FanPercent = 100 }
+                    new FanCurvePoint { TemperatureC = 40, FanPercent = 38 },
+                    new FanCurvePoint { TemperatureC = 50, FanPercent = 52 },
+                    new FanCurvePoint { TemperatureC = 60, FanPercent = 72 },
+                    new FanCurvePoint { TemperatureC = 70, FanPercent = 100 }
                 }
             };
         }
@@ -345,15 +369,21 @@ namespace OmenCore.ViewModels
             {
                 _logging.Info("Applying Balanced profile (Default Power + Auto Cooling)");
 
-                // Apply Default mode
                 _performanceModeService.SetPerformanceMode("Default");
 
-                // Apply Auto fan mode
-                _fanService.ApplyAutoMode();
-                
-                if (string.Equals(_fanService.GetCurrentFanMode(), "Auto", StringComparison.OrdinalIgnoreCase))
+                var coolingPreset = _fanControlViewModel?.FanPresets.FirstOrDefault(p =>
+                    p.Name.Equals("Auto", StringComparison.OrdinalIgnoreCase));
+                var fanApplied = coolingPreset != null
+                    ? _fanService.ApplyPreset(coolingPreset, immediate: true)
+                    : false;
+
+                if (fanApplied)
                 {
                     _fanControlViewModel?.SelectPresetByNameNoApply("Auto");
+                }
+                else
+                {
+                    _fanService.ApplyAutoMode();
                 }
                 
                 // v2.8.6: Sync OMEN tab performance mode display
@@ -378,15 +408,21 @@ namespace OmenCore.ViewModels
             {
                 _logging.Info("Applying Quiet profile (Power Saver + Silent Cooling)");
 
-                // Apply Quiet/PowerSaver mode
                 _performanceModeService.SetPerformanceMode("Quiet");
 
-                // Apply Quiet fan mode
-                _fanService.ApplyQuietMode();
-                
-                if (string.Equals(_fanService.GetCurrentFanMode(), "Quiet", StringComparison.OrdinalIgnoreCase))
+                var coolingPreset = _fanControlViewModel?.FanPresets.FirstOrDefault(p =>
+                    p.Name.Equals("Quiet", StringComparison.OrdinalIgnoreCase));
+                var fanApplied = coolingPreset != null
+                    ? _fanService.ApplyPreset(coolingPreset, immediate: true)
+                    : false;
+
+                if (fanApplied)
                 {
-                    _fanControlViewModel?.SelectPresetByNameNoApply("Auto");
+                    _fanControlViewModel?.SelectPresetByNameNoApply("Quiet");
+                }
+                else
+                {
+                    _fanService.ApplyQuietMode();
                 }
                 
                 // v2.8.6: Sync OMEN tab performance mode display
@@ -403,19 +439,15 @@ namespace OmenCore.ViewModels
         }
 
         /// <summary>
-        /// Custom profile: User-defined settings (redirect to Advanced tab)
+        /// Custom profile: User-defined settings (redirect to Custom tab)
         /// </summary>
         public void ApplyCustomProfile()
         {
             try
             {
-                _logging.Info("Custom profile selected - use Advanced tab for manual control");
-
+                _logging.Info("Custom profile selected — navigating to Custom tab for manual control");
                 SelectedProfile = "Custom";
-                CurrentPerformanceMode = "Custom";
-                CurrentFanMode = "Custom";
-
-                // Note: Actual custom settings are applied via the Advanced tab
+                CustomTabNavigationRequested?.Invoke(this, EventArgs.Empty);
             }
             catch (Exception ex)
             {
@@ -426,6 +458,12 @@ namespace OmenCore.ViewModels
         #endregion
 
         #region Private Methods
+
+        // v3.7.0: Called by MainViewModel to reflect safety override state in UI
+        internal void SetQuietSafetyOverride(bool active)
+        {
+            IsQuietSafetyOverrideActive = active;
+        }
 
         private void LoadCurrentState()
         {

@@ -49,6 +49,7 @@ namespace OmenCore.Services
         public event EventHandler? ToggleFanModeRequested;
         public event EventHandler? ToggleMaxFanRequested;
         public event EventHandler? TogglePerformanceModeRequested;
+        public event EventHandler? TogglePerformanceProfileRequested;
         public event EventHandler? ToggleBoostModeRequested;
         public event EventHandler? ToggleQuietModeRequested;
         public event EventHandler? ShowWindowRequested;
@@ -182,6 +183,9 @@ namespace OmenCore.Services
             
             // Ctrl+Shift+P = Cycle performance modes
             RegisterHotkey(HotkeyAction.TogglePerformanceMode, ModifierKeys.Control | ModifierKeys.Shift, Key.P);
+
+            // Ctrl+Shift+E = Cycle General performance profiles
+            RegisterHotkey(HotkeyAction.TogglePerformanceProfile, ModifierKeys.Control | ModifierKeys.Shift, Key.E);
             
             // Ctrl+Shift+B = Toggle boost mode
             RegisterHotkey(HotkeyAction.ToggleBoostMode, ModifierKeys.Control | ModifierKeys.Shift, Key.B);
@@ -405,6 +409,9 @@ namespace OmenCore.Services
                 case HotkeyAction.TogglePerformanceMode:
                     TogglePerformanceModeRequested?.Invoke(this, EventArgs.Empty);
                     break;
+                case HotkeyAction.TogglePerformanceProfile:
+                    TogglePerformanceProfileRequested?.Invoke(this, EventArgs.Empty);
+                    break;
                 case HotkeyAction.ToggleBoostMode:
                     ToggleBoostModeRequested?.Invoke(this, EventArgs.Empty);
                     break;
@@ -488,6 +495,7 @@ namespace OmenCore.Services
         ToggleFanMode,
         ToggleMaxFan,
         TogglePerformanceMode,
+        TogglePerformanceProfile,
         ToggleBoostMode,
         ToggleQuietMode,
         ShowWindow,

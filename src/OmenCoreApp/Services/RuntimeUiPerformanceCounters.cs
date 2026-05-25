@@ -39,6 +39,10 @@ namespace OmenCore.Services
         private static long _popupRenderCacheHits;
         private static long _popupRenderCacheMisses;
         private static long _latestSampleReplacements;
+        private static long _fanTelemetrySyncs;
+        private static long _fanTelemetryCollectionResizes;
+        private static long _fanTelemetryItemsUpdated;
+        private static long _fanTelemetryPropertyOnlySyncs;
 
         public static void RecordDispatcherBeginInvokePost() => Interlocked.Increment(ref _dispatcherBeginInvokePosts);
         public static void RecordDispatcherInvoke() => Interlocked.Increment(ref _dispatcherInvokes);
@@ -65,6 +69,23 @@ namespace OmenCore.Services
         public static void RecordPopupRenderCacheHit() => Interlocked.Increment(ref _popupRenderCacheHits);
         public static void RecordPopupRenderCacheMiss() => Interlocked.Increment(ref _popupRenderCacheMisses);
         public static void RecordLatestSampleReplacement() => Interlocked.Increment(ref _latestSampleReplacements);
+        public static void RecordFanTelemetrySync(bool collectionResized, int itemsUpdated)
+        {
+            Interlocked.Increment(ref _fanTelemetrySyncs);
+            if (collectionResized)
+            {
+                Interlocked.Increment(ref _fanTelemetryCollectionResizes);
+            }
+            else if (itemsUpdated > 0)
+            {
+                Interlocked.Increment(ref _fanTelemetryPropertyOnlySyncs);
+            }
+
+            if (itemsUpdated > 0)
+            {
+                Interlocked.Add(ref _fanTelemetryItemsUpdated, itemsUpdated);
+            }
+        }
 
         public static RuntimeUiPerformanceCounterSnapshot GetSnapshot()
         {
@@ -92,6 +113,10 @@ namespace OmenCore.Services
             var popupRenderCacheHits = Interlocked.Read(ref _popupRenderCacheHits);
             var popupRenderCacheMisses = Interlocked.Read(ref _popupRenderCacheMisses);
             var latestSampleReplacements = Interlocked.Read(ref _latestSampleReplacements);
+            var fanTelemetrySyncs = Interlocked.Read(ref _fanTelemetrySyncs);
+            var fanTelemetryCollectionResizes = Interlocked.Read(ref _fanTelemetryCollectionResizes);
+            var fanTelemetryItemsUpdated = Interlocked.Read(ref _fanTelemetryItemsUpdated);
+            var fanTelemetryPropertyOnlySyncs = Interlocked.Read(ref _fanTelemetryPropertyOnlySyncs);
 
             return new RuntimeUiPerformanceCounterSnapshot(
                 uptimeSeconds,
@@ -127,8 +152,14 @@ namespace OmenCore.Services
                 popupRenderCacheHits,
                 popupRenderCacheMisses,
                 latestSampleReplacements,
+                fanTelemetrySyncs,
+                fanTelemetryCollectionResizes,
+                fanTelemetryItemsUpdated,
+                fanTelemetryPropertyOnlySyncs,
                 SafeRatio(trayRenderCacheHits, trayRenderCacheHits + trayRenderCacheMisses),
-                SafeRatio(popupRenderCacheHits, popupRenderCacheHits + popupRenderCacheMisses));
+                SafeRatio(popupRenderCacheHits, popupRenderCacheHits + popupRenderCacheMisses),
+                SafeRatio(fanTelemetryCollectionResizes, fanTelemetrySyncs),
+                SafeRatio(fanTelemetryPropertyOnlySyncs, fanTelemetrySyncs));
         }
 
         private static double SafeRatio(long numerator, long denominator)
@@ -161,6 +192,10 @@ namespace OmenCore.Services
                 Interlocked.Exchange(ref _popupRenderCacheHits, 0);
                 Interlocked.Exchange(ref _popupRenderCacheMisses, 0);
                 Interlocked.Exchange(ref _latestSampleReplacements, 0);
+                Interlocked.Exchange(ref _fanTelemetrySyncs, 0);
+                Interlocked.Exchange(ref _fanTelemetryCollectionResizes, 0);
+                Interlocked.Exchange(ref _fanTelemetryItemsUpdated, 0);
+                Interlocked.Exchange(ref _fanTelemetryPropertyOnlySyncs, 0);
             }
         }
     }
@@ -200,6 +235,12 @@ namespace OmenCore.Services
         long PopupRenderCacheHits,
         long PopupRenderCacheMisses,
         long LatestSampleReplacements,
+        long FanTelemetrySyncs,
+        long FanTelemetryCollectionResizes,
+        long FanTelemetryItemsUpdated,
+        long FanTelemetryPropertyOnlySyncs,
         double TrayRenderCacheHitRatio,
-        double PopupRenderCacheHitRatio);
+        double PopupRenderCacheHitRatio,
+        double FanTelemetryCollectionResizeRatio,
+        double FanTelemetryPropertyOnlySyncRatio);
 }

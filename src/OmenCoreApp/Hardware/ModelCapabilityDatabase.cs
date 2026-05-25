@@ -64,6 +64,12 @@ namespace OmenCore.Hardware
         
         /// <summary>Whether OEM performance modes are available.</summary>
         public bool SupportsPerformanceModes { get; set; } = true;
+
+        /// <summary>
+        /// True when this model needs the WMI thermal/performance policy write to hold OEM
+        /// performance behavior if direct EC/MSR power-limit writes are unavailable.
+        /// </summary>
+        public bool AllowDecoupledWmiThermalPolicyFallback { get; set; } = false;
         
         /// <summary>Available performance mode names.</summary>
         public string[] PerformanceModes { get; set; } = new[] { "Default", "Performance", "Cool" };
@@ -243,6 +249,35 @@ namespace OmenCore.Hardware
                 UserVerified = true
             });
 
+            // Discord report (2026-05-23): OMEN 15-dc1077tx / ProductId 8574.
+            // This legacy board reports non-functional WMI BIOS command paths but reliable
+            // EC fan control via PawnIO. Keep RGB conservative (backlight only) until
+            // multi-zone behavior is field-verified for this exact ProductId.
+            AddModel(new ModelCapabilities
+            {
+                ProductId = "8574",
+                ModelName = "OMEN 15-dc1xxx (2019) Intel",
+                ModelNamePattern = "15-dc1",
+                ModelYear = 2019,
+                Family = OmenModelFamily.Legacy,
+                SupportsFanControlWmi = false,
+                SupportsFanControlEc = true,
+                SupportsFanCurves = true,
+                SupportsIndependentFanCurves = true,
+                SupportsRpmReadback = true,
+                FanZoneCount = 2,
+                SupportsPerformanceModes = true,
+                HasMuxSwitch = false,
+                SupportsGpuPowerBoost = true,
+                HasKeyboardBacklight = true,
+                HasFourZoneRgb = false,
+                SupportsUndervolt = true,
+                SupportsTccOffset = false,
+                SupportsPowerLimits = false,
+                UserVerified = false,
+                Notes = "Discord field report - OMEN 15-dc1077tx (ProductId 8574): WMI BIOS command path not functional, EC fan control and PawnIO undervolt runtime available; RGB kept conservative until exact keyboard protocol is verified."
+            });
+
             // GitHub #120: HP OMEN Laptop 15-en0038ur (2020 AMD, Ryzen 7 4800H + RTX 2060)
             // Product/Baseboard ID 8787. Reporter confirmed WMI ColorTable lighting, accepted
             // basic fan commands, MUX, and GPU power controls; fan RPM readback still reports 0.
@@ -395,12 +430,14 @@ namespace OmenCore.Hardware
                 Family = OmenModelFamily.OMEN16,
                 SupportsFanControlWmi = true,
                 SupportsFanCurves = true,
+                FanZoneCount = 2,
+                MaxFanLevel = 60,
                 HasMuxSwitch = true,
                 SupportsGpuPowerBoost = true,
                 SupportsUndervolt = false,
                 HasFourZoneRgb = true,
                 UserVerified = false,
-                Notes = "GitHub #121 — Hades 8A43 exact ProductId profile added to avoid model-name-pattern inference. HP serial lookup reports OMEN Gaming Laptop 16-n0002ni / 6G103EA."
+                Notes = "GitHub #121 / Discord 2026-05-25 — Hades 8A43 exact ProductId profile added to avoid model-name-pattern inference. HP serial lookup reports OMEN Gaming Laptop 16-n0002ni / 6G103EA. Fan diagnostics show practical V1 ceiling near level 60 (GPU ~60, CPU ~58), so max fan level override is set to 60 for safer verification/normalization."
             });
             
             // OMEN 16 (2023) - wf series
@@ -489,14 +526,17 @@ namespace OmenCore.Hardware
                 ModelYear = 2024,
                 Family = OmenModelFamily.OMEN16,
                 SupportsFanControlWmi = true,
+                SupportsFanControlEc = false,
                 SupportsFanCurves = true,
+                SupportsIndependentFanCurves = false,
                 FanZoneCount = 2,
                 MaxFanLevel = 55,
                 SupportsPerformanceModes = true,
                 HasMuxSwitch = true,
                 SupportsGpuPowerBoost = true,
                 HasFourZoneRgb = true,
-                Notes = "2024 AMD model - V1 fan control, MaxFanLevel=55"
+                UserVerified = false,
+                Notes = "Discord 2026-05-20 - OMEN 16-xd0xxx / ProductId 8BCD (Ryzen + RTX 4050). V1 WMI fan control, MaxFanLevel=55; direct EC and independent curves disabled pending register-layout validation. WMI auto-handoff keeps the 8BCD manual-floor clear exception."
             });
             
             // OMEN 16 (2025) - ap0xxx series (AMD Ryzen AI + RTX 50-series)
@@ -553,7 +593,7 @@ namespace OmenCore.Hardware
             AddModel(new ModelCapabilities
             {
                 ProductId = "8D2F",
-                ModelName = "OMEN 16 am0xxx shared AMD/Intel",
+                ModelName = "OMEN 16-am0xxx (8D2F)",
                 ModelYear = 2025,
                 Family = OmenModelFamily.OMEN16,
                 SupportsFanControlWmi = true,
@@ -567,13 +607,14 @@ namespace OmenCore.Hardware
                 SupportsGpuPowerBoost = true,
                 HasFourZoneRgb = true,
                 SupportsUndervolt = false,
-                UserVerified = false,
-                Notes = "GitHub #111 / Discord 2026-05-20 - OMEN Gaming Laptop 16-am0xxx, ProductId 8D2F. ProductId observed on AMD and Intel Core Ultra variants; WMI V1 fan profile retained, direct EC writes disabled, and identity label kept neutral pending field verification.",
+                AllowDecoupledWmiThermalPolicyFallback = true,
+                UserVerified = true,
+                Notes = "GitHub #111 / Discord 2026-05-20 and 2026-05-21 - OMEN Gaming Laptop 16-am0xxx, ProductId 8D2F. Exact board identity confirmed; product ID has appeared across AMD and Intel Core Ultra variants, so direct EC fan writes and independent curves remain disabled. WMI V1 fan/profile control is retained, and WMI thermal-policy fallback is enabled for performance modes when EC/MSR power-limit writes are unavailable.",
             });
 
             // OMEN 16 (2025) - am0xxx Intel Core Ultra H + RTX 50-series
             // GitHub Issue #124: HP Omen 16-am0168ng (Core Ultra 7-255H + RTX 5070)
-            // reports legacy fallback / erratic fans when ProductId is not yet known.
+            // reports broad model fallback / erratic fans when ProductId is not yet known.
             AddModel(new ModelCapabilities
             {
                 ProductId = "am0xxx_intel_2025_unverified",
@@ -592,8 +633,9 @@ namespace OmenCore.Hardware
                 SupportsGpuPowerBoost = true,
                 HasFourZoneRgb = true,
                 SupportsUndervolt = false,
+                AllowDecoupledWmiThermalPolicyFallback = true,
                 UserVerified = false,
-                Notes = "GitHub #124 - OMEN Gaming Laptop 16-am0168ng / 16-am0xxx (Intel Core Ultra 7-255H + RTX 5070). ProductId pending; direct EC writes disabled until real hardware confirms register layout."
+                Notes = "GitHub #124 - OMEN Gaming Laptop 16-am0168ng / 16-am0xxx (Intel Core Ultra 7-255H + RTX 5070). ProductId pending; direct EC writes disabled until real hardware confirms register layout. WMI thermal-policy fallback is enabled for performance modes when direct EC/MSR power-limit writes are unavailable."
             });
 
             // OMEN 16 (2025) - am1xxx series (Intel i9-14900HX + RTX 5070 Ti and similar)
@@ -634,7 +676,7 @@ namespace OmenCore.Hardware
             // OMEN MAX Series (2025+ flagship models)
             // ═══════════════════════════════════════════════════════════════════════════════════
             
-            // OMEN MAX 16 (2025) - ah0xxx series - Intel Core Ultra 9 275HX + RTX 5080
+            // OMEN MAX 16 (2025) - ah0xxx series - Intel Core Ultra 9 275HX + RTX 5080/5090
             // GitHub Issue #61: Model not in database
             // GitHub Issue #60: EC registers have different layout on 2025 Max models!
             // Direct EC access causes EC panic (caps lock blinking) - use WMI only.
@@ -653,20 +695,22 @@ namespace OmenCore.Hardware
                 FanZoneCount = 2,
                 MaxFanLevel = 100,
                 SupportsPerformanceModes = true,
+                AllowDecoupledWmiThermalPolicyFallback = true,
                 PerformanceModes = new[] { "Default", "Performance", "Cool" },
                 HasMuxSwitch = true, // Advanced Optimus / MUX switch available
-                SupportsGpuPowerBoost = true, // RTX 5080 supports extended +25W boost
+                SupportsGpuPowerBoost = true, // RTX 50-series MAX configs support GPU Power Boost/PPAB paths
                 SupportsAdvancedOptimus = true,
                 HasKeyboardBacklight = true,
                 HasFourZoneRgb = true, // 4-zone RGB keyboard
+                HasPerKeyRgb = true,
                 SupportsUndervolt = true, // Intel Core Ultra 9 275HX
                 SupportsOverboost = true,
                 UserVerified = true,
-                Notes = "OMEN MAX Gaming Laptop 16-ah0xxx (2025) - Intel Core Ultra 9 275HX + RTX 5080. " +
+                Notes = "OMEN MAX Gaming Laptop 16-ah0xxx (2025) - Intel Core Ultra 9 275HX + RTX 5080/5090 variants. " +
                        "WARNING: EC registers have completely different layout than legacy OMEN models. " +
                        "Writing to legacy EC addresses (0x34, 0x62, etc.) corrupts EC state and causes " +
                        "caps lock blinking panic. Use WMI/ACPI platform_profile only. " +
-                       "V2 fan commands forced."
+                       "V2 fan commands forced. WMI thermal-policy fallback is enabled so Quick Profiles can hold OEM performance behavior when direct EC/MSR limits report unavailable."
             });
             
             // OMEN MAX 16t (2025) - 16t-ah000 variant - Intel Core Ultra 7 255HX + RTX 5070 Ti
@@ -687,6 +731,7 @@ namespace OmenCore.Hardware
                 FanZoneCount = 2,
                 MaxFanLevel = 100,
                 SupportsPerformanceModes = true,
+                AllowDecoupledWmiThermalPolicyFallback = true,
                 PerformanceModes = new[] { "Default", "Performance", "Cool" },
                 HasMuxSwitch = true,
                 SupportsGpuPowerBoost = true,
@@ -1264,6 +1309,8 @@ namespace OmenCore.Hardware
                     SupportsFanCurves = templateModel.SupportsFanCurves,
                     SupportsIndependentFanCurves = templateModel.SupportsIndependentFanCurves,
                     FanZoneCount = templateModel.FanZoneCount,
+                    SupportsPerformanceModes = templateModel.SupportsPerformanceModes,
+                    AllowDecoupledWmiThermalPolicyFallback = templateModel.AllowDecoupledWmiThermalPolicyFallback,
                     HasMuxSwitch = templateModel.HasMuxSwitch,
                     SupportsGpuPowerBoost = templateModel.SupportsGpuPowerBoost,
                     HasFourZoneRgb = templateModel.HasFourZoneRgb,

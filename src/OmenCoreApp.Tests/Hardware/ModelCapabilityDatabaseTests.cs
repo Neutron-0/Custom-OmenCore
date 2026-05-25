@@ -28,6 +28,7 @@ namespace OmenCoreApp.Tests.Hardware
         [InlineData("8C58", OmenModelFamily.Transcend)]
         [InlineData("8E41", OmenModelFamily.Transcend)]
         [InlineData("8D87", OmenModelFamily.OMEN2024Plus)]
+        [InlineData("8574", OmenModelFamily.Legacy)]
         [InlineData("8787", OmenModelFamily.Legacy)]
         [InlineData("88D2", OmenModelFamily.Legacy)]
         public void GetCapabilities_Returns_NewlyAdded_ModelEntries(string productId, OmenModelFamily expectedFamily)
@@ -66,6 +67,22 @@ namespace OmenCoreApp.Tests.Hardware
         }
 
         [Fact]
+        public void GetCapabilities_8D41_OmenMaxAh0xxx_UsesWmiPolicyFallback()
+        {
+            var caps = ModelCapabilityDatabase.GetCapabilities("8D41");
+
+            caps.ProductId.Should().Be("8D41");
+            caps.ModelName.Should().Contain("ah0xxx");
+            caps.SupportsFanControlWmi.Should().BeTrue();
+            caps.SupportsFanControlEc.Should().BeFalse();
+            caps.SupportsFanCurves.Should().BeFalse();
+            caps.AllowDecoupledWmiThermalPolicyFallback.Should().BeTrue(
+                "8D41 cannot safely use legacy EC power/fan writes, so Quick Profiles need the OEM WMI thermal-policy path when direct limits are unavailable");
+            caps.HasPerKeyRgb.Should().BeTrue();
+            caps.UserVerified.Should().BeTrue();
+        }
+
+        [Fact]
         public void GetCapabilities_8787_Omen15En0038ur_UsesReportedSafeCapabilities()
         {
             var caps = ModelCapabilityDatabase.GetCapabilities("8787");
@@ -78,6 +95,24 @@ namespace OmenCoreApp.Tests.Hardware
             caps.SupportsFanControlEc.Should().BeFalse();
             caps.SupportsRpmReadback.Should().BeFalse("GitHub #120 reports accepted fan commands but 0 RPM readback");
             caps.MaxFanLevel.Should().Be(55);
+        }
+
+        [Fact]
+        public void GetCapabilities_8574_Omen15Dc1xxx_UsesConservativeEcFirstProfile()
+        {
+            var caps = ModelCapabilityDatabase.GetCapabilities("8574");
+
+            caps.ProductId.Should().Be("8574");
+            caps.ModelName.Should().Contain("15-dc1");
+            caps.Family.Should().Be(OmenModelFamily.Legacy);
+            caps.SupportsFanControlWmi.Should().BeFalse();
+            caps.SupportsFanControlEc.Should().BeTrue();
+            caps.SupportsFanCurves.Should().BeTrue();
+            caps.HasKeyboardBacklight.Should().BeTrue();
+            caps.HasFourZoneRgb.Should().BeFalse("RGB capability is held back until this board's protocol is verified");
+            caps.SupportsTccOffset.Should().BeFalse();
+            caps.SupportsPowerLimits.Should().BeFalse();
+            caps.UserVerified.Should().BeFalse();
         }
 
         [Fact]
@@ -179,20 +214,23 @@ namespace OmenCoreApp.Tests.Hardware
             caps.SupportsFanControlWmi.Should().BeTrue();
             caps.SupportsFanControlEc.Should().BeFalse();
             caps.SupportsUndervolt.Should().BeFalse();
+            caps.AllowDecoupledWmiThermalPolicyFallback.Should().BeTrue();
         }
 
         [Fact]
-        public void GetPreferredCapabilities_8D2F_UsesSharedConservativeAm0Profile()
+        public void GetPreferredCapabilities_8D2F_UsesConfirmedConservativeAm0Profile()
         {
             var caps = ModelCapabilityDatabase.GetPreferredCapabilities("8D2F", "OMEN Gaming Laptop 16-am0xxx");
 
             caps.Should().NotBeNull();
             caps!.ProductId.Should().Be("8D2F");
-            caps.ModelName.Should().Contain("shared");
+            caps.ModelName.Should().Contain("16-am0");
             caps.SupportsFanControlWmi.Should().BeTrue();
             caps.SupportsFanControlEc.Should().BeFalse();
             caps.SupportsIndependentFanCurves.Should().BeFalse();
             caps.SupportsUndervolt.Should().BeFalse();
+            caps.AllowDecoupledWmiThermalPolicyFallback.Should().BeTrue();
+            caps.UserVerified.Should().BeTrue("the exact 8D2F board identity has field confirmation, even though risky direct EC features stay disabled");
         }
 
         [Fact]
@@ -202,6 +240,7 @@ namespace OmenCoreApp.Tests.Hardware
 
             caps.Should().NotBeNull();
             caps!.ProductId.Should().Be("8A43");
+            caps.MaxFanLevel.Should().Be(60, "8A43 diagnostics show practical fan-level ceiling near 60 (GPU ~60, CPU ~58)");
             caps.Notes.Should().Contain("16-n0002ni");
             caps.Notes.Should().Contain("6G103EA");
         }
@@ -252,6 +291,21 @@ namespace OmenCoreApp.Tests.Hardware
             caps.SupportsGpuPowerBoost.Should().BeFalse("no power boost proof yet");
             caps.SupportsUndervolt.Should().BeFalse("no undervolt proof yet");
             caps.HasKeyboardBacklight.Should().BeTrue("keyboard backlight expected");
+        }
+
+        [Fact]
+        public void GetCapabilities_8BCD_UsesConservativeWmiV1FanProfile()
+        {
+            var caps = ModelCapabilityDatabase.GetPreferredCapabilities("8BCD", "OMEN by HP Gaming Laptop 16-xd0xxx");
+
+            caps.Should().NotBeNull();
+            caps!.ProductId.Should().Be("8BCD");
+            caps.SupportsFanControlWmi.Should().BeTrue();
+            caps.SupportsFanControlEc.Should().BeFalse("8BCD field evidence points at V1 WMI fan control, not validated direct EC fan writes");
+            caps.SupportsIndependentFanCurves.Should().BeFalse("independent curve UI requires validated independent fan ownership");
+            caps.MaxFanLevel.Should().Be(55);
+            caps.UserVerified.Should().BeFalse("2026-05-20 Discord report still needs physical follow-up after the 3.7.0 fixes");
+            caps.Notes.Should().Contain("2026-05-20");
         }
     }
 }

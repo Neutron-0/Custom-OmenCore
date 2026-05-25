@@ -1,9 +1,14 @@
 using System;
 using System.Collections.ObjectModel;
+using System.Collections.Generic;
+using System.Collections.Specialized;
+using System.ComponentModel;
 using System.Linq;
+using System.Windows.Input;
 using System.Windows.Threading;
 using OmenCore.Models;
 using OmenCore.Services;
+using OmenCore.Utils;
 
 namespace OmenCore.ViewModels
 {
@@ -16,6 +21,8 @@ namespace OmenCore.ViewModels
         private const double UiProjectionLoadDelta = 2.0;
         private const double UiProjectionPowerDelta = 1.0;
         private const int UiProjectionFanRpmDelta = 120;
+        private const string CelsiusSuffix = "\u00B0C";
+        private const string MissingTemperatureDisplay = "--\u00B0C";
 
         /// <summary>Time range options in minutes for the graph time-range selector.</summary>
         public static readonly int[] TimeRangeOptions = { 1, 5, 15, 30 };
@@ -23,6 +30,7 @@ namespace OmenCore.ViewModels
         private readonly HardwareMonitoringService _monitoringService;
         private readonly FanService? _fanService;
         private readonly RuntimePollingCoordinator? _pollingCoordinator;
+        private readonly HashSet<FanTelemetry> _subscribedFanTelemetry = new();
         private readonly ObservableCollection<ThermalSample> _thermalSamples = new();
         private readonly ObservableCollection<ThermalSample> _filteredThermalSamples = new();
         private int _timeRangeMinutes = 5;
@@ -33,6 +41,7 @@ namespace OmenCore.ViewModels
         private string _modeLinkStatus = "Decoupled fan/perf";
         private bool _disposed;
         private volatile bool _pendingUIUpdate; // Throttle BeginInvoke backlog
+        private volatile bool _pendingFanTelemetryUIUpdate;
         private bool _telemetryProjectionEnabled = true;
         private readonly object _sampleUpdateLock = new();
         private MonitoringSample? _queuedSample;
@@ -184,20 +193,31 @@ namespace OmenCore.ViewModels
                 OnPropertyChanged(nameof(GpuTemperature));
                 OnPropertyChanged(nameof(CpuTempDisplay));
                 OnPropertyChanged(nameof(GpuTempDisplay));
+                OnPropertyChanged(nameof(CpuTempChipDisplay));
+                OnPropertyChanged(nameof(GpuTempChipDisplay));
+                OnPropertyChanged(nameof(SsdTempDisplay));
                 OnPropertyChanged(nameof(IsCpuTempAvailable));
                 OnPropertyChanged(nameof(IsGpuTempAvailable));
                 OnPropertyChanged(nameof(CpuSummary));
                 OnPropertyChanged(nameof(GpuSummary));
                 OnPropertyChanged(nameof(MemorySummary));
                 OnPropertyChanged(nameof(StorageSummary));
+                OnPropertyChanged(nameof(CpuSummaryDisplay));
+                OnPropertyChanged(nameof(GpuSummaryDisplay));
+                OnPropertyChanged(nameof(StorageSummaryDisplay));
                 OnPropertyChanged(nameof(BatterySummary));
                 OnPropertyChanged(nameof(CpuClockSummary));
                 OnPropertyChanged(nameof(ThrottlingSummary));
                 OnPropertyChanged(nameof(IsThrottling));
                 OnPropertyChanged(nameof(IsSsdDataAvailable));
                 OnPropertyChanged(nameof(FanSummary));
+                OnPropertyChanged(nameof(FanCurveSummary));
+                OnPropertyChanged(nameof(FanCurveChipDisplay));
+                OnPropertyChanged(nameof(CpuFanDisplay));
+                OnPropertyChanged(nameof(GpuFanDisplay));
                 OnPropertyChanged(nameof(FanVisualState));
                 OnPropertyChanged(nameof(PowerVisualState));
+                OnPropertyChanged(nameof(PowerTotalDisplay));
             }
         }
 
@@ -383,6 +403,18 @@ namespace OmenCore.ViewModels
         /// </summary>
         public bool IsGpuTempAvailable => GpuTemperature > 0;
 
+        public string CpuTempChipDisplay => FormatTemperatureForState(
+            CpuTemperature,
+            LatestMonitoringSample?.CpuTemperatureState ?? TelemetryDataState.Unknown);
+
+        public string GpuTempChipDisplay => LatestMonitoringSample?.GpuTemperatureState == TelemetryDataState.Inactive
+            ? "Idle"
+            : FormatTemperatureForState(
+                GpuTemperature,
+                LatestMonitoringSample?.GpuTemperatureState ?? TelemetryDataState.Unknown);
+
+        public string SsdTempDisplay => FormatTemperature(LatestMonitoringSample?.SsdTemperatureC ?? 0);
+
         public string CpuSummary => LatestMonitoringSample == null 
             ? "CPU telemetry unavailable" 
             : LatestMonitoringSample.CpuPowerWatts > 0 
@@ -402,6 +434,34 @@ namespace OmenCore.ViewModels
             : LatestMonitoringSample.IsOnAcPower 
                 ? $"{LatestMonitoringSample.BatteryChargePercent:F0}% • AC Power" 
                 : $"{LatestMonitoringSample.BatteryChargePercent:F0}% • {LatestMonitoringSample.BatteryTimeRemaining}";
+        public string CpuSummaryDisplay => LatestMonitoringSample == null
+            ? "CPU telemetry unavailable"
+            : LatestMonitoringSample.CpuPowerWatts > 0
+                ? $"{FormatTemperature(LatestMonitoringSample.CpuTemperatureC)} | {LatestMonitoringSample.CpuLoadPercent:F0}% | {LatestMonitoringSample.CpuPowerWatts:F0}W"
+                : $"{FormatTemperature(LatestMonitoringSample.CpuTemperatureC)} | {LatestMonitoringSample.CpuLoadPercent:F0}% load";
+
+        public string GpuSummaryDisplay => LatestMonitoringSample == null
+            ? "GPU telemetry unavailable"
+            : LatestMonitoringSample.GpuTemperatureState == TelemetryDataState.Inactive
+                ? $"dGPU idle | {LatestMonitoringSample.GpuLoadPercent:F0}% load{(LatestMonitoringSample.GpuVramUsageMb > 0 ? $" | {LatestMonitoringSample.GpuVramUsageMb:F0} MB VRAM" : string.Empty)}"
+                : $"{FormatTemperature(LatestMonitoringSample.GpuTemperatureC)} | {LatestMonitoringSample.GpuLoadPercent:F0}% load{(LatestMonitoringSample.GpuVramUsageMb > 0 ? $" | {LatestMonitoringSample.GpuVramUsageMb:F0} MB VRAM" : string.Empty)}";
+
+        public string StorageSummaryDisplay => LatestMonitoringSample == null
+            ? "Storage telemetry unavailable"
+            : $"SSD {FormatTemperature(LatestMonitoringSample.SsdTemperatureC)} | {LatestMonitoringSample.DiskUsagePercent:F0}% active";
+
+        private static string FormatTemperature(double temperature) =>
+            temperature > 0 ? $"{temperature:F0}{CelsiusSuffix}" : MissingTemperatureDisplay;
+
+        private static string FormatTemperatureForState(double temperature, TelemetryDataState state) =>
+            state switch
+            {
+                TelemetryDataState.Unavailable => MissingTemperatureDisplay,
+                TelemetryDataState.Invalid => MissingTemperatureDisplay,
+                TelemetryDataState.Stale => temperature > 0 ? $"{temperature:F0}{CelsiusSuffix}*" : MissingTemperatureDisplay,
+                _ => FormatTemperature(temperature)
+            };
+
         public string CpuClockSummary => LatestMonitoringSample == null || LatestMonitoringSample.CpuCoreClocksMhz.Count == 0
             ? "Per-core clocks unavailable"
             : string.Join(", ", LatestMonitoringSample.CpuCoreClocksMhz.Select((c, i) => $"C{i + 1}:{c:F0}MHz"));
@@ -432,6 +492,23 @@ namespace OmenCore.ViewModels
             : LatestMonitoringSample.CpuPowerWatts > 0 || LatestMonitoringSample.GpuPowerWatts > 0
                 ? $"CPU: {LatestMonitoringSample.CpuPowerWatts:F0}W • GPU: {LatestMonitoringSample.GpuPowerWatts:F0}W • Total: {LatestMonitoringSample.CpuPowerWatts + LatestMonitoringSample.GpuPowerWatts:F0}W"
                 : "Power sensors unavailable";
+
+        public string PowerTotalDisplay
+        {
+            get
+            {
+                if (LatestMonitoringSample == null)
+                    return "--W";
+
+                var cpuWatts = Math.Max(0, LatestMonitoringSample.CpuPowerWatts);
+                var gpuWatts = LatestMonitoringSample.GpuTemperatureState == TelemetryDataState.Inactive
+                    ? 0
+                    : Math.Max(0, LatestMonitoringSample.GpuPowerWatts);
+                var totalWatts = cpuWatts + gpuWatts;
+
+                return totalWatts > 0 ? $"{totalWatts:F0}W" : "--W";
+            }
+        }
         
         public string PowerEfficiencySummary
         {
@@ -480,12 +557,29 @@ namespace OmenCore.ViewModels
                 
                 var cpuTemp = LatestMonitoringSample?.CpuTemperatureC ?? 0;
                 var gpuTemp = LatestMonitoringSample?.GpuTemperatureC ?? 0;
-                var avgTemp = (cpuTemp + gpuTemp) / 2;
+                var validTemps = new[] { cpuTemp, gpuTemp }.Where(temp => temp > 0).ToList();
+                var avgTemp = validTemps.Count > 0 ? validTemps.Average() : 0;
                 
-                var cpuFan = _fanService.FanTelemetry.Count > 0 ? FormatFanRpmForSummary(_fanService.FanTelemetry[0]) : "--";
-                var gpuFan = _fanService.FanTelemetry.Count > 1 ? FormatFanRpmForSummary(_fanService.FanTelemetry[1]) : "--";
+                var cpuFan = CpuFanDisplay;
+                var gpuFan = GpuFanDisplay;
                 
                 return $"{avgTemp:F0}°C → CPU: {cpuFan} • GPU: {gpuFan}";
+            }
+        }
+
+        public string FanCurveChipDisplay
+        {
+            get
+            {
+                if (_fanService?.FanTelemetry == null || _fanService.FanTelemetry.Count == 0)
+                    return "-- RPM";
+
+                var cpuFan = _fanService.FanTelemetry.Count > 0 ? FormatFanRpmForChip(_fanService.FanTelemetry[0]) : "--";
+                var gpuFan = _fanService.FanTelemetry.Count > 1 ? FormatFanRpmForChip(_fanService.FanTelemetry[1]) : "--";
+
+                return string.Equals(cpuFan, "--", StringComparison.Ordinal) && string.Equals(gpuFan, "--", StringComparison.Ordinal)
+                    ? "-- RPM"
+                    : $"{cpuFan}/{gpuFan}";
             }
         }
         
@@ -512,11 +606,19 @@ namespace OmenCore.ViewModels
                 if (telemetry == null || telemetry.Count == 0)
                     return "-- RPM";
                 
-                var fan1 = telemetry.Count > 0 ? FormatFanRpmForSummary(telemetry[0]) : "--";
-                var fan2 = telemetry.Count > 1 ? FormatFanRpmForSummary(telemetry[1]) : "--";
+                var fan1 = CpuFanDisplay;
+                var fan2 = GpuFanDisplay;
                 return $"CPU: {fan1} • GPU: {fan2}";
             }
         }
+
+        public string CpuFanDisplay => _fanService?.FanTelemetry.Count > 0
+            ? FormatFanRpmForSummary(_fanService.FanTelemetry[0])
+            : "--";
+
+        public string GpuFanDisplay => _fanService?.FanTelemetry.Count > 1
+            ? FormatFanRpmForSummary(_fanService.FanTelemetry[1])
+            : "--";
 
         private static string FormatFanRpmForSummary(FanTelemetry telemetry)
         {
@@ -528,6 +630,18 @@ namespace OmenCore.ViewModels
             return $"{telemetry.SpeedRpm} RPM";
         }
 
+        private static string FormatFanRpmForChip(FanTelemetry telemetry)
+        {
+            if (telemetry.RpmState == TelemetryDataState.Unavailable)
+            {
+                return "n/a";
+            }
+
+            return telemetry.SpeedRpm > 0 ? telemetry.SpeedRpm.ToString() : "--";
+        }
+
+        public ICommand RefreshCommand { get; }
+
         public DashboardViewModel(
             HardwareMonitoringService monitoringService,
             FanService? fanService = null,
@@ -536,8 +650,10 @@ namespace OmenCore.ViewModels
             _monitoringService = monitoringService;
             _fanService = fanService;
             _pollingCoordinator = pollingCoordinator;
+            RefreshCommand = new RelayCommand(_ => RefreshDashboardDisplay());
             _monitoringService.SampleUpdated += OnSampleUpdated;
             _monitoringService.HealthStatusChanged += OnHealthStatusChanged;
+            SubscribeFanTelemetry();
             
             // Start uptime timer for session tracking (v2.2)
             _uptimeTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
@@ -552,6 +668,161 @@ namespace OmenCore.ViewModels
                 OnPropertyChanged(nameof(LastSampleAge));
             };
             _uptimeTimer.Start();
+        }
+
+        private void RefreshDashboardDisplay()
+        {
+            if (!MonitoringLowOverheadMode)
+            {
+                RebuildHistoricalTelemetryBuffers();
+            }
+
+            OnPropertyChanged(nameof(LatestMonitoringSample));
+            OnPropertyChanged(nameof(CpuTempDisplay));
+            OnPropertyChanged(nameof(GpuTempDisplay));
+            OnPropertyChanged(nameof(CpuTempChipDisplay));
+            OnPropertyChanged(nameof(GpuTempChipDisplay));
+            OnPropertyChanged(nameof(SsdTempDisplay));
+            OnPropertyChanged(nameof(CpuSummary));
+            OnPropertyChanged(nameof(GpuSummary));
+            OnPropertyChanged(nameof(CpuSummaryDisplay));
+            OnPropertyChanged(nameof(GpuSummaryDisplay));
+            OnPropertyChanged(nameof(StorageSummaryDisplay));
+            OnPropertyChanged(nameof(PowerConsumptionSummary));
+            OnPropertyChanged(nameof(PowerTotalDisplay));
+            OnPropertyChanged(nameof(FanSummary));
+            OnPropertyChanged(nameof(FanCurveSummary));
+            OnPropertyChanged(nameof(FanCurveChipDisplay));
+            OnPropertyChanged(nameof(CpuFanDisplay));
+            OnPropertyChanged(nameof(GpuFanDisplay));
+            OnPropertyChanged(nameof(MonitoringSourceText));
+            OnPropertyChanged(nameof(LastSampleAge));
+        }
+
+        private void SubscribeFanTelemetry()
+        {
+            if (_fanService?.FanTelemetry == null)
+            {
+                return;
+            }
+
+            if (_fanService.FanTelemetry is INotifyCollectionChanged collectionChanged)
+            {
+                collectionChanged.CollectionChanged += OnFanTelemetryCollectionChanged;
+            }
+
+            foreach (var fan in _fanService.FanTelemetry)
+            {
+                SubscribeFanTelemetryItem(fan);
+            }
+        }
+
+        private void UnsubscribeFanTelemetry()
+        {
+            if (_fanService?.FanTelemetry is INotifyCollectionChanged collectionChanged)
+            {
+                collectionChanged.CollectionChanged -= OnFanTelemetryCollectionChanged;
+            }
+
+            foreach (var fan in _subscribedFanTelemetry.ToArray())
+            {
+                fan.PropertyChanged -= OnFanTelemetryPropertyChanged;
+            }
+
+            _subscribedFanTelemetry.Clear();
+        }
+
+        private void OnFanTelemetryCollectionChanged(object? sender, NotifyCollectionChangedEventArgs e)
+        {
+            if (e.Action == NotifyCollectionChangedAction.Reset)
+            {
+                foreach (var fan in _subscribedFanTelemetry.ToArray())
+                {
+                    fan.PropertyChanged -= OnFanTelemetryPropertyChanged;
+                }
+
+                _subscribedFanTelemetry.Clear();
+            }
+
+            if (e.OldItems != null)
+            {
+                foreach (var item in e.OldItems.OfType<FanTelemetry>())
+                {
+                    if (_subscribedFanTelemetry.Remove(item))
+                    {
+                        item.PropertyChanged -= OnFanTelemetryPropertyChanged;
+                    }
+                }
+            }
+
+            if (e.NewItems != null)
+            {
+                foreach (var item in e.NewItems.OfType<FanTelemetry>())
+                {
+                    SubscribeFanTelemetryItem(item);
+                }
+            }
+
+            ScheduleFanTelemetryUiRefresh();
+        }
+
+        private void SubscribeFanTelemetryItem(FanTelemetry telemetry)
+        {
+            if (_subscribedFanTelemetry.Add(telemetry))
+            {
+                telemetry.PropertyChanged += OnFanTelemetryPropertyChanged;
+            }
+        }
+
+        private void OnFanTelemetryPropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            var propertyName = e.PropertyName;
+            if (string.IsNullOrEmpty(propertyName)
+                || propertyName == nameof(FanTelemetry.SpeedRpm)
+                || propertyName == nameof(FanTelemetry.RpmState)
+                || propertyName == nameof(FanTelemetry.DisplayRpmText)
+                || propertyName == nameof(FanTelemetry.Name))
+            {
+                ScheduleFanTelemetryUiRefresh();
+            }
+        }
+
+        private void ScheduleFanTelemetryUiRefresh()
+        {
+            if (_disposed || _pendingFanTelemetryUIUpdate)
+            {
+                return;
+            }
+
+            _pendingFanTelemetryUIUpdate = true;
+            var dispatcher = System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher == null)
+            {
+                _pendingFanTelemetryUIUpdate = false;
+                RaiseFanTelemetryDisplayProperties();
+                return;
+            }
+
+            dispatcher.BeginInvoke(new Action(() =>
+            {
+                _pendingFanTelemetryUIUpdate = false;
+                if (_disposed)
+                {
+                    return;
+                }
+
+                RaiseFanTelemetryDisplayProperties();
+            }), DispatcherPriority.Background);
+        }
+
+        private void RaiseFanTelemetryDisplayProperties()
+        {
+            OnPropertyChanged(nameof(FanSummary));
+            OnPropertyChanged(nameof(FanCurveSummary));
+            OnPropertyChanged(nameof(FanCurveChipDisplay));
+            OnPropertyChanged(nameof(CpuFanDisplay));
+            OnPropertyChanged(nameof(GpuFanDisplay));
+            OnPropertyChanged(nameof(FanVisualState));
         }
 
         private void SetUptimeTimerEnabled(bool enabled)
@@ -703,97 +974,105 @@ namespace OmenCore.ViewModels
         private void ScheduleUiProjection()
         {
             RuntimeUiPerformanceCounters.RecordDashboardDispatcherPost();
-            System.Windows.Application.Current?.Dispatcher?.BeginInvoke(() =>
+            var dispatcher = System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher == null)
             {
-                bool requeue = false;
-                try
-                {
-                    MonitoringSample? latest;
-                    lock (_sampleUpdateLock)
-                    {
-                        if (!_telemetryProjectionEnabled)
-                        {
-                            _pendingUIUpdate = false;
-                            return;
-                        }
+                ProcessQueuedUiProjection();
+                return;
+            }
 
-                        latest = _queuedSample;
-                        _queuedSample = null;
+            dispatcher.BeginInvoke(new Action(ProcessQueuedUiProjection), DispatcherPriority.Background);
+        }
+
+        private void ProcessQueuedUiProjection()
+        {
+            bool requeue = false;
+            try
+            {
+                MonitoringSample? latest;
+                lock (_sampleUpdateLock)
+                {
+                    if (!_telemetryProjectionEnabled)
+                    {
+                        _pendingUIUpdate = false;
+                        return;
                     }
 
-                    if (latest != null && ShouldProjectSampleToUi(latest))
+                    latest = _queuedSample;
+                    _queuedSample = null;
+                }
+
+                if (latest != null && ShouldProjectSampleToUi(latest))
+                {
+                    RuntimeUiPerformanceCounters.RecordDashboardSampleProjected();
+                    _lastUiProjectedSample = latest;
+                    _lastUiProjectionUtc = DateTime.UtcNow;
+
+                    LatestMonitoringSample = latest;
+
+                    // Convert to ThermalSample for temperature charts
+                    var thermalSample = new ThermalSample
                     {
-                        RuntimeUiPerformanceCounters.RecordDashboardSampleProjected();
-                        _lastUiProjectedSample = latest;
-                        _lastUiProjectionUtc = DateTime.UtcNow;
+                        Timestamp = latest.Timestamp,
+                        CpuCelsius = latest.CpuTemperatureC,
+                        GpuCelsius = latest.GpuTemperatureC
+                    };
+                    if (!MonitoringLowOverheadMode)
+                    {
+                        _thermalSamples.Add(thermalSample);
 
-                        LatestMonitoringSample = latest;
-
-                        // Convert to ThermalSample for temperature charts
-                        var thermalSample = new ThermalSample
+                        // Trim to max history size - remove excess items in one pass
+                        var excessCount = _thermalSamples.Count - MaxThermalSampleHistory;
+                        for (int i = 0; i < excessCount; i++)
                         {
-                            Timestamp = latest.Timestamp,
-                            CpuCelsius = latest.CpuTemperatureC,
-                            GpuCelsius = latest.GpuTemperatureC
-                        };
-                        if (!MonitoringLowOverheadMode)
-                        {
-                            _thermalSamples.Add(thermalSample);
-
-                            // Trim to max history size - remove excess items in one pass
-                            var excessCount = _thermalSamples.Count - MaxThermalSampleHistory;
-                            for (int i = 0; i < excessCount; i++)
-                            {
-                                _thermalSamples.RemoveAt(0);
-                            }
-
-                            AddFilteredSample(thermalSample);
-
-                            // Update fan curve points for visualization
-                            UpdateFanCurvePoints(latest);
-
-                            // Update sparkline data properties only when graph history is active.
-                            OnPropertyChanged(nameof(RecentCpuTemps));
-                            OnPropertyChanged(nameof(RecentGpuTemps));
-                            OnPropertyChanged(nameof(HasSparklineData));
-                            OnPropertyChanged(nameof(HasHistoricalData));
-                            OnPropertyChanged(nameof(FanCurveSummary));
+                            _thermalSamples.RemoveAt(0);
                         }
 
+                        AddFilteredSample(thermalSample);
+
+                        // Update fan curve points for visualization
+                        UpdateFanCurvePoints(latest);
+
+                        // Update sparkline data properties only when graph history is active.
+                        OnPropertyChanged(nameof(RecentCpuTemps));
+                        OnPropertyChanged(nameof(RecentGpuTemps));
+                        OnPropertyChanged(nameof(HasSparklineData));
+                        OnPropertyChanged(nameof(HasHistoricalData));
+                        OnPropertyChanged(nameof(FanCurveSummary));
                         OnPropertyChanged(nameof(RecentRamUsage));
-
-                        // Notify coalesced derived summaries
-                        OnPropertyChanged(nameof(PowerConsumptionSummary));
-                        OnPropertyChanged(nameof(PowerEfficiencySummary));
-                        OnPropertyChanged(nameof(BatteryHealthSummary));
-                        OnPropertyChanged(nameof(HasLiveData));
-                        OnPropertyChanged(nameof(MonitoringSourceText));
-                    }
-                    else if (latest != null)
-                    {
-                        RuntimeUiPerformanceCounters.RecordDashboardSampleSkipped();
                     }
 
-                    lock (_sampleUpdateLock)
-                    {
-                        requeue = _queuedSample != null;
-                        if (!requeue)
-                        {
-                            _pendingUIUpdate = false;
-                        }
-                    }
+                    // Notify coalesced derived summaries
+                    OnPropertyChanged(nameof(PowerConsumptionSummary));
+                    OnPropertyChanged(nameof(PowerEfficiencySummary));
+                    OnPropertyChanged(nameof(BatteryHealthSummary));
+                    OnPropertyChanged(nameof(HasLiveData));
+                    OnPropertyChanged(nameof(MonitoringSourceText));
                 }
-                finally
+                else if (latest != null)
                 {
-                    // Process at most one sample per dispatch turn to avoid monopolizing
-                    // the UI thread under telemetry bursts.
-                    if (requeue)
+                    RuntimeUiPerformanceCounters.RecordDashboardSampleSkipped();
+                }
+
+                lock (_sampleUpdateLock)
+                {
+                    requeue = _queuedSample != null;
+                    if (!requeue)
                     {
-                        RuntimeUiPerformanceCounters.RecordDashboardProjectionRequeue();
-                        ScheduleUiProjection();
+                        _pendingUIUpdate = false;
                     }
                 }
-            }, DispatcherPriority.Background);
+            }
+            finally
+            {
+                // Process at most one sample per dispatch turn to avoid monopolizing
+                // the UI thread under telemetry bursts.
+                if (requeue)
+                {
+                    RuntimeUiPerformanceCounters.RecordDashboardProjectionRequeue();
+                    ScheduleUiProjection();
+                }
+            }
         }
 
         private bool ShouldProjectSampleToUi(MonitoringSample sample)
@@ -877,6 +1156,7 @@ namespace OmenCore.ViewModels
             {
                 _monitoringService.SampleUpdated -= OnSampleUpdated;
                 _monitoringService.HealthStatusChanged -= OnHealthStatusChanged;
+                UnsubscribeFanTelemetry();
                 _uptimeTimer?.Stop();
                 _uptimeTimer = null;
             }

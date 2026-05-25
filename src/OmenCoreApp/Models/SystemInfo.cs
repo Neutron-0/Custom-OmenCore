@@ -48,6 +48,7 @@ namespace OmenCore.Models
         public StandaloneStatus Status { get; set; } = StandaloneStatus.OK;
         public string StatusText { get; set; } = "Standalone";
         public string StatusColor { get; set; } = "#00FF88"; // Green
+        public string DegradationClassification { get; set; } = "None";
         public List<DependencyCheck> Checks { get; set; } = new();
         public DateTime AuditTime { get; set; } = DateTime.Now;
         public string Summary { get; set; } = string.Empty;
@@ -66,6 +67,16 @@ namespace OmenCore.Models
         /// Count of missing required dependencies.
         /// </summary>
         public int MissingRequiredCount => Checks.FindAll(c => c.IsRequired && !c.IsDetected).Count;
+
+        /// <summary>
+        /// True when one or more required dependencies are missing.
+        /// </summary>
+        public bool HasCriticalDegradation => MissingRequiredCount > 0;
+
+        /// <summary>
+        /// True when only optional dependencies are missing.
+        /// </summary>
+        public bool HasOptionalDegradation => !HasCriticalDegradation && MissingOptionalCount > 0;
     }
     
     public class SystemInfo

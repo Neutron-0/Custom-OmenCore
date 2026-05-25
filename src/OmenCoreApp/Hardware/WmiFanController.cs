@@ -10,7 +10,7 @@ namespace OmenCore.Hardware
     /// <summary>
     /// WMI-based fan controller for HP OMEN/Victus laptops.
     /// Uses HP WMI BIOS interface instead of direct EC access.
-    /// This eliminates the need for the WinRing0 driver.
+    /// This avoids direct EC driver access for normal fan control.
     /// 
     /// Features automatic countdown extension to prevent BIOS from reverting
     /// fan settings after 120 seconds (HP BIOS limitation).
@@ -185,7 +185,10 @@ namespace OmenCore.Hardware
                     var temp = _hwMonitor.GetCpuTemperature();
                     if (temp > 0) return temp;
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _logging?.Debug($"WmiFanController: CPU temperature monitor read failed: {ex.Message}");
+                }
             }
             return _wmiBios.GetTemperature() ?? 0;
         }
@@ -199,7 +202,10 @@ namespace OmenCore.Hardware
                     var temp = _hwMonitor.GetGpuTemperature();
                     if (temp > 0) return temp;
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _logging?.Debug($"WmiFanController: GPU temperature monitor read failed: {ex.Message}");
+                }
             }
             return _wmiBios.GetGpuTemperature() ?? 0;
         }
@@ -213,7 +219,10 @@ namespace OmenCore.Hardware
                     var speeds = _hwMonitor.GetFanSpeeds();
                     if (speeds.Any()) return speeds;
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _logging?.Debug($"WmiFanController: fan speed monitor read failed: {ex.Message}");
+                }
             }
             // Fallback to WMI BIOS — only use V2 direct RPM command on V2+ systems
             // CMD 0x38 (GetFanRpmDirect) is only valid on OMEN Max 2025+ with ThermalPolicy V2.

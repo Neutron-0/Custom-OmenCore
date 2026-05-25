@@ -23,6 +23,7 @@ namespace OmenCore.Models
     
     public class FanTelemetry : INotifyPropertyChanged
     {
+        private string _name = string.Empty;
         private int _rpm;
         private int _speedRpm;
         private int _dutyCyclePercent;
@@ -30,7 +31,19 @@ namespace OmenCore.Models
         private RpmSource _rpmSource = RpmSource.Unknown;
         private TelemetryDataState _rpmState = TelemetryDataState.Unknown;
 
-        public string Name { get; set; } = string.Empty;
+        public string Name
+        {
+            get => _name;
+            set
+            {
+                value ??= string.Empty;
+                if (_name != value)
+                {
+                    _name = value;
+                    PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(Name)));
+                }
+            }
+        }
 
         public int Rpm
         {

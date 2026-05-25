@@ -59,12 +59,12 @@ namespace OmenCore.Hardware
 
     /// <summary>
     /// Factory for creating fan controllers with automatic backend selection.
-    /// Prioritizes WMI BIOS (no driver required) over OGH proxy over EC access (requires an EC-access backend like PawnIO/WinRing0).
+    /// Prioritizes WMI BIOS (no driver required) over OGH proxy over EC access (requires PawnIO).
     /// 
     /// For 2023+ OMEN laptops with Secure Boot, the selection order is:
     /// 1. OGH Proxy (requires OGH services running) - best for newer models
     /// 2. WMI BIOS (requires HP WMI classes) - works if BIOS responds
-    /// 3. EC Access (requires PawnIO or WinRing0) - WinRing0 may require Secure Boot/Mem Integrity disabled
+    /// 3. EC Access (requires PawnIO)
     /// 4. Fallback (monitoring only)
     /// </summary>
     public class FanControllerFactory
@@ -154,7 +154,9 @@ namespace OmenCore.Hardware
                     var temp = _libreHwMonitor.GetCpuTemperature();
                     if (temp > 0) return temp;
                 }
-                catch { }
+                catch (Exception)
+                {
+                }
             }
             
             // Fall back to WMI BIOS
@@ -173,7 +175,9 @@ namespace OmenCore.Hardware
                     var temp = _libreHwMonitor.GetGpuTemperature();
                     if (temp > 0) return temp;
                 }
-                catch { }
+                catch (Exception)
+                {
+                }
             }
             
             // Fall back to WMI BIOS
@@ -287,7 +291,7 @@ namespace OmenCore.Hardware
             if (ecController != null)
             {
                 ActiveBackend = "EC Direct";
-                _logging?.Info("✓ Using EC-based fan controller (OGH-independent, requires PawnIO/WinRing0)");
+                _logging?.Info("✓ Using EC-based fan controller (OGH-independent, requires PawnIO)");
                 _logging?.Info($"  Backend: {_ecAccess?.GetType().Name ?? "Unknown EC access"}");
                 _logging?.Info("  Advantages: Direct hardware control, works on older models");
                 return ecController;
@@ -295,7 +299,7 @@ namespace OmenCore.Hardware
             
             // Fallback diagnostics: EC access unavailable
             _logging?.Warn("⚠️ EC Direct fan control not available");
-            _logging?.Info("  Possible reasons: WinRing0/PawnIO not loaded, Secure Boot blocking driver");
+            _logging?.Info("  Possible reasons: PawnIO not loaded, driver awaiting reboot, or module missing");
             _logging?.Info("  Trying fallback: OGH proxy...");
 
             // Priority 3: OGH proxy as last resort (requires OGH services)
@@ -369,18 +373,23 @@ namespace OmenCore.Hardware
             {
                 var conservativeWmiProfile = _capabilities?.ModelConfig != null &&
                     (!_capabilities.ModelConfig.SupportsFanControlEc || !_capabilities.ModelConfig.UserVerified);
+                var allowV1AutoModeFloorClear = !conservativeWmiProfile ||
+                    string.Equals(_capabilities?.ModelConfig?.ProductId, "8BCD", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(_capabilities?.ProductId, "8BCD", StringComparison.OrdinalIgnoreCase);
                 var controller = new WmiFanController(
                     _libreHwMonitor!,
                     _logging,
                     _maxFanLevelOverride,
                     ecAccess: _ecAccess,
                     strictFanModeReadback: !conservativeWmiProfile,
-                    allowV1AutoModeFloorClear: !conservativeWmiProfile);
+                    allowV1AutoModeFloorClear: allowV1AutoModeFloorClear);
                 if (controller.IsAvailable)
                 {
                     if (conservativeWmiProfile)
                     {
-                        _logging?.Info("WMI fan controller using conservative handoff policy (non-strict EC readback, no V1 manual-zero floor clear)");
+                        _logging?.Info(allowV1AutoModeFloorClear
+                            ? "WMI fan controller using partial conservative handoff policy (non-strict EC readback, V1 manual-zero floor clear enabled for verified 8BCD handoff)"
+                            : "WMI fan controller using conservative handoff policy (non-strict EC readback, no V1 manual-zero floor clear)");
                     }
 
                     return new WmiFanControllerWrapper(controller, _logging);
@@ -1185,7 +1194,9 @@ namespace OmenCore.Hardware
                     if (speeds.Any())
                         return speeds;
                 }
-                catch { }
+                catch (Exception)
+                {
+                }
             }
             
             // Fall back to WMI BIOS
@@ -1217,7 +1228,9 @@ namespace OmenCore.Hardware
                     var temp = libreHw.GetCpuTemperature();
                     if (temp > 0) return temp;
                 }
-                catch { }
+                catch (Exception)
+                {
+                }
             }
             
             return WmiBios.GetTemperature() ?? 0;
@@ -1235,7 +1248,9 @@ namespace OmenCore.Hardware
                     var temp = libreHw.GetGpuTemperature();
                     if (temp > 0) return temp;
                 }
-                catch { }
+                catch (Exception)
+                {
+                }
             }
             
             return WmiBios.GetGpuTemperature() ?? 0;

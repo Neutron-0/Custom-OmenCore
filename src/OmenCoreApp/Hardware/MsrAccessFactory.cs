@@ -6,7 +6,7 @@ namespace OmenCore.Hardware
 {
     /// <summary>
     /// Factory for creating MSR access providers.
-    /// Prefers PawnIO (Secure Boot compatible) over WinRing0 (legacy).
+    /// Uses PawnIO for Secure Boot compatible MSR access.
     /// </summary>
     public static class MsrAccessFactory
     {
@@ -21,7 +21,7 @@ namespace OmenCore.Hardware
         public static string StatusMessage { get; private set; } = "Not initialized";
         
         /// <summary>
-        /// Create an MSR access provider. Uses PawnIO only (WinRing0 deprecated and removed).
+        /// Create an MSR access provider. Uses PawnIO only.
         /// Returns null if PawnIO is not available.
         /// </summary>
         public static IMsrAccess? Create(LoggingService? logging = null)
@@ -44,9 +44,6 @@ namespace OmenCore.Hardware
                 logging?.Debug($"PawnIO MSR init failed: {ex.Message}");
             }
             
-            // WinRing0 fallback removed in v2.7.0 to avoid antivirus false positives
-            // Users should install PawnIO for MSR access features
-            
             // No backend available — distinguish "not installed" from "installed but broken"
             ActiveBackend = MsrBackend.None;
             if (IsPawnIOInstalled())
@@ -67,13 +64,15 @@ namespace OmenCore.Hardware
         /// </summary>
         public static bool IsAnyBackendAvailable()
         {
-            // Check for PawnIO only (WinRing0 removed in v2.7.0)
+            // Check for PawnIO only.
             try
             {
                 using var pawnIO = new PawnIOMsrAccess();
                 if (pawnIO.IsAvailable) return true;
             }
-            catch { }
+            catch (Exception)
+            {
+            }
             
             return false;
         }
@@ -100,8 +99,6 @@ namespace OmenCore.Hardware
     public enum MsrBackend
     {
         None,
-        PawnIO,
-        [Obsolete("WinRing0 support removed in v2.7.0")]
-        WinRing0
+        PawnIO
     }
 }

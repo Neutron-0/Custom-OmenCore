@@ -105,6 +105,22 @@ namespace OmenCore.Services.KeyboardLighting
                 ModelYear = 2020
             });
 
+            // Discord report (2026-05-23): OMEN 15-dc1077tx / ProductId 8574.
+            // WMI brightness controls respond, but RGB zone writes do not take effect on the
+            // reported BIOS. Keep this as backlight-only until exact zone protocol is verified.
+            AddModel(new KeyboardModelConfig
+            {
+                ProductId = "8574",
+                ModelName = "OMEN 15-dc1xxx (2019)",
+                ModelNamePattern = "15-dc1",
+                KeyboardType = KeyboardType.BacklightOnly,
+                PreferredMethod = KeyboardMethod.BacklightOnly,
+                FallbackMethods = Array.Empty<KeyboardMethod>(),
+                ModelYear = 2019,
+                UserVerified = false,
+                Notes = "Discord field report - OMEN 15-dc1077tx / ProductId 8574. RGB zone writes failed on BIOS F.29; use conservative backlight-only profile pending protocol verification."
+            });
+
             AddModel(new KeyboardModelConfig
             {
                 ProductId = "8787",
@@ -268,13 +284,13 @@ namespace OmenCore.Services.KeyboardLighting
             AddModel(new KeyboardModelConfig
             {
                 ProductId = "8D2F",
-                ModelName = "OMEN 16-am0xxx shared AMD/Intel",
+                ModelName = "OMEN 16-am0xxx (8D2F)",
                 KeyboardType = KeyboardType.FourZone,
                 PreferredMethod = KeyboardMethod.ColorTable2020,
                 FallbackMethods = new[] { KeyboardMethod.NewWmi2023, KeyboardMethod.EcDirect },
                 ModelYear = 2024,
-                UserVerified = false,
-                Notes = "GitHub #111 — OMEN Gaming Laptop 16-am0xxx. Keyboard config mirrors xd0/ap0 sibling generation."
+                UserVerified = true,
+                Notes = "GitHub #111 / Discord 2026-05-21 - OMEN Gaming Laptop 16-am0xxx, ProductId 8D2F. Keyboard config mirrors xd0/ap0 sibling generation and is now confirmed by exact ProductId."
             });
 
             // OMEN 16-am0xxx (2025 Intel Core Ultra + RTX 50-series) - ProductId pending
@@ -407,7 +423,23 @@ namespace OmenCore.Services.KeyboardLighting
                 PreferredMethod = KeyboardMethod.HidPerKey,
                 FallbackMethods = new[] { KeyboardMethod.NewWmi2023 },
                 ModelYear = 2025,
-                Notes = "Per-key RGB, RTX 5080, Intel Core Ultra 9 275HX"
+                Notes = "Per-key RGB, RTX 50-series, Intel Core Ultra 9 275HX"
+            });
+
+            // OMEN MAX 16 (2025) - ah0xxx Intel / RTX 50-series.
+            // Field log 2026-05-24: ProductId 8D41, WMI model "OMEN MAX Gaming Laptop 16t-ah000".
+            // Use the per-key-capable MAX profile, with WMI zone fallback until HID per-key control is verified.
+            AddModel(new KeyboardModelConfig
+            {
+                ProductId = "8D41",
+                ModelName = "OMEN MAX 16-ah0xxx (2025) Intel",
+                ModelNamePattern = "16t-ah0",
+                KeyboardType = KeyboardType.PerKeyRgb,
+                PreferredMethod = KeyboardMethod.HidPerKey,
+                FallbackMethods = new[] { KeyboardMethod.NewWmi2023, KeyboardMethod.ColorTable2020 },
+                ModelYear = 2025,
+                UserVerified = false,
+                Notes = "Discord field log 2026-05-24 - OMEN MAX Gaming Laptop 16t-ah000 / ProductId 8D41. Per-key-capable MAX keyboard profile inferred; WMI ColorTable fallback remains available while HID per-key behavior is field-verified."
             });
 
             // OMEN MAX 16 (2025) - ak0xxx family (GitHub #117)

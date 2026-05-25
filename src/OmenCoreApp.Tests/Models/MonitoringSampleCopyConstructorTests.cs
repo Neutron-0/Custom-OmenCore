@@ -22,6 +22,22 @@ namespace OmenCoreApp.Tests.Models
                 GpuName                = "RTX 5060",
                 BatteryTimeRemaining   = "2:30",
                 CpuTemperatureState    = TelemetryDataState.Valid,
+                CpuTemperatureTelemetry = new TelemetryValue<double>
+                {
+                    Value = 75.5,
+                    IsSupported = true,
+                    IsStale = false,
+                    BackendSource = "WMI",
+                    LastError = null
+                },
+                CpuPowerTelemetry = new TelemetryValue<double>
+                {
+                    Value = 42,
+                    IsSupported = true,
+                    IsStale = false,
+                    BackendSource = "MSR",
+                    LastError = null
+                }
             };
 
             var s2 = new MonitoringSample(s1);
@@ -37,6 +53,12 @@ namespace OmenCoreApp.Tests.Models
             Assert.Equal("RTX 5060",              s2.GpuName);
             Assert.Equal("2:30",                  s2.BatteryTimeRemaining);
             Assert.Equal(TelemetryDataState.Valid, s2.CpuTemperatureState);
+            Assert.Equal(75.5,                     s2.CpuTemperatureTelemetry.Value);
+            Assert.Equal("WMI",                   s2.CpuTemperatureTelemetry.BackendSource);
+            Assert.Equal(42,                       s2.CpuPowerTelemetry.Value);
+            Assert.Equal("MSR",                   s2.CpuPowerTelemetry.BackendSource);
+            Assert.NotSame(s1.CpuTemperatureTelemetry, s2.CpuTemperatureTelemetry);
+            Assert.NotSame(s1.CpuPowerTelemetry,       s2.CpuPowerTelemetry);
         }
 
         [Fact]

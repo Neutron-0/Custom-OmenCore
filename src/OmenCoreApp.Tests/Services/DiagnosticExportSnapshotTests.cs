@@ -163,6 +163,26 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public async Task RuntimePerformanceFile_IncludesFanTelemetryChurnCounters()
+        {
+            RuntimeUiPerformanceCounters.ResetForTests();
+            RuntimeUiPerformanceCounters.RecordFanTelemetrySync(collectionResized: true, itemsUpdated: 2);
+            RuntimeUiPerformanceCounters.RecordFanTelemetrySync(collectionResized: false, itemsUpdated: 2);
+
+            var svc = new DiagnosticExportService(_logging, _tempDir);
+            var zipPath = await svc.CollectAndExportAsync();
+
+            string content = ReadFileFromExport(zipPath, "runtime-performance.txt");
+
+            content.Should().Contain("FanTelemetrySyncs: 2");
+            content.Should().Contain("FanTelemetryCollectionResizes: 1");
+            content.Should().Contain("FanTelemetryItemsUpdated: 4");
+            content.Should().Contain("FanTelemetryPropertyOnlySyncs: 1");
+            content.Should().Contain("FanTelemetryCollectionResizeRatio: 0.50");
+            content.Should().Contain("FanTelemetryPropertyOnlySyncRatio: 0.50");
+        }
+
+        [Fact]
         public async Task MonitoringCadenceHoldFile_ContainsExpectedSections_WhenServicesUnavailable()
         {
             var svc = new DiagnosticExportService(_logging, _tempDir);
@@ -327,6 +347,8 @@ namespace OmenCoreApp.Tests.Services
             content.Should().Contain("PopupRenderCacheClass:", "popup cache hit classification required");
             content.Should().Contain("TrayRenderCacheHitRatio:", "tray cache hit ratio required");
             content.Should().Contain("PopupRenderCacheHitRatio:", "popup cache hit ratio required");
+            content.Should().Contain("FanTelemetryCollectionResizeRatio:", "fan telemetry collection resize ratio required");
+            content.Should().Contain("FanTelemetryPropertyOnlySyncRatio:", "fan telemetry property-only sync ratio required");
         }
 
         /// <summary>
@@ -362,7 +384,10 @@ namespace OmenCoreApp.Tests.Services
             // MonitoringSource line should be present and contain CPU Authority info
             var monitoringLine = content.Split('\n').FirstOrDefault(l => l.Contains("MonitoringSource:"));
             monitoringLine.Should().NotBeNull("MonitoringSource must be in runtime state summary");
-            monitoringLine.Should().Contain("CPU Authority", "CPU thermal authority source must be included in MonitoringSource");
+            if (!monitoringLine!.Contains("Unavailable", StringComparison.OrdinalIgnoreCase))
+            {
+                monitoringLine.Should().Contain("CPU Authority", "CPU thermal authority source must be included when monitoring is available");
+            }
         }
     }
 }

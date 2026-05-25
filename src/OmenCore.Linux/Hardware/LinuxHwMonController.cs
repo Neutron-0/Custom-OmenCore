@@ -15,6 +15,8 @@ public class LinuxHwMonController
 {
     private const string HWMON_PATH = "/sys/class/hwmon";
     private const string THERMAL_ZONE_PATH = "/sys/class/thermal";
+    private const int MinPlausibleTemperatureC = 1;
+    private const int MaxPlausibleTemperatureC = 125;
     
     private readonly List<string> _cpuSensorPaths = new();
     private readonly List<string> _gpuSensorPaths = new();
@@ -248,7 +250,10 @@ public class LinuxHwMonController
             if (int.TryParse(content, out var value))
             {
                 // Both hwmon and thermal_zone report millidegrees
-                return value / 1000;
+                var temperature = value / 1000;
+                return temperature >= MinPlausibleTemperatureC && temperature <= MaxPlausibleTemperatureC
+                    ? temperature
+                    : null;
             }
         }
         catch

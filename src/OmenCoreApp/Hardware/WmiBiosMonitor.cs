@@ -12,7 +12,7 @@ using OmenCore.Services;
 namespace OmenCore.Hardware
 {
     /// <summary>
-    /// Self-sustaining WMI BIOS + NVAPI hardware monitor - NO LHM/WinRing0 dependency.
+    /// Self-sustaining WMI BIOS + NVAPI hardware monitor - no external monitoring dependency.
     ///
     /// This is OmenCore's PRIMARY monitoring bridge. It reads all sensor data using
     /// native Windows APIs and NVIDIA's NVAPI - no external kernel drivers required.
@@ -92,9 +92,13 @@ namespace OmenCore.Hardware
         private const int CpuFallbackReadBaseCooldownSeconds = 30;
         private const int CpuFallbackReadCooldownSeconds = CpuFallbackReadBaseCooldownSeconds;
         private const int CpuFallbackReadMaxCooldownSeconds = 300;
+        private const int WorkerCpuTempLastGoodGraceSeconds = 300;
         private DateTime _cpuFallbackHoldUntilUtc = DateTime.MinValue;
         private DateTime _cpuFallbackReadDisabledUntilUtc = DateTime.MinValue;
         private bool _cpuFallbackTimeoutLogged;
+        private bool _workerCpuTempReuseLogged;
+        private double _lastWorkerCpuTempReading;
+        private DateTime _lastWorkerCpuTempReadingUtc = DateTime.MinValue;
         private int _cpuFallbackTimeoutStreak;
         private int _cpuAuthorityMismatchConsecutiveReadings;
         private string _cpuTemperatureAuthoritySource = "WMI BIOS";
@@ -102,7 +106,9 @@ namespace OmenCore.Hardware
         private DateTime _cpuTemperatureAuthorityLastSwitchUtc = DateTime.MinValue;
         private DateTime _cpuTemperatureAuthorityLastWarnUtc = DateTime.MinValue;
         private int _cpuTemperatureAuthoritySwitchCount;
+        private int _cpuPrimaryAuthorityRecoveryReadings;
         private const int CpuAuthoritySwitchWarnCooldownSeconds = 30;
+        private const int CpuPrimaryAuthorityRecoveryConfirmReadings = 3;
         
         // GPU temperature freeze detection (similar to CPU temp)
         private double _lastGpuTempReading;
@@ -800,9 +806,30 @@ namespace OmenCore.Hardware
                 }
 
                 var fallbackApplied = TryApplyCpuTemperatureFallback();
-                if (!fallbackApplied && primaryCpuAuthoritySource != null)
+                if (fallbackApplied)
                 {
-                    SetCpuTemperatureAuthority(primaryCpuAuthoritySource, primaryCpuAuthorityReason ?? "Primary CPU temperature accepted");
+                    _cpuPrimaryAuthorityRecoveryReadings = 0;
+                }
+                else if (primaryCpuAuthoritySource != null)
+                {
+                    var returningToWmi =
+                        string.Equals(primaryCpuAuthoritySource, "WMI BIOS", StringComparison.Ordinal) &&
+                        !string.Equals(_cpuTemperatureAuthoritySource, "WMI BIOS", StringComparison.Ordinal);
+
+                    if (returningToWmi)
+                    {
+                        _cpuPrimaryAuthorityRecoveryReadings++;
+                        if (_cpuPrimaryAuthorityRecoveryReadings >= CpuPrimaryAuthorityRecoveryConfirmReadings)
+                        {
+                            _cpuPrimaryAuthorityRecoveryReadings = 0;
+                            SetCpuTemperatureAuthority(primaryCpuAuthoritySource, primaryCpuAuthorityReason ?? "Primary CPU temperature accepted");
+                        }
+                    }
+                    else
+                    {
+                        _cpuPrimaryAuthorityRecoveryReadings = 0;
+                        SetCpuTemperatureAuthority(primaryCpuAuthoritySource, primaryCpuAuthorityReason ?? "Primary CPU temperature accepted");
+                    }
                 }
                 
                 // ═══════════════════════════════════════════════════════════════
@@ -1000,8 +1027,14 @@ namespace OmenCore.Hardware
             bool lowAndHighPower = _cachedCpuTemp <= ImplausiblyLowCpuTempThresholdC &&
                                    _cachedCpuPowerWatts >= CpuPowerThresholdForLowTempFallbackWatts;
             bool fallbackHoldActive = DateTime.UtcNow < _cpuFallbackHoldUntilUtc;
-            if (DateTime.UtcNow < _cpuFallbackReadDisabledUntilUtc)
+            var nowUtc = DateTime.UtcNow;
+            if (nowUtc < _cpuFallbackReadDisabledUntilUtc)
             {
+                if (TryReuseLastWorkerCpuTemperature(nowUtc, "worker CPU fallback cooldown active"))
+                {
+                    return true;
+                }
+
                 return false;
             }
 
@@ -1089,6 +1122,12 @@ namespace OmenCore.Hardware
                         _logging?.Warn($"[WmiBiosMonitor] CPU temp fallback timed out after {CpuFallbackReadTimeoutMs}ms — disabling fallback for {cooldownSeconds}s to keep monitoring responsive");
                         _cpuFallbackTimeoutLogged = true;
                     }
+
+                    if (TryReuseLastWorkerCpuTemperature(DateTime.UtcNow, $"worker CPU read timed out after {CpuFallbackReadTimeoutMs}ms"))
+                    {
+                        return true;
+                    }
+
                     return false;
                 }
 
@@ -1101,8 +1140,11 @@ namespace OmenCore.Hardware
                 if (fallbackCpuTemp > 0 && fallbackCpuTemp < 110)
                 {
                     _cpuFallbackTimeoutLogged = false;
+                    _workerCpuTempReuseLogged = false;
                     _cpuFallbackTimeoutStreak = 0;
                     _cpuFallbackReadDisabledUntilUtc = DateTime.MinValue;
+                    _lastWorkerCpuTempReading = fallbackCpuTemp;
+                    _lastWorkerCpuTempReadingUtc = DateTime.UtcNow;
 
                     bool shouldApplyFallback = _workerBackedCpuTempOverrideEnabled ||
                                                _cachedCpuTemp <= 0 ||
@@ -1152,6 +1194,37 @@ namespace OmenCore.Hardware
             }
 
             return false;
+        }
+
+        private bool TryReuseLastWorkerCpuTemperature(DateTime nowUtc, string reason)
+        {
+            if (!_workerBackedCpuTempOverrideEnabled ||
+                !IsRecentWorkerCpuTemperatureUsable(_lastWorkerCpuTempReading, _lastWorkerCpuTempReadingUtc, nowUtc))
+            {
+                return false;
+            }
+
+            _cachedCpuTemp = _lastWorkerCpuTempReading;
+            _lastCpuTempReading = _lastWorkerCpuTempReading;
+
+            if (!_workerCpuTempReuseLogged)
+            {
+                var ageSeconds = (nowUtc - _lastWorkerCpuTempReadingUtc).TotalSeconds;
+                _logging?.Warn($"[WmiBiosMonitor] CPU temp source override for '{_systemModel}' kept last good worker reading ({_lastWorkerCpuTempReading:F1}°C, age={ageSeconds:F0}s) because {reason}; rejecting WMI/ACPI fallback authority");
+                _workerCpuTempReuseLogged = true;
+            }
+
+            SetCpuTemperatureAuthority("LHM Worker Override", $"Using last good worker CPU temperature because {reason}");
+            return true;
+        }
+
+        private static bool IsRecentWorkerCpuTemperatureUsable(double cpuTemp, DateTime capturedUtc, DateTime nowUtc)
+        {
+            return cpuTemp > 0 &&
+                   cpuTemp < 110 &&
+                   capturedUtc != DateTime.MinValue &&
+                   nowUtc >= capturedUtc &&
+                   (nowUtc - capturedUtc).TotalSeconds <= WorkerCpuTempLastGoodGraceSeconds;
         }
 
         private void SetCpuTemperatureAuthority(string source, string reason)

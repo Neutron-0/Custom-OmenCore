@@ -5,7 +5,7 @@ namespace OmenCore.Hardware
     /// <summary>
     /// Interface for MSR (Model-Specific Register) access providers.
     /// Implemented by PawnIOMsrAccess (recommended, Secure Boot compatible) and
-    /// WinRing0MsrAccess (legacy, requires Secure Boot disabled).
+    /// PawnIOMsrAccess.
     /// </summary>
     public interface IMsrAccess : IDisposable
     {

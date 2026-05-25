@@ -400,6 +400,43 @@ namespace OmenCoreApp.Tests.ViewModels
         }
 
         [Fact]
+        public void ResolveNextHotkeyPerformanceProfile_SkipsCustom_WhenNoCustomCurveExists()
+        {
+            using var vm = new MainViewModel();
+
+            var resolver = typeof(MainViewModel).GetMethod("ResolveNextHotkeyPerformanceProfile", BindingFlags.Instance | BindingFlags.NonPublic);
+            resolver.Should().NotBeNull();
+
+            resolver!.Invoke(vm, new object[] { "Quiet" }).Should().Be("Balanced",
+                "the profile hotkey should not advertise Custom unless there is a real curve to apply");
+            resolver.Invoke(vm, new object[] { "Custom" }).Should().Be("Balanced",
+                "a stale label-only Custom state should cycle back to the canonical profile list");
+        }
+
+        [Fact]
+        public void ResolveNextHotkeyPerformanceProfile_UsesCustom_WhenCustomCurveExists()
+        {
+            using var vm = new MainViewModel();
+            vm.FanPresets.Add(new FanPreset
+            {
+                Name = "Desk curve",
+                IsBuiltIn = false,
+                Mode = FanMode.Manual,
+                Curve =
+                {
+                    new FanCurvePoint { TemperatureC = 40, FanPercent = 32 },
+                    new FanCurvePoint { TemperatureC = 80, FanPercent = 90 }
+                }
+            });
+
+            var resolver = typeof(MainViewModel).GetMethod("ResolveNextHotkeyPerformanceProfile", BindingFlags.Instance | BindingFlags.NonPublic);
+            resolver.Should().NotBeNull();
+
+            resolver!.Invoke(vm, new object[] { "Quiet" }).Should().Be("Custom",
+                "a saved custom curve gives Ctrl+Shift+E a real Custom target instead of a label-only state");
+        }
+
+        [Fact]
         public void StartupFanRestore_AllowsSavedCustomCurve_WhenHardwareRestoreDisabled()
         {
             var helper = typeof(MainViewModel).GetMethod(

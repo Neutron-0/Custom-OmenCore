@@ -54,9 +54,6 @@ namespace OmenCore.Services
             // Check 5: PawnIO driver
             audit.Checks.Add(CheckPawnIODriver());
             
-            // Check 6: Legacy WinRing0 artifacts (optional, not used by default)
-            audit.Checks.Add(CheckWinRing0Driver());
-
             // If HP WMI BIOS is missing but another backend exists, this is a limited-feature
             // fallback mode rather than a hard required dependency failure.
             var hpWmiCheck = audit.Checks.FirstOrDefault(c => c.Name == "HP WMI BIOS");
@@ -83,7 +80,8 @@ namespace OmenCore.Services
                 audit.Status = StandaloneStatus.Limited;
                 audit.StatusText = "Limited";
                 audit.StatusColor = "#FF6B6B"; // Red
-                audit.Summary = $"Missing {requiredMissing.Count} required component(s): {string.Join(", ", requiredMissing.Select(c => c.Name))}";
+                audit.DegradationClassification = "Critical";
+                audit.Summary = $"Critical degradation: missing {requiredMissing.Count} required component(s): {string.Join(", ", requiredMissing.Select(c => c.Name))}";
             }
             // P1-2 fix: threshold raised from >= 2 to >= 3, and LHM is no longer counted
             // as optional (it's explicitly not needed). This prevents clean standalone installs
@@ -95,7 +93,8 @@ namespace OmenCore.Services
                 audit.Status = StandaloneStatus.Degraded;
                 audit.StatusText = "Degraded";
                 audit.StatusColor = "#FFD93D"; // Yellow
-                audit.Summary = $"Fully standalone, but {optionalMissing.Count} optional component(s) unavailable (OGH and HP-SEU are not required for core operation)";
+                audit.DegradationClassification = "Optional";
+                audit.Summary = $"Optional degradation: fully standalone, but {optionalMissing.Count} optional component(s) unavailable (OGH and HP-SEU are not required for core operation)";
             }
             else
             {
@@ -104,13 +103,15 @@ namespace OmenCore.Services
                     audit.Status = StandaloneStatus.Limited;
                     audit.StatusText = "Limited";
                     audit.StatusColor = "#FFD93D"; // Yellow
-                    audit.Summary = "Direct HP WMI BIOS interface is unavailable; fallback backend is active (core fan control works, some HP-dependent features may be limited)";
+                    audit.DegradationClassification = "Critical";
+                    audit.Summary = "Critical degradation: direct HP WMI BIOS interface is unavailable; fallback backend is active (core fan control works, some HP-dependent features may be limited)";
                 }
                 else
                 {
                     audit.Status = StandaloneStatus.OK;
                     audit.StatusText = "Standalone";
                     audit.StatusColor = "#00FF88"; // Green
+                    audit.DegradationClassification = "None";
                     audit.Summary = "OmenCore is running fully standalone without HP dependencies";
                 }
             }
@@ -335,40 +336,6 @@ private DependencyCheck CheckPawnIODriver()
             }
             
             _logging.Info($"  [{(check.IsDetected ? "✓" : "○")}] {check.Name}: {check.Status}");
-            return check;
-        }
-        
-        private DependencyCheck CheckWinRing0Driver()
-        {
-            var check = new DependencyCheck
-            {
-                Name = "Legacy WinRing0 Driver",
-                Description = "Legacy optional Ring0 backend artifact check (not used by default)",
-                IsRequired = false,
-                IsOptional = false // We don't use this
-            };
-            
-            try
-            {
-                // Check for WinRing0 service
-                var services = ServiceController.GetServices();
-                var winring0 = services.FirstOrDefault(s => 
-                    s.ServiceName.Contains("WinRing", StringComparison.OrdinalIgnoreCase));
-                    
-                check.IsDetected = winring0 != null;
-                check.Status = check.IsDetected ? "Detected" : "Not Present";
-                check.Details = check.IsDetected
-                    ? "Legacy WinRing0 artifacts detected - OmenCore defaults to PawnIO/WMI paths"
-                    : "Legacy WinRing0 artifacts not present - this is expected ✓";
-            }
-            catch
-            {
-                check.IsDetected = false;
-                check.Status = "Unknown";
-                check.Details = "Could not check legacy WinRing0 status";
-            }
-            
-            _logging.Info($"  [{(!check.IsDetected ? "✓" : "○")}] {check.Name}: {check.Status}");
             return check;
         }
         

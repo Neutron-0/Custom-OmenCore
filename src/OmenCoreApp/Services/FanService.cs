@@ -69,6 +69,11 @@ namespace OmenCore.Services
         private bool _smoothingEnabled = true;
         private int _smoothingDurationMs = 1000;
         private int _smoothingStepMs = 200;
+        private double _smoothedCpuCurveTemp = double.NaN;
+        private double _smoothedGpuCurveTemp = double.NaN;
+        private const double CurveTempSmoothingBypassTempC = 75.0;
+        private const double CurveTempMaxRisePerEvaluationC = 6.0;
+        private const double CurveTempMaxDropPerEvaluationC = 4.0;
 
         // Expose for tests and read-only inspection
         public bool SmoothingEnabled => _smoothingEnabled;
@@ -763,11 +768,7 @@ namespace OmenCore.Services
                 {
                     App.Current.Dispatcher.BeginInvoke(() =>
                     {
-                        _fanTelemetry.Clear();
-                        foreach (var fan in fanSpeeds)
-                        {
-                            _fanTelemetry.Add(fan);
-                        }
+                        SyncFanTelemetryCollection(fanSpeeds);
                     });
                 }
             }
@@ -1120,6 +1121,7 @@ namespace OmenCore.Services
                 _lastAppliedFanPercent = -1;
                 _zeroRpmCurveCommandSince = DateTime.MinValue;
                 _lastCurveZeroRpmWakeKick = DateTime.MinValue;
+                ResetCurveTemperatureSmoothing();
             }
 
             NotifyFanActivityStateChangedIfNeeded();
@@ -1142,6 +1144,7 @@ namespace OmenCore.Services
                 _lastAppliedGpuFanPercent = -1;
                 _zeroRpmCurveCommandSince = DateTime.MinValue;
                 _lastCurveZeroRpmWakeKick = DateTime.MinValue;
+                ResetCurveTemperatureSmoothing();
             }
 
             NotifyFanActivityStateChangedIfNeeded();
@@ -1176,6 +1179,7 @@ namespace OmenCore.Services
                 _lastCurveUpdate = DateTime.MinValue; // Force immediate update
                 _lastAppliedCpuFanPercent = -1;
                 _lastAppliedGpuFanPercent = -1;
+                ResetCurveTemperatureSmoothing();
             }
 
             NotifyFanActivityStateChangedIfNeeded();
@@ -1260,6 +1264,46 @@ namespace OmenCore.Services
             }
             
             return clamped;
+        }
+
+        private void ResetCurveTemperatureSmoothing()
+        {
+            _smoothedCpuCurveTemp = double.NaN;
+            _smoothedGpuCurveTemp = double.NaN;
+        }
+
+        private (double cpuTemp, double gpuTemp) SmoothCurveTemperatures(double cpuTemp, double gpuTemp)
+        {
+            _smoothedCpuCurveTemp = SmoothCurveTemperature("CPU", _smoothedCpuCurveTemp, cpuTemp);
+            _smoothedGpuCurveTemp = SmoothCurveTemperature("GPU", _smoothedGpuCurveTemp, gpuTemp);
+            return (_smoothedCpuCurveTemp, _smoothedGpuCurveTemp);
+        }
+
+        private double SmoothCurveTemperature(string sensorName, double previous, double current)
+        {
+            if (current <= 0 || double.IsNaN(current) || double.IsInfinity(current))
+            {
+                return current;
+            }
+
+            if (double.IsNaN(previous) || previous <= 0 || current >= CurveTempSmoothingBypassTempC)
+            {
+                return current;
+            }
+
+            var delta = current - previous;
+            var limitedDelta = delta > 0
+                ? Math.Min(delta, CurveTempMaxRisePerEvaluationC)
+                : Math.Max(delta, -CurveTempMaxDropPerEvaluationC);
+
+            if (Math.Abs(limitedDelta - delta) > 0.01)
+            {
+                var smoothed = previous + limitedDelta;
+                _logging.Debug($"Curve temp smoothing: {sensorName} {previous:F1}C -> {current:F1}C limited to {smoothed:F1}C");
+                return smoothed;
+            }
+
+            return current;
         }
         
         /// <summary>
@@ -1731,20 +1775,7 @@ namespace OmenCore.Services
                         // Only update fan telemetry if values changed meaningfully
                         if (fanSpeedsChanged || fanRpmStateChanged)
                         {
-                            _fanTelemetry.Clear();
-                            for (int i = 0; i < fanSpeeds.Count; i++)
-                            {
-                                var fan = fanSpeeds[i];
-                                // Show the stabilized RPM value instead of raw sensor noise
-                                fan.SpeedRpm = (i < displayRpms.Count) ? displayRpms[i] : fan.SpeedRpm;
-                                fan.RpmState = i < rpmStates.Count
-                                    ? rpmStates[i]
-                                    : (fan.SpeedRpm > 0 ? TelemetryDataState.Valid : TelemetryDataState.Zero);
-                                _fanTelemetry.Add(fan);
-                            }
-
-                            // Commit displayed RPMs as the last-seen UI state (already set above)
-                            //_lastFanSpeeds = displayRpms.ToList();
+                            SyncFanTelemetryCollection(fanSpeeds, displayRpms, rpmStates);
                         }
                         
                         // Check RPM sanity: if duty > 0% but RPM = 0, monitor for hardware failure
@@ -1789,6 +1820,86 @@ namespace OmenCore.Services
             }
 
             _logging.Info("Fan monitor loop stopped");
+        }
+
+        private void SyncFanTelemetryCollection(
+            IReadOnlyList<FanTelemetry> fanSpeeds,
+            IReadOnlyList<int>? displayRpms = null,
+            IReadOnlyList<TelemetryDataState>? rpmStates = null)
+        {
+            var collectionResized = false;
+            var itemsUpdated = 0;
+
+            while (_fanTelemetry.Count > fanSpeeds.Count)
+            {
+                _fanTelemetry.RemoveAt(_fanTelemetry.Count - 1);
+                collectionResized = true;
+            }
+
+            for (int i = 0; i < fanSpeeds.Count; i++)
+            {
+                var source = fanSpeeds[i];
+                if (i >= _fanTelemetry.Count)
+                {
+                    _fanTelemetry.Add(CreateFanTelemetrySnapshot(source, i, displayRpms, rpmStates));
+                    collectionResized = true;
+                    itemsUpdated++;
+                    continue;
+                }
+
+                if (UpdateFanTelemetrySnapshot(_fanTelemetry[i], source, i, displayRpms, rpmStates))
+                {
+                    itemsUpdated++;
+                }
+            }
+
+            RuntimeUiPerformanceCounters.RecordFanTelemetrySync(collectionResized, itemsUpdated);
+        }
+
+        private static FanTelemetry CreateFanTelemetrySnapshot(
+            FanTelemetry source,
+            int index,
+            IReadOnlyList<int>? displayRpms,
+            IReadOnlyList<TelemetryDataState>? rpmStates)
+        {
+            var snapshot = new FanTelemetry();
+            UpdateFanTelemetrySnapshot(snapshot, source, index, displayRpms, rpmStates);
+            return snapshot;
+        }
+
+        private static bool UpdateFanTelemetrySnapshot(
+            FanTelemetry target,
+            FanTelemetry source,
+            int index,
+            IReadOnlyList<int>? displayRpms,
+            IReadOnlyList<TelemetryDataState>? rpmStates)
+        {
+            var speedRpm = displayRpms != null && index < displayRpms.Count
+                ? displayRpms[index]
+                : (source.SpeedRpm != 0 ? source.SpeedRpm : source.Rpm);
+            var rpmState = rpmStates != null && index < rpmStates.Count
+                ? rpmStates[index]
+                : source.RpmState;
+
+            if (rpmState == TelemetryDataState.Unknown)
+            {
+                rpmState = speedRpm > 0 ? TelemetryDataState.Valid : TelemetryDataState.Zero;
+            }
+
+            var changed = target.Name != source.Name
+                || target.DutyCyclePercent != source.DutyCyclePercent
+                || Math.Abs(target.Temperature - source.Temperature) > 0.1
+                || target.RpmSource != source.RpmSource
+                || target.SpeedRpm != speedRpm
+                || target.RpmState != rpmState;
+
+            target.Name = source.Name;
+            target.DutyCyclePercent = source.DutyCyclePercent;
+            target.Temperature = source.Temperature;
+            target.RpmSource = source.RpmSource;
+            target.SpeedRpm = speedRpm;
+            target.RpmState = rpmState;
+            return changed;
         }
 
         private static bool IntListsEqual(List<int> left, List<int> right)
@@ -2211,11 +2322,17 @@ namespace OmenCore.Services
             lock (_curveLock)
             {
                 if (_activeCurve == null)
+                {
                     return Task.CompletedTask;
-                   try
-                   {
-                    // Use max of CPU/GPU temp to determine fan speed
-                    var maxTemp = Math.Max(cpuTemp, gpuTemp);
+                }
+
+                try
+                {
+                    var (controlCpuTemp, controlGpuTemp) = SmoothCurveTemperatures(cpuTemp, gpuTemp);
+                    // Use smoothed control temps for curve interpolation, but keep raw
+                    // temperatures for safety clamps and hysteresis state.
+                    var maxTemp = Math.Max(controlCpuTemp, controlGpuTemp);
+                    var rawMaxTemp = Math.Max(cpuTemp, gpuTemp);
                     
                     // Calculate fan speed using slope-based interpolation (omen-fan style)
                     // This provides smoother transitions between curve points
@@ -2226,7 +2343,7 @@ namespace OmenCore.Services
                     targetFanPercent = AdjustFanPercentForGpuPowerBoost((int)targetFanPercent, gpuTemp);
                     
                     // Apply safety bounds clamping based on temperature
-                    targetFanPercent = ApplySafetyBoundsClamping(targetFanPercent, maxTemp);
+                    targetFanPercent = ApplySafetyBoundsClamping(targetFanPercent, rawMaxTemp);
 
                     // If immediate flag passed, bypass hysteresis and smoothing and apply now
                     if (immediate)
@@ -2234,17 +2351,17 @@ namespace OmenCore.Services
                         if (SetFanSpeedSerialized((int)targetFanPercent))
                         {
                             _lastAppliedFanPercent = (int)targetFanPercent;
-                            _lastHysteresisTemp = maxTemp;
+                            _lastHysteresisTemp = rawMaxTemp;
                             _pendingFanPercent = -1;
                             _lastCurveUpdate = now;
                             MarkCurveWrite(now);
-                            _logging.Info($"Immediate curve applied: {targetFanPercent}% @ {maxTemp:F1}°C (GPU boost: {_gpuPowerBoostLevel})");
+                            _logging.Info($"Immediate curve applied: {targetFanPercent}% @ {rawMaxTemp:F1}C (control {maxTemp:F1}C, GPU boost: {_gpuPowerBoostLevel})");
                         }
 
                         return Task.CompletedTask;
                     }
 
-                    if (TryApplyCurveZeroRpmWakeKick((int)Math.Round(targetFanPercent), maxTemp, now))
+                    if (TryApplyCurveZeroRpmWakeKick((int)Math.Round(targetFanPercent), rawMaxTemp, now))
                     {
                         return Task.CompletedTask;
                     }
@@ -2259,7 +2376,7 @@ namespace OmenCore.Services
                     // Apply hysteresis if enabled
                     if (_hysteresis.Enabled && _lastAppliedFanPercent >= 0)
                     {
-                        var tempDelta = Math.Abs(maxTemp - _lastHysteresisTemp);
+                        var tempDelta = Math.Abs(rawMaxTemp - _lastHysteresisTemp);
                         
                         // Check if temperature change is within dead-zone
                         if (tempDelta < _hysteresis.DeadZone && targetFanPercent != _lastAppliedFanPercent)
@@ -2307,18 +2424,18 @@ namespace OmenCore.Services
                             if (success)
                             {
                                 _lastAppliedFanPercent = (int)targetFanPercent;
-                                _lastHysteresisTemp = maxTemp;
+                                _lastHysteresisTemp = rawMaxTemp;
                                 _pendingFanPercent = -1;
                                 MarkCurveWrite(now);
                                 
                                 if (forceRefresh)
                                 {
                                     _lastCurveForceRefresh = now;
-                                    _logging.Info($"Curve force-refreshed: {targetFanPercent}% @ {maxTemp:F1}°C");
+                                    _logging.Info($"Curve force-refreshed: {targetFanPercent}% @ {rawMaxTemp:F1}C (control {maxTemp:F1}C)");
                                 }
                                 else
                                 {
-                                    _logging.Info($"Curve applied: {targetFanPercent}% @ {maxTemp:F1}°C");
+                                    _logging.Info($"Curve applied: {targetFanPercent}% @ {rawMaxTemp:F1}C (control {maxTemp:F1}C)");
                                 }
                             }
                             else
@@ -2332,7 +2449,7 @@ namespace OmenCore.Services
                             var cancellationToken = CancellationToken.None;
                             _ = RampFanToPercentAsync((int)targetFanPercent, cancellationToken);
                             MarkCurveWrite(now);
-                            _lastHysteresisTemp = maxTemp;
+                            _lastHysteresisTemp = rawMaxTemp;
                         }
                     }
                     
@@ -2360,6 +2477,10 @@ namespace OmenCore.Services
                     
                 try
                 {
+                    var rawCpuTemp = cpuTemp;
+                    var rawGpuTemp = gpuTemp;
+                    (cpuTemp, gpuTemp) = SmoothCurveTemperatures(cpuTemp, gpuTemp);
+
                     // Evaluate CPU curve using slope-based interpolation
                     int cpuFanPercent = (int)Math.Round(InterpolateFanSpeed(_cpuCurve, cpuTemp));
                     
@@ -2367,10 +2488,10 @@ namespace OmenCore.Services
                     int gpuFanPercent = (int)Math.Round(InterpolateFanSpeed(_gpuCurve, gpuTemp));
                     
                     // Apply safety bounds clamping to both CPU and GPU fan speeds
-                    cpuFanPercent = (int)Math.Round(ApplySafetyBoundsClamping(cpuFanPercent, cpuTemp));
-                    gpuFanPercent = (int)Math.Round(ApplySafetyBoundsClamping(gpuFanPercent, gpuTemp));
+                    cpuFanPercent = (int)Math.Round(ApplySafetyBoundsClamping(cpuFanPercent, rawCpuTemp));
+                    gpuFanPercent = (int)Math.Round(ApplySafetyBoundsClamping(gpuFanPercent, rawGpuTemp));
 
-                    if (TryApplyCurveZeroRpmWakeKick(Math.Max(cpuFanPercent, gpuFanPercent), Math.Max(cpuTemp, gpuTemp), now))
+                    if (TryApplyCurveZeroRpmWakeKick(Math.Max(cpuFanPercent, gpuFanPercent), Math.Max(rawCpuTemp, rawGpuTemp), now))
                     {
                         return Task.CompletedTask;
                     }

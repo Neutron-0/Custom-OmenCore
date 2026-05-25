@@ -53,6 +53,9 @@ dotnet publish "$root\src\OmenCore.Avalonia\OmenCore.Avalonia.csproj" `
     -p:PublishSingleFile=true `
     -p:Version=$version -p:AssemblyVersion=$assemblyVersion -p:FileVersion=$assemblyVersion `
     -o $guiOut
+if ($LASTEXITCODE -ne 0) {
+    throw "GUI publish failed with exit code $LASTEXITCODE"
+}
 
 # Build CLI second into its own folder.
 dotnet publish "$root\src\OmenCore.Linux\OmenCore.Linux.csproj" `
@@ -60,6 +63,9 @@ dotnet publish "$root\src\OmenCore.Linux\OmenCore.Linux.csproj" `
     -p:PublishSingleFile=true `
     -p:Version=$version -p:AssemblyVersion=$assemblyVersion -p:FileVersion=$assemblyVersion `
     -o $cliOut
+if ($LASTEXITCODE -ne 0) {
+    throw "CLI publish failed with exit code $LASTEXITCODE"
+}
 
 if (-not (Test-Path "$guiOut\omencore-gui")) {
     throw "GUI publish did not produce omencore-gui at $guiOut"

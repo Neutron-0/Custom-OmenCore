@@ -48,6 +48,11 @@ artifacts/
 *.temp
 *.log
 *.cache
+build-*.txt
+build-*.log
+test-*.log
+osd-lifecycle-*.txt
+/query
 
 # User-specific files
 *.rsuser

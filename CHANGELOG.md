@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [3.7.0] - 2026-05-25 - Runtime Recovery, Fan Authority, and UI Responsiveness
+
+### Development Status
+
+- Rolling stabilization changelog: [docs/CHANGELOG_v3.7.0.md](docs/CHANGELOG_v3.7.0.md).
+- Active code audit: [docs/3.7.0-CODE-AUDIT.md](docs/3.7.0-CODE-AUDIT.md).
+- Version metadata corrected to `3.7.0` across the Windows app, hardware worker, Linux CLI, Avalonia GUI, installer, and `VERSION.txt`.
+- Pre-release artifacts were built for Windows installer, Windows portable ZIP, and Linux x64 ZIP, but those artifacts are superseded by the late GitHub #134 CPU-temperature authority fix and must be rebuilt before upload.
+- Final automated validation before the late #134 fix passed: `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore` reported 743 passed, 0 failed.
+- Current focus: rebuild/re-hash artifacts after GitHub #134, field validation for GitHub #133 UI responsiveness, `8BCD`, `8D2F`, `8D41`, Linux boards `8787`/`8C30`, focused-window runtime measurements, and prerelease feedback.
+
+### Superseded Pre-release Artifacts
+
+These hashes describe the earlier 3.7.0 candidate build and should not be uploaded as final prerelease assets after the late GitHub #134 patch.
+
+| File | Size | SHA256 |
+| --- | ---: | --- |
+| `OmenCoreSetup-3.7.0.exe` | 101.72 MB | `AD47AEC9E4D0CD894672B822B5F01337030372F5F7EC42A5F6298B955EAA8101` |
+| `OmenCore-3.7.0-win-x64.zip` | 104.88 MB | `682D914A6234900B530A9E1B27B016883D1E0FAAD0BC9A3B34466AB3C0CD5090` |
+| `OmenCore-3.7.0-linux-x64.zip` | 43.56 MB | `6A66450F97AF3E1F678FA70D0B226613D72500BBC49BF9D6946159660D652697` |
+
+### Changed
+
+- Monitoring reliability scaffolding added for CPU telemetry projection: `MonitoringSample` now carries structured `TelemetryValue<T>` envelopes for CPU temperature and CPU power via `MonitoringTelemetryAdapter`, preserving compatibility with existing scalar/state fields while explicitly surfacing stale/unsupported/error state.
+- Dashboard power projection no longer uses synthetic/estimated fallback math and now reports measured sensor aggregation only, reducing false confidence during degraded telemetry windows.
+- OSD stale-path behavior no longer infers synthetic CPU/GPU load from temperature when load sensors are unavailable, preventing misleading utilization display under partial backend failure.
+- Capability detection now publishes additive structured backend provider health (`BackendStatus`) for WMI, PawnIO, NVAPI, and retired WinRing0, including capability tags, failure reason, recommended action, and timestamp.
+- Backend health transition logging added for initialization failures, provider availability changes, and required capability loss without changing existing backend execution paths.
+- `DeviceCapabilities` now distinguishes critical vs optional backend degradation through structured provider health projection, enabling diagnostics-first readiness checks without UI redesign.
+- Standalone dependency audit now carries explicit degradation classification (`Critical`, `Optional`, `None`) and summary text aligned to required-vs-optional dependency loss semantics.
+- Secure Boot driver guidance relevance tightened: warning projection now keys off structured PawnIO health so legacy-backend concern is suppressed when PawnIO is healthy.
+- ProductId `8A43` capability profile now uses a 60-level fan ceiling (instead of 55) based on field diagnostics showing effective high-end readback near level 60.
+- Guided fan verification now rejects weak level-only evidence for medium/high targets when RPM remains materially below expected response, reducing false-positive pass results.
+- Thermal sensor timeout handling now reuses recent last-good CPU/GPU temperatures for a short grace window instead of dropping control input to `0C` on transient UI-thread read timeouts.
+- CPU temperature authority switching now requires consecutive healthy primary readings before reverting from fallback authority, reducing source flapping under intermittent read failures.
+
+### Validation
+
+- Focused unit validation passed for telemetry adapter and capability/degradation projection updates.
+- App project build succeeded for `src/OmenCoreApp/OmenCoreApp.csproj --no-restore` after the above changes.
+- Additional focused fan/model hardening validation passed after the 8A43 fixes (`50` passed, `0` failed), and the app project build remained green.
+
+---
+
 ## [3.6.3] - 2026-05-19 - Safety and Stability Hotfix Rollup
 
 ### Development Status

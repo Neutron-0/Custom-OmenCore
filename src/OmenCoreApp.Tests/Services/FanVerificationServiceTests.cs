@@ -33,6 +33,31 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public void VerifyAppliedState_Fails_WhenHighTargetHasOnlyLevelEvidence_AndRpmIsTooLow()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+            var service = new FanVerificationService(wmiBios: null, fanService: null, logging);
+
+            var result = new FanApplyResult
+            {
+                RequestedPercent = 60,
+                ExpectedRpm = 3600,
+                ActualRpmAfter = 1600,
+                ExpectedLevel = 33,
+                ActualLevelAfter = 33,
+                LevelReadbackMatched = true,
+                WmiCallSucceeded = true
+            };
+
+            var method = typeof(FanVerificationService).GetMethod("VerifyAppliedState", BindingFlags.Instance | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+
+            var verified = (bool)method!.Invoke(service, new object[] { result })!;
+            verified.Should().BeFalse("high-target level-only evidence should not pass when RPM is far below expected response");
+        }
+
+        [Fact]
         public void VerificationScore_UsesLevelReadbackFloor_WhenCommandApplied()
         {
             var result = new FanApplyResult

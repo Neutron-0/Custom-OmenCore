@@ -72,6 +72,22 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public void RegisterDefaultHotkeys_QueuesPerformanceProfileCycleHotkey()
+        {
+            using var logging = new LoggingService();
+            var service = new HotkeyService(logging);
+
+            service.RegisterDefaultHotkeys();
+
+            var pending = GetPending(service);
+            pending.Should().Contain(binding =>
+                binding.Action == HotkeyAction.TogglePerformanceProfile &&
+                binding.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift) &&
+                binding.Key == Key.E,
+                "Ctrl+Shift+E should remain reserved for General profile cycling");
+        }
+
+        [Fact]
         public void UnregisterAllHotkeys_ClearsPendingQueue()
         {
             using var logging = new LoggingService();

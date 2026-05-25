@@ -256,6 +256,28 @@ cat /sys/devices/platform/hp-wmi/thermal_profile 2>/dev/null
 uname -r
 ```
 
+### OMEN 16-wf1xxx (Board 8C77, Insyde BIOS)
+
+Some 8C77 systems can expose hp-wmi profile interfaces but still fail to apply expected sustained performance behavior under Linux.
+
+Use this focused checklist before filing an issue:
+
+```bash
+# 1) Capture OmenCore diagnosis
+sudo ./omencore-cli diagnose --report
+
+# 2) Capture firmware-path kernel hints (look for WQ00 warnings)
+journalctl -k -b --no-pager | grep -iE 'hp_wmi|wmi_bus|WQ00|platform_profile'
+
+# 3) Capture model + board + BIOS identity
+sudo dmidecode -t system -t baseboard -t bios
+
+# 4) Optional but useful for upstream hp-wmi maintainers
+sudo acpidump > acpidump_8c77.dat
+```
+
+If logs include lines such as `WQ00 data block query control method not found`, treat it as firmware/kernel integration evidence. Board-list presence in hp-wmi is not enough to prove full profile-power functionality on that unit.
+
 **If nothing works on your 2023 OMEN:**
 
 1. **Check kernel version**: Ubuntu 24.04 LTS ships with kernel 6.8, which should support most OMEN models

@@ -58,7 +58,7 @@
 
                 <Button Style="{StaticResource ModernOutlineButton}" 
                         Command="{Binding RefreshCommand}"
-                        ToolTip="Refresh all sensors">
+                        ToolTip="Refresh dashboard readings">
                     <StackPanel Orientation="Horizontal">
                         <Path Data="{StaticResource IconRestore}" Width="12" Height="12" 
                               Fill="{StaticResource TextSecondaryBrush}" Stretch="Uniform" Margin="0,0,6,0"/>
@@ -210,7 +210,7 @@
                                 Background="{Binding LatestMonitoringSample.CpuTemperatureC, Converter={StaticResource TemperatureToColorConverter}, ConverterParameter=cpu}"
                                 CornerRadius="8" Padding="8,3"
                                 ToolTip="Temperature status">
-                            <TextBlock Text="{Binding LatestMonitoringSample.CpuTemperatureC, Converter={StaticResource ZeroDoubleToPlaceholderConverter}}"
+                            <TextBlock Text="{Binding CpuTempChipDisplay}"
                                        Style="{StaticResource MonospaceValue}" FontSize="11" Foreground="White"/>
                         </Border>
                     </Grid>
@@ -222,7 +222,7 @@
                                         MinValue="30" MaxValue="100"
                                         ShowEndDot="True"
                                         Visibility="{Binding HasSparklineData, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                    <TextBlock Grid.Row="3" Text="{Binding CpuSummary}" 
+                    <TextBlock Grid.Row="3" Text="{Binding CpuSummaryDisplay}"
                                Style="{StaticResource BodyText}"
                                FontSize="13"
                                LineHeight="18"/>
@@ -249,7 +249,7 @@
                                 Background="{Binding LatestMonitoringSample.GpuTemperatureC, Converter={StaticResource TemperatureToColorConverter}, ConverterParameter=gpu}"
                                 CornerRadius="8" Padding="8,3"
                                 ToolTip="Temperature status">
-                            <TextBlock Text="{Binding LatestMonitoringSample.GpuTemperatureC, StringFormat={}{0:F0}°C, FallbackValue=--°C}"
+                            <TextBlock Text="{Binding GpuTempChipDisplay}"
                                        Style="{StaticResource MonospaceValue}" FontSize="11" Foreground="White"/>
                         </Border>
                     </Grid>
@@ -261,7 +261,7 @@
                                         MinValue="25" MaxValue="90"
                                         ShowEndDot="True"
                                         Visibility="{Binding HasSparklineData, Converter={StaticResource BooleanToVisibilityConverter}}"/>
-                    <TextBlock Grid.Row="3" Text="{Binding GpuSummary}" 
+                    <TextBlock Grid.Row="3" Text="{Binding GpuSummaryDisplay}"
                                Style="{StaticResource BodyText}"
                                FontSize="13"
                                LineHeight="18"/>
@@ -319,18 +319,19 @@
                     </Grid.RowDefinitions>
                     <Grid Grid.Row="0" Margin="0,0,0,8">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="💾" FontSize="14" Margin="0,0,8,0"/>
+                            <Path Data="{StaticResource IconStorage}" Width="16" Height="16"
+                                  Fill="#6FCF97" Stretch="Uniform" Margin="0,0,8,0"/>
                             <TextBlock Text="STORAGE" Style="{StaticResource Label}"/>
                         </StackPanel>
                         <Border HorizontalAlignment="Right" VerticalAlignment="Center"
                                 Background="{Binding LatestMonitoringSample.SsdTemperatureC, Converter={StaticResource TemperatureToColorConverter}, ConverterParameter=ssd}"
                                 CornerRadius="8" Padding="8,3"
                                 ToolTip="SSD temperature indicator">
-                            <TextBlock Text="{Binding LatestMonitoringSample.SsdTemperatureC, StringFormat={}{0:F0}°C, FallbackValue=--°C}"
+                            <TextBlock Text="{Binding SsdTempDisplay}"
                                        Style="{StaticResource MonospaceValue}" FontSize="11" Foreground="White"/>
                         </Border>
                     </Grid>
-                    <TextBlock Grid.Row="2" Text="{Binding StorageSummary}" 
+                    <TextBlock Grid.Row="2" Text="{Binding StorageSummaryDisplay}"
                                Style="{StaticResource BodyText}"
                                FontSize="13"
                                LineHeight="18"/>
@@ -348,7 +349,8 @@
                     </Grid.RowDefinitions>
                     <Grid Grid.Row="0" Margin="0,0,0,8">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="🔋" FontSize="14" Margin="0,0,8,0"/>
+                            <Path Data="{StaticResource IconUpdate}" Width="16" Height="16"
+                                  Fill="{StaticResource SuccessBrush}" Stretch="Uniform" Margin="0,0,8,0"/>
                             <TextBlock Text="BATTERY" Style="{StaticResource Label}"/>
                         </StackPanel>
                         <Border HorizontalAlignment="Right" VerticalAlignment="Center"
@@ -377,14 +379,15 @@
                     </Grid.RowDefinitions>
                     <Grid Grid.Row="0" Margin="0,0,0,8">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="⚡" FontSize="14" Margin="0,0,8,0"/>
+                            <Path Data="{StaticResource IconUpdate}" Width="16" Height="16"
+                                  Fill="#FFD700" Stretch="Uniform" Margin="0,0,8,0"/>
                             <TextBlock Text="POWER" Style="{StaticResource Label}"/>
                         </StackPanel>
                         <Border HorizontalAlignment="Right" VerticalAlignment="Center"
                                 Background="#FFD700"
                                 CornerRadius="8" Padding="8,3"
                                 ToolTip="Total system power">
-                            <TextBlock Text="{Binding PowerConsumptionSummary, Converter={StaticResource PowerToTotalConverter}, FallbackValue=--W}"
+                            <TextBlock Text="{Binding PowerTotalDisplay}"
                                        Style="{StaticResource MonospaceValue}" FontSize="11" Foreground="Black"/>
                         </Border>
                     </Grid>
@@ -406,14 +409,15 @@
                     </Grid.RowDefinitions>
                     <Grid Grid.Row="0" Margin="0,0,0,8">
                         <StackPanel Orientation="Horizontal">
-                            <TextBlock Text="💨" FontSize="14" Margin="0,0,8,0"/>
+                            <Path Data="{StaticResource IconFan}" Width="16" Height="16"
+                                  Fill="#87CEEB" Stretch="Uniform" Margin="0,0,8,0"/>
                             <TextBlock Text="FAN CURVE" Style="{StaticResource Label}"/>
                         </StackPanel>
                         <Border HorizontalAlignment="Right" VerticalAlignment="Center"
                                 Background="#87CEEB"
                                 CornerRadius="8" Padding="8,3"
                                 ToolTip="Current fan speeds">
-                            <TextBlock Text="{Binding FanCurveSummary, Converter={StaticResource FanSpeedConverter}, FallbackValue=-- RPM}"
+                            <TextBlock Text="{Binding FanCurveChipDisplay}"
                                        Style="{StaticResource MonospaceValue}" FontSize="11" Foreground="Black"/>
                         </Border>
                     </Grid>
@@ -547,7 +551,8 @@
                 <StackPanel>
                     <Grid Margin="0,0,0,16">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="⚡" FontSize="14" Margin="0,0,8,0"/>
+                            <Path Data="{StaticResource IconUpdate}" Width="16" Height="16"
+                                  Fill="#FFD700" Stretch="Uniform" Margin="0,0,8,0"/>
                             <TextBlock Text="GPU VOLTAGE &amp; CURRENT" Style="{StaticResource Label}"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
@@ -585,7 +590,8 @@
                 <StackPanel>
                     <Grid Margin="0,0,0,16">
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="💨" FontSize="14" Margin="0,0,8,0"/>
+                            <Path Data="{StaticResource IconFan}" Width="16" Height="16"
+                                  Fill="#87CEEB" Stretch="Uniform" Margin="0,0,8,0"/>
                             <TextBlock Text="FAN CURVE" Style="{StaticResource Label}"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
@@ -594,7 +600,7 @@
                                            FontSize="10" FontWeight="SemiBold"
                                            Foreground="{StaticResource TextTertiaryBrush}"
                                            HorizontalAlignment="Center"/>
-                                <TextBlock Text="{Binding FanCurvePoints, Converter={StaticResource LatestFanSpeedConverter}, ConverterParameter=cpu, FallbackValue=-- RPM}" 
+                                <TextBlock Text="{Binding CpuFanDisplay}"
                                            Style="{StaticResource MonospaceValue}"
                                            FontSize="16"
                                            Foreground="{StaticResource AccentBrush}"
@@ -605,7 +611,7 @@
                                            FontSize="10" FontWeight="SemiBold"
                                            Foreground="{StaticResource TextTertiaryBrush}"
                                            HorizontalAlignment="Center"/>
-                                <TextBlock Text="{Binding FanCurvePoints, Converter={StaticResource LatestFanSpeedConverter}, ConverterParameter=gpu, FallbackValue=-- RPM}" 
+                                <TextBlock Text="{Binding GpuFanDisplay}"
                                            Style="{StaticResource MonospaceValue}"
                                            FontSize="16"
                                            Foreground="#45C7FF"

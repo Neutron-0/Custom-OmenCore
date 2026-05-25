@@ -241,7 +241,7 @@
                             </Border>
                             
                             <TextBlock Grid.Row="1" Text="Extreme" FontSize="13" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" HorizontalAlignment="Center"/>
-                            <TextBlock Grid.Row="2" Text="@88C" FontSize="9" FontWeight="SemiBold" Foreground="#64B5F6" HorizontalAlignment="Center" Margin="0,2,0,6"/>
+                            <TextBlock Grid.Row="2" Text="@75C" FontSize="9" FontWeight="SemiBold" Foreground="#64B5F6" HorizontalAlignment="Center" Margin="0,2,0,6"/>
                             
                             <Border Grid.Row="3" Background="#2064B5F6" CornerRadius="4" Padding="6,2" HorizontalAlignment="Center"
                                     Visibility="{Binding IsExtremeSelected, Converter={StaticResource BoolToVisibility}}">

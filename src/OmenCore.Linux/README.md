@@ -267,6 +267,13 @@ For OMEN Max 16 board `8D41` / RTX 50-series reports where TGP stays capped arou
 unit log too. `nvidia-smi -pl` is expected to be blocked on these laptop GPUs; the useful evidence is
 whether Linux hp-wmi exposed and applied the GPU thermal modes / PPAB unlock path.
 
+For OMEN 15-en0xxx board `8787` / RTX 2060 reports, OmenCore treats this as the
+legacy 2020 AMD generation rather than a new hp-wmi-only board. Test the EC path
+first (`sudo modprobe ec_sys write_support=1`, with debugfs mounted if needed),
+then rerun `sudo omencore-cli diagnose --report`. RPM readback is still
+field-unverified on this board, so include both the command result and whether
+the fans physically changed speed.
+
 Please include:
 - Exact laptop model string (`sudo dmidecode -s system-product-name`)
 - Board ID (from dmidecode/baseboard)

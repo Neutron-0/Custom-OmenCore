@@ -828,12 +828,6 @@ namespace OmenCore.Views
                     UpdateGpuTempColor();
                     
                     IsThrottling = CpuTemp > 95 || GpuTemp > 95;
-                    
-                    // Estimate load from temp when sample is stale
-                    if (_showCpuLoad)
-                        CpuLoad = Math.Min(100, Math.Max(0, (CpuTemp - 40) * 2));
-                    if (_showGpuLoad)
-                        GpuLoad = Math.Min(100, Math.Max(0, (GpuTemp - 40) * 2));
                 }
                 
                 // Read fan speeds

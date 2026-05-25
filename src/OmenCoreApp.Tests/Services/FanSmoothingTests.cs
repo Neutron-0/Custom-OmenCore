@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Collections.Specialized;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -93,7 +95,7 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
-        public async Task ExtremePreset_FollowsCurveInsteadOfForcingMaxAtModerateThermals()
+        public async Task ExtremePreset_ReachesMaxAtSeventyFiveC()
         {
             var logging = new LoggingService();
             logging.Initialize();
@@ -111,9 +113,9 @@ namespace OmenCoreApp.Tests.Services
                 Mode = FanMode.Performance,
                 Curve = new List<FanCurvePoint>
                 {
-                    new FanCurvePoint { TemperatureC = 70, FanPercent = 82 },
-                    new FanCurvePoint { TemperatureC = 80, FanPercent = 94 },
-                    new FanCurvePoint { TemperatureC = 88, FanPercent = 100 }
+                    new FanCurvePoint { TemperatureC = 60, FanPercent = 66 },
+                    new FanCurvePoint { TemperatureC = 70, FanPercent = 88 },
+                    new FanCurvePoint { TemperatureC = 75, FanPercent = 100 }
                 }
             };
 
@@ -121,8 +123,46 @@ namespace OmenCoreApp.Tests.Services
             await fanService.ForceApplyCurveNowAsync(cpuTemp: 76, gpuTemp: 0, immediate: true);
 
             controller.SetCalls.Should().NotBeEmpty();
-            controller.SetCalls[^1].Should().BeLessThan(100,
-                "Extreme should follow its curve at moderate 70-80C temperatures; Max is the explicit 100% mode");
+            controller.SetCalls[^1].Should().Be(100,
+                "Extreme should restore the long-standing full-cooling behavior once temps pass 75C");
+
+            logging.Dispose();
+        }
+
+        [Fact]
+        public async Task CurveEngine_SmoothsWarmSensorJump_BeforeSafetyBypassRange()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var controller = new RecordingFanController();
+            var thermalProvider = new OmenCore.Hardware.ThermalSensorProvider(new OmenCore.Hardware.LibreHardwareMonitorImpl());
+            var notificationService = new NotificationService(logging);
+
+            var fanService = new FanService(controller, thermalProvider, logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService());
+            fanService.SetHysteresis(new FanHysteresisSettings { Enabled = false });
+            fanService.SetSmoothingSettings(new FanTransitionSettings { EnableSmoothing = false });
+
+            var curve = new List<FanCurvePoint>
+            {
+                new FanCurvePoint { TemperatureC = 40, FanPercent = 40 },
+                new FanCurvePoint { TemperatureC = 70, FanPercent = 70 },
+                new FanCurvePoint { TemperatureC = 90, FanPercent = 100 }
+            };
+
+            fanService.ApplyCustomCurve(curve, immediate: false);
+            await fanService.ForceApplyCurveNowAsync(cpuTemp: 54, gpuTemp: 0, immediate: true);
+            controller.SetCalls[^1].Should().Be(54);
+
+            controller.SetCalls.Clear();
+            SetPrivateField(fanService, "_lastCurveUpdate", DateTime.Now.AddSeconds(-10));
+            SetPrivateField(fanService, "_lastCurveForceRefresh", DateTime.Now);
+
+            await fanService.ForceApplyCurveNowAsync(cpuTemp: 70, gpuTemp: 0, immediate: false);
+
+            controller.SetCalls.Should().ContainSingle();
+            controller.SetCalls[0].Should().Be(60,
+                "a warm sensor authority jump should be slew-limited before the hot safety range");
 
             logging.Dispose();
         }
@@ -658,6 +698,99 @@ namespace OmenCoreApp.Tests.Services
             finally
             {
                 fanService.Stop();
+                logging.Dispose();
+            }
+        }
+
+        [Fact]
+        public void FanTelemetrySync_UpdatesStableFanItemsInPlace()
+        {
+            RuntimeUiPerformanceCounters.ResetForTests();
+
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var controller = new RecordingFanController();
+            var thermalProvider = new OmenCore.Hardware.ThermalSensorProvider(new OmenCore.Hardware.LibreHardwareMonitorImpl());
+            var notificationService = new NotificationService(logging);
+            var fanService = new FanService(controller, thermalProvider, logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService());
+
+            try
+            {
+                var syncMethod = typeof(FanService).GetMethod(
+                    "SyncFanTelemetryCollection",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                syncMethod.Should().NotBeNull();
+
+                var collectionField = typeof(FanService).GetField(
+                    "_fanTelemetry",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                collectionField.Should().NotBeNull();
+
+                var telemetry = collectionField!.GetValue(fanService)
+                    .Should().BeAssignableTo<ObservableCollection<FanTelemetry>>().Subject;
+
+                var collectionChangedCount = 0;
+                telemetry.CollectionChanged += (_, args) =>
+                {
+                    if (args.Action is NotifyCollectionChangedAction.Add
+                        or NotifyCollectionChangedAction.Remove
+                        or NotifyCollectionChangedAction.Reset)
+                    {
+                        collectionChangedCount++;
+                    }
+                };
+
+                var firstRead = new List<FanTelemetry>
+                {
+                    new() { Name = "CPU Fan", SpeedRpm = 1000, DutyCyclePercent = 30, RpmSource = RpmSource.WmiBios },
+                    new() { Name = "GPU Fan", SpeedRpm = 1100, DutyCyclePercent = 35, RpmSource = RpmSource.WmiBios }
+                };
+
+                syncMethod!.Invoke(fanService, new object?[] { firstRead, null, null });
+
+                telemetry.Should().HaveCount(2);
+                collectionChangedCount.Should().Be(2, "initial fan discovery may add one item per detected fan");
+                var firstCpuTelemetry = telemetry[0];
+                var firstGpuTelemetry = telemetry[1];
+
+                collectionChangedCount = 0;
+                var secondRead = new List<FanTelemetry>
+                {
+                    new() { Name = "CPU Fan", SpeedRpm = 1600, DutyCyclePercent = 42, RpmSource = RpmSource.EcDirect },
+                    new() { Name = "GPU Fan", SpeedRpm = 1700, DutyCyclePercent = 45, RpmSource = RpmSource.EcDirect }
+                };
+
+                syncMethod.Invoke(
+                    fanService,
+                    new object?[]
+                    {
+                        secondRead,
+                        new List<int> { 1500, 1650 },
+                        new List<TelemetryDataState> { TelemetryDataState.Valid, TelemetryDataState.Valid }
+                    });
+
+                telemetry.Should().HaveCount(2);
+                telemetry[0].Should().BeSameAs(firstCpuTelemetry);
+                telemetry[1].Should().BeSameAs(firstGpuTelemetry);
+                telemetry[0].SpeedRpm.Should().Be(1500);
+                telemetry[1].SpeedRpm.Should().Be(1650);
+                telemetry[0].DutyCyclePercent.Should().Be(42);
+                telemetry[1].DutyCyclePercent.Should().Be(45);
+                telemetry[0].RpmSource.Should().Be(RpmSource.EcDirect);
+                telemetry[1].RpmState.Should().Be(TelemetryDataState.Valid);
+                collectionChangedCount.Should().Be(0, "stable fan-count updates should not reset or rebuild the observable collection");
+
+                var counters = RuntimeUiPerformanceCounters.GetSnapshot();
+                counters.FanTelemetrySyncs.Should().Be(2);
+                counters.FanTelemetryCollectionResizes.Should().Be(1, "only initial fan discovery should resize the collection");
+                counters.FanTelemetryPropertyOnlySyncs.Should().Be(1, "the second sync should update existing fan items in place");
+                counters.FanTelemetryItemsUpdated.Should().Be(4);
+                counters.FanTelemetryCollectionResizeRatio.Should().Be(0.5d);
+                counters.FanTelemetryPropertyOnlySyncRatio.Should().Be(0.5d);
+            }
+            finally
+            {
                 logging.Dispose();
             }
         }

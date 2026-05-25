@@ -87,6 +87,7 @@ namespace OmenCore.Services
         private readonly object _cadenceTransitionLock = new();
         private readonly Queue<MonitoringCadenceTransition> _cadenceTransitions = new();
         private const int MaxCadenceTransitions = 80;
+        private string? _lastProviderError;
 
         public ReadOnlyObservableCollection<MonitoringSample> Samples { get; }
         public event EventHandler<MonitoringSample>? SampleUpdated;
@@ -477,6 +478,7 @@ namespace OmenCore.Services
                     try
                     {
                         sample = await _bridge.ReadSampleAsync(readCts.Token);
+                        _lastProviderError = null;
                         _consecutiveTimeouts = 0; // Reset on successful read
                         _lastSuccessfulSampleTime = DateTime.Now;
                         
@@ -507,6 +509,7 @@ namespace OmenCore.Services
                     {
                         // Timeout occurred (not overall cancellation)
                         _consecutiveTimeouts++;
+                        _lastProviderError = $"ReadSampleAsync timeout after {ReadSampleTimeoutMs}ms";
                         _logging.Warn($"[MonitorLoop] ReadSampleAsync timed out after {ReadSampleTimeoutMs}ms (consecutive: {_consecutiveTimeouts})");
                         
                         // Update health status based on consecutive timeouts
@@ -554,6 +557,7 @@ namespace OmenCore.Services
 
                     // Temperature freeze detection (v2.7.0)
                     sample = CheckAndRecoverFrozenTemps(sample);
+                    sample = EnrichCpuTelemetry(sample);
 
                     // ALWAYS update historical metrics for charts/graphs (bug fix v2.7.0)
                     // The history must be populated even when UI updates are skipped
@@ -618,6 +622,7 @@ namespace OmenCore.Services
                 catch (Exception ex)
                 {
                     consecutiveErrors++;
+                    _lastProviderError = ex.Message;
                     _logging.Error($"Hardware monitoring error ({consecutiveErrors}/{maxErrors})", ex);
 
                     if (consecutiveErrors >= maxErrors)
@@ -652,6 +657,27 @@ namespace OmenCore.Services
             }
 
             _logging.Info("Optimized hardware monitoring loop stopped");
+        }
+
+        private MonitoringSample EnrichCpuTelemetry(MonitoringSample sample)
+        {
+            var staleMonitoring = _healthStatus == MonitoringHealthStatus.Stale ||
+                                  _healthStatus == MonitoringHealthStatus.Degraded;
+            var source = _bridge.MonitoringSource;
+
+            sample.CpuTemperatureTelemetry = MonitoringTelemetryAdapter.BuildCpuTemperatureTelemetry(
+                sample,
+                source,
+                staleMonitoring,
+                _lastProviderError);
+
+            sample.CpuPowerTelemetry = MonitoringTelemetryAdapter.BuildCpuPowerTelemetry(
+                sample,
+                source,
+                staleMonitoring,
+                _lastProviderError);
+
+            return sample;
         }
 
         /// <summary>
@@ -904,7 +930,7 @@ namespace OmenCore.Services
                 Timestamp = now,
                 CpuTemperature = sample.CpuTemperatureC,
                 GpuTemperature = sample.GpuTemperatureC,
-                PowerConsumption = CalculateEstimatedPowerConsumption(sample),
+                PowerConsumption = CalculateMeasuredPowerConsumption(sample),
                 // Battery health is unknown when sample has no battery reading.
                 // Use -1 sentinel for unknown to avoid fake "100% healthy" UI/telemetry.
                 BatteryHealthPercentage = sample.BatteryChargePercent > 0
@@ -975,16 +1001,16 @@ namespace OmenCore.Services
             }
         }
 
-        private double CalculateEstimatedPowerConsumption(MonitoringSample sample)
+        private static double CalculateMeasuredPowerConsumption(MonitoringSample sample)
         {
-            // Rough estimation based on CPU/GPU load and temperatures
-            // In a real implementation, this would use actual power sensors
-            double basePower = 30; // Base system power
-            double cpuPower = (sample.CpuLoadPercent / 100.0) * 45; // CPU power contribution
-            double gpuPower = (sample.GpuLoadPercent / 100.0) * 60; // GPU power contribution
-            double tempMultiplier = 1 + ((sample.CpuTemperatureC + sample.GpuTemperatureC) / 2 - 50) * 0.005; // Temperature efficiency loss
+            // Dashboard total power should only reflect measured sensors.
+            // When sensors are unavailable, return 0 and let the UI show unavailable states.
+            var cpuPower = sample.CpuPowerWatts > 0 ? sample.CpuPowerWatts : 0;
+            var gpuPower = sample.GpuTemperatureState == TelemetryDataState.Inactive
+                ? 0
+                : (sample.GpuPowerWatts > 0 ? sample.GpuPowerWatts : 0);
 
-            return (basePower + cpuPower + gpuPower) * tempMultiplier;
+            return cpuPower + gpuPower;
         }
 
         private double CalculatePowerEfficiency(MonitoringSample sample)

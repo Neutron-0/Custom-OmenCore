@@ -213,7 +213,7 @@ namespace OmenCore.Hardware
         {
             EnsureAvailable();
             
-            // Convert mV to MSR format (same logic as WinRing0MsrAccess)
+            // Convert mV to MSR format.
             // This logic should be shared, but for now duplicating to avoid refactoring everything
             long offsetVal = (long)Math.Round(offsetMv * 1.024);
             ulong value = 0x8000001100000000; // Write command + 1.024 scale

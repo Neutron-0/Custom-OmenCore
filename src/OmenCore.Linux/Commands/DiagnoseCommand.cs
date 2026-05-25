@@ -283,6 +283,40 @@ public static class DiagnoseCommand
             info.Notes.Add("Board 8D41 detected (OMEN Max 16-ah0xxx): Linux GPU TGP may stay capped near base power if hp-wmi does not send the GPU thermal modes / Dynamic Boost unlock that Windows OGH sends.");
             info.Recommendations.Add("If RTX 5080/5070-class TGP remains capped around 80W, attach `sudo omencore-cli diagnose --report`, `journalctl -u nvidia-powerd -b --no-pager`, and an ACPI dump to GitHub issue #123 or the upstream hp-wmi thread.");
         }
+
+        if (string.Equals(info.BoardId, "8787", StringComparison.OrdinalIgnoreCase))
+        {
+            info.Notes.Add("Board 8787 detected (OMEN 15-en0xxx / Ryzen + RTX 2060 generation). Windows support uses a conservative legacy profile; Linux support depends on the kernel exposing ec_sys or hp-wmi control paths on this unit.");
+            if (info.EcIoPathExists)
+            {
+                info.Notes.Add("Legacy EC io is present for board 8787. Prefer OmenCore CLI fan/profile commands over raw register writes so safety checks and auto-restore remain active.");
+            }
+            else
+            {
+                info.Recommendations.Add("For board 8787 fan control, test the legacy EC path first: `sudo modprobe ec_sys write_support=1`, mount debugfs if needed, then rerun `sudo omencore-cli diagnose --report`.");
+            }
+
+            if (!info.HpWmiFan1InputExists && !info.HpWmiFan2InputExists)
+            {
+                info.Notes.Add("Board 8787 RPM readback is still field-unverified; fan commands may work even when Linux RPM telemetry is unavailable.");
+            }
+
+            info.Recommendations.Add("When requesting Linux 8787 support, attach `sudo omencore-cli diagnose --report`, `sudo dmidecode -t system -t baseboard`, hp-wmi tree, hwmon tree, and the exact RTX 2060 driver/kernel version.");
+        }
+
+        if (string.Equals(info.BoardId, "8C30", StringComparison.OrdinalIgnoreCase))
+        {
+            info.Notes.Add("Board 8C30 detected (Victus 15-fb1xxx / Ryzen 5 7535HS generation). If the GUI reports performance control unavailable, this usually means the current kernel did not expose hp-wmi/platform_profile controls for this board.");
+            info.Notes.Add("Treat this as profile-control triage until a diagnose bundle shows writable profile or EC paths; do not assume the disabled GUI card is a successful backend apply failure.");
+            info.Recommendations.Add("For board 8C30 Linux reports, attach `sudo omencore-cli diagnose --report`, `sudo dmidecode -t system -t baseboard -t bios`, `find /sys/devices/platform/hp-wmi -maxdepth 4 -type f -print 2>/dev/null`, `find /sys/class/hwmon -maxdepth 3 -type f -name 'fan*' -o -name 'pwm*' -o -name 'temp*_input' 2>/dev/null`, and `journalctl -k -b --no-pager | grep -iE 'hp_wmi|platform_profile|wmi_bus|WQ00'`.");
+        }
+
+        if (string.Equals(info.BoardId, "8C77", StringComparison.OrdinalIgnoreCase))
+        {
+            info.Notes.Add("Board 8C77 detected (OMEN 16-wf1xxx / Insyde BIOS commonly reported). On some units, hp-wmi profile controls may appear available but still fail to deliver expected sustained power behavior.");
+            info.Recommendations.Add("For 8C77 performance/profile gaps, capture `sudo omencore-cli diagnose --report`, `journalctl -k -b --no-pager | grep -iE 'hp_wmi|wmi_bus|WQ00|platform_profile'`, and `sudo dmidecode -t system -t baseboard -t bios`.");
+            info.Recommendations.Add("If logs show WQ00 firmware-method warnings, treat this as a firmware/kernel integration gap and attach ACPI tables (`sudo acpidump`) for upstream hp-wmi triage.");
+        }
         
         if (ec.IsUnsafeEcModel)
         {
@@ -466,6 +500,27 @@ public static class DiagnoseCommand
                  line.Contains("Unknown group", StringComparison.OrdinalIgnoreCase)))
             .Take(3)
             .ToList();
+
+        var hpWmiWq00Lines = lines
+            .Where(line =>
+                line.Contains("WQ00", StringComparison.OrdinalIgnoreCase) &&
+                (line.Contains("Firmware Bug", StringComparison.OrdinalIgnoreCase) ||
+                 line.Contains("query control method not found", StringComparison.OrdinalIgnoreCase) ||
+                 line.Contains("wmi_bus", StringComparison.OrdinalIgnoreCase)))
+            .Take(4)
+            .ToList();
+
+        if (hpWmiWq00Lines.Count > 0)
+        {
+            hints.Add(new LinuxKernelIssueHint
+            {
+                Id = "hp-wmi-wq00-missing-method",
+                Severity = "Warning",
+                Summary = "Kernel reports missing WQ00 query method in WMI firmware path.",
+                Evidence = string.Join(" | ", hpWmiWq00Lines),
+                Recommendation = "This often indicates a firmware/kernel hp-wmi integration gap on some OMEN Insyde boards. Do not assume board-list support guarantees working profile power control; attach diagnose output, full kernel log, and ACPI tables to upstream hp-wmi reports."
+            });
+        }
 
         if (i2cGroupLines.Count > 0)
         {
@@ -666,6 +721,11 @@ public static class DiagnoseCommand
 
     private static void PrintHumanReadable(DiagnoseInfo info)
     {
+        if (UseAsciiDiagnoseOutput())
+        {
+            PrintHumanReadableAscii(info);
+            return;
+        }
         // Box width: 90 total (╔ + 88 inner + ╗)
         const int innerWidth = 88;
         const string topBorder    = "╔════════════════════════════════════════════════════════════════════════════════════════════╗";
@@ -751,6 +811,111 @@ public static class DiagnoseCommand
         }
 
         Console.WriteLine(bottomBorder);
+        Console.WriteLine();
+    }
+
+    private static bool UseAsciiDiagnoseOutput() => true;
+
+    private static void PrintHumanReadableAscii(DiagnoseInfo info)
+    {
+        const int innerWidth = 88;
+        var border = "+" + new string('-', innerWidth) + "+";
+
+        static string State(bool value, string positive = "present", string negative = "missing") =>
+            value ? $"OK {positive}" : $"NO {negative}";
+
+        static string Pad(string value, int width) =>
+            value.Length > width ? value[..Math.Max(0, width - 1)] + "." : value.PadRight(width);
+
+        static string Shorten(string value, int max) =>
+            value.Length <= max ? value : (max <= 3 ? value[..max] : value[..(max - 3)] + "...");
+
+        static void WriteLine(string label, string value)
+        {
+            Console.WriteLine($"|  {label,-11}{Pad(value, 75)}|");
+        }
+
+        Console.WriteLine();
+        Console.WriteLine(border);
+        Console.WriteLine($"|{"OmenCore Linux - Diagnose",56}{"",-32}|");
+        Console.WriteLine(border);
+        WriteLine("Version:", info.Version);
+        WriteLine("Runtime:", info.Runtime);
+        WriteLine("OS:", info.OsPrettyName);
+        WriteLine("Kernel:", info.KernelRelease);
+        WriteLine("Model:", info.Model);
+        WriteLine("Board ID:", info.BoardId);
+        Console.WriteLine(border);
+        WriteLine("Root:", info.IsRoot ? "OK" : "NO");
+        WriteLine("debugfs:", State(info.DebugFsMounted, "mounted", "not mounted"));
+        WriteLine("ec_io:", State(info.EcIoPathExists));
+        WriteLine("ec_sys:", State(info.EcSysModuleLoaded, "loaded", "not loaded"));
+        WriteLine("ec_sys ws:", string.IsNullOrWhiteSpace(info.EcSysWriteSupport) ? "(n/a)" : info.EcSysWriteSupport);
+        WriteLine("hp_wmi:", State(info.HpWmiModuleLoaded, "loaded", "not loaded"));
+        WriteLine("hp-wmi:", State(info.HpWmiPathExists));
+        WriteLine("thermal:", State(info.HpWmiThermalProfileExists));
+        WriteLine("wmi_prof:", State(info.HpWmiPlatformProfileExists));
+        WriteLine("therm_ch:", State(info.HpWmiThermalProfileChoicesExists));
+        WriteLine("wmi_ch:", State(info.HpWmiPlatformProfileChoicesExists));
+        WriteLine("fan1_out:", State(info.HpWmiFan1OutputExists));
+        WriteLine("fan2_out:", State(info.HpWmiFan2OutputExists));
+        WriteLine("fan1_tgt:", State(info.HpWmiFan1TargetExists));
+        WriteLine("fan2_tgt:", State(info.HpWmiFan2TargetExists));
+        WriteLine("acpi_prof:", info.AcpiPlatformProfileExists ? $"OK ({info.AcpiPlatformProfile ?? "?"})" : "NO missing");
+        WriteLine("hwmon_fan:", State(info.HasHwmonFanAccess));
+        Console.WriteLine(border);
+        WriteLine("Capability:", Shorten(info.CapabilityClass, 75));
+        WriteLine("Config Sch:", info.ConfigSchemaVersion.ToString());
+        WriteLine("GPU Telem:", Shorten($"{info.GpuTelemetrySource} {info.GpuTelemetryPath}".Trim(), 75));
+        WriteLine("Detected:", info.DetectedAccessMethod);
+        WriteLine("Available:", info.EcControllerAvailable ? "OK" : "NO");
+        Console.WriteLine($"Service: systemd={(info.Service.SystemdAvailable ? "present" : "missing")}, unit={(info.Service.UnitInstalled ? info.Service.ActiveState : "not installed")}, system_config={(info.Service.SystemConfigExists ? "present" : "missing")}");
+
+        if (info.IsUnsafeEcModel)
+        {
+            WriteLine("EC Safety:", "WARN blocked (new model)");
+        }
+
+        if (info.Notes.Count > 0)
+        {
+            Console.WriteLine(border);
+            WriteLine("Notes:", string.Empty);
+            foreach (var note in info.Notes.Take(6))
+            {
+                foreach (var line in WrapText(note, innerWidth - 7))
+                {
+                    Console.WriteLine($"|   - {Pad(line, innerWidth - 5)}|");
+                }
+            }
+        }
+
+        if (info.KernelIssueHints.Count > 0)
+        {
+            Console.WriteLine(border);
+            WriteLine("Kernel:", "Hints");
+            foreach (var hint in info.KernelIssueHints.Take(4))
+            {
+                foreach (var line in WrapText($"{hint.Severity}: {hint.Summary}", innerWidth - 7))
+                {
+                    Console.WriteLine($"|   - {Pad(line, innerWidth - 5)}|");
+                }
+            }
+        }
+
+        if (info.Recommendations.Count > 0)
+        {
+            Console.WriteLine(border);
+            WriteLine("Next:", "Steps");
+            foreach (var rec in info.Recommendations.Take(6))
+            {
+                foreach (var line in WrapText(rec, innerWidth - 7))
+                {
+                    Console.WriteLine($"|   - {Pad(line, innerWidth - 5)}|");
+                }
+            }
+        }
+
+        Console.WriteLine(border);
         Console.WriteLine();
     }
 

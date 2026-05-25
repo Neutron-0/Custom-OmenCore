@@ -103,7 +103,7 @@ namespace OmenCoreApp.Tests.ViewModels
 
                 vm.CurrentPerformanceMode.Should().Be("Performance");
                 vm.CurrentFanMode.Should().Be("Auto",
-                    "General must report the confirmed FanService state instead of the requested Gaming preset when fan apply is rejected");
+                    "General must report the confirmed FanService state instead of the requested Performance cooling preset when fan apply is rejected");
                 vm.SelectedProfile.Should().Be("Custom",
                     "Performance+Auto is a mixed confirmed state rather than the full Performance quick profile");
             }

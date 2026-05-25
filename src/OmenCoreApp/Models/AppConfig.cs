@@ -30,6 +30,13 @@ namespace OmenCore.Models
         /// Fan transition / smoothing settings for ramping and immediate apply behavior.
         /// </summary>
         public FanTransitionSettings FanTransition { get; set; } = new();
+
+        /// <summary>
+        /// v3.7.0: Quiet profile thermal safety auto-switch settings.
+        /// When in Quiet profile and temperature exceeds SafetyOnTempC, OmenCore
+        /// automatically applies Max fan cooling until temp drops below SafetyOffTempC.
+        /// </summary>
+        public QuietSafetySettings QuietSafety { get; set; } = new();
         
         /// <summary>
         /// Override the auto-detected maximum fan level (0 = auto-detect).
@@ -42,6 +49,13 @@ namespace OmenCore.Models
         public OsdSettings Osd { get; set; } = new();
         public BatterySettings Battery { get; set; } = new();
         public AmbientLightingSettings AmbientLighting { get; set; } = new();
+
+        /// <summary>
+        /// Controls whether the Scene Quick Select card is enabled in the RGB tab.
+        /// When false, only the card header remains visible so users can re-enable it.
+        /// </summary>
+        public bool SceneQuickSelectCardEnabled { get; set; } = true;
+
         public bool FirstRunCompleted { get; set; } = false;
 
         /// <summary>
@@ -634,7 +648,7 @@ namespace OmenCore.Models
         /// <summary>GPU core clock offset in MHz (-500 to +300)</summary>
         public int CoreClockOffsetMHz { get; set; } = 0;
         
-        /// <summary>GPU memory clock offset in MHz (-500 to +1500)</summary>
+        /// <summary>GPU memory clock offset in MHz (-500 to +2000)</summary>
         public int MemoryClockOffsetMHz { get; set; } = 0;
         
         /// <summary>Power limit percentage (50-125, 100 = default TDP)</summary>
@@ -887,6 +901,35 @@ namespace OmenCore.Models
 
         /// <summary>Days of the week on which this rule is active (0=Sun..6=Sat). Empty = every day.</summary>
         public List<int> ActiveDays { get; set; } = new();
+    }
+
+    /// <summary>
+    /// v3.7.0: Quiet profile thermal safety auto-switch settings.
+    /// When the Quiet profile is active and temperature rises critically high, OmenCore
+    /// temporarily applies Max fan cooling, then restores Quiet fans once temperature
+    /// drops back to a safe level.
+    /// </summary>
+    public class QuietSafetySettings
+    {
+        /// <summary>
+        /// Enable the Quiet profile thermal safety auto-switch.
+        /// Default: true. Disable only if you want fully manual fan control in Quiet.
+        /// </summary>
+        public bool Enabled { get; set; } = true;
+
+        /// <summary>
+        /// Temperature (°C) at which safety override activates and switches fans to Max.
+        /// Default: 90°C. Lower this if you want earlier intervention (e.g. 85°C).
+        /// Range: 70–100°C.
+        /// </summary>
+        public double SafetyOnTempC { get; set; } = 90.0;
+
+        /// <summary>
+        /// Temperature (°C) at which the safety override releases and Quiet fans resume.
+        /// Default: 70°C. Must be lower than SafetyOnTempC to provide hysteresis.
+        /// Range: 50–90°C.
+        /// </summary>
+        public double SafetyOffTempC { get; set; } = 70.0;
     }
 }
 

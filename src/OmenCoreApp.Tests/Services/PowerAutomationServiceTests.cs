@@ -9,15 +9,14 @@ namespace OmenCoreApp.Tests.Services
     public class PowerAutomationServiceTests
     {
         [Fact]
-        public void BuiltInPerformanceCurve_ReservesMaxForHighThermals()
+        public void BuiltInPerformanceCurve_ReachesMaxAtSeventyFiveC()
         {
             var curve = FanModeNameResolver.BuildBuiltInCurve("Performance", FanMode.Performance)
                 .OrderBy(p => p.TemperatureC)
                 .ToList();
 
-            curve.Where(p => p.TemperatureC <= 80).Should().OnlyContain(p => p.FanPercent < 90,
-                "power automation fallback Performance/Gaming should not silently behave like Max at moderate temperatures");
-            curve.Single(p => p.FanPercent == 100).TemperatureC.Should().BeGreaterThanOrEqualTo(90);
+            curve.Single(p => p.FanPercent == 100).TemperatureC.Should().Be(75,
+                "power automation fallback Performance should match the restored aggressive cooling endpoint");
         }
     }
 }

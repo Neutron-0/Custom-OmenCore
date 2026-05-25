@@ -94,6 +94,20 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public void GetConfig_ReturnsConfig_For_ProductId_8D41()
+        {
+            var cfg = KeyboardModelDatabase.GetConfig("8D41");
+
+            cfg.Should().NotBeNull();
+            cfg!.ModelName.Should().Contain("OMEN MAX 16");
+            cfg.ModelName.Should().Contain("ah0xxx");
+            cfg.PreferredMethod.Should().Be(KeyboardMethod.HidPerKey);
+            cfg.FallbackMethods.Should().Contain(KeyboardMethod.ColorTable2020);
+            cfg.KeyboardType.Should().Be(KeyboardType.PerKeyRgb);
+            cfg.UserVerified.Should().BeFalse();
+        }
+
+        [Fact]
         public void GetConfigByModelName_ReturnsPerKeyConfig_ForOmenMaxAk0003nr()
         {
             var cfg = KeyboardModelDatabase.GetConfigByModelName("OMEN MAX 16 ak0003nr");
@@ -142,6 +156,18 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public void GetConfig_8D2F_IsVerifiedExactKeyboardProfile()
+        {
+            var cfg = KeyboardModelDatabase.GetConfig("8D2F");
+
+            cfg.Should().NotBeNull();
+            cfg!.ModelName.Should().Contain("16-am0xxx");
+            cfg.KeyboardType.Should().Be(KeyboardType.FourZone);
+            cfg.PreferredMethod.Should().Be(KeyboardMethod.ColorTable2020);
+            cfg.UserVerified.Should().BeTrue();
+        }
+
+        [Fact]
         public void GetConfig_ReturnsConfig_For_ProductId_8787()
         {
             var cfg = KeyboardModelDatabase.GetConfig("8787");
@@ -150,6 +176,20 @@ namespace OmenCoreApp.Tests.Services
             cfg!.ModelName.Should().Contain("15-en0038ur");
             cfg.PreferredMethod.Should().Be(KeyboardMethod.ColorTable2020);
             cfg.KeyboardType.Should().Be(KeyboardType.FourZoneTkl);
+            cfg.UserVerified.Should().BeFalse();
+        }
+
+        [Fact]
+        public void GetConfig_ReturnsConfig_For_ProductId_8574()
+        {
+            var cfg = KeyboardModelDatabase.GetConfig("8574");
+
+            cfg.Should().NotBeNull();
+            cfg!.ModelName.Should().Contain("15-dc1");
+            cfg.ModelNamePattern.Should().Be("15-dc1");
+            cfg.KeyboardType.Should().Be(KeyboardType.BacklightOnly);
+            cfg.PreferredMethod.Should().Be(KeyboardMethod.BacklightOnly);
+            cfg.FallbackMethods.Should().BeEmpty();
             cfg.UserVerified.Should().BeFalse();
         }
 

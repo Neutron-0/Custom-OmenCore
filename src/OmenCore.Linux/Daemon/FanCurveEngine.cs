@@ -15,6 +15,9 @@ namespace OmenCore.Linux.Daemon;
 /// </summary>
 public class FanCurveEngine : IDisposable
 {
+    private const int CriticalFanTempC = 90;
+    private const int MinimumValidFanControlTempC = 1;
+
     private readonly LinuxEcController _ec;
     private readonly LinuxHwMonController _hwmon;
     private readonly OmenCoreConfig _config;
@@ -119,12 +122,25 @@ public class FanCurveEngine : IDisposable
             }
         }
         
-        // Get temperatures from multiple sources
-        var cpuTemp = _ec.GetCpuTemperature() ?? _hwmon.GetCpuTemperature() ?? 0;
-        var gpuTemp = _ec.GetGpuTemperature() ?? _hwmon.GetGpuTemperature() ?? 0;
+        // Get temperatures from multiple sources. Missing telemetry must not be treated
+        // as 0C, because that can incorrectly ramp fans down during sensor outages.
+        var cpuTempReading = LinuxTelemetryResolver.GetCpuTemperature(_ec, _hwmon);
+        var gpuTempReading = LinuxTelemetryResolver.GetGpuTemperature(_ec, _hwmon);
+        var cpuTemp = cpuTempReading?.Temperature ?? 0;
+        var gpuTemp = gpuTempReading?.Temperature ?? 0;
+        var validTemps = new[] { cpuTempReading, gpuTempReading }
+            .Where(reading => reading?.Temperature >= MinimumValidFanControlTempC)
+            .Select(reading => reading!.Temperature)
+            .ToList();
+
+        if (validTemps.Count == 0)
+        {
+            Log("Fan curve skipped: CPU/GPU temperature telemetry is unavailable; preserving the last fan target.");
+            return;
+        }
         
         // Use the higher of CPU/GPU temps for fan control
-        var maxTemp = Math.Max(cpuTemp, gpuTemp);
+        var maxTemp = validTemps.Max();
         
         // Apply hysteresis to prevent oscillation
         if (_lastTargetSpeed >= 0)
@@ -141,6 +157,11 @@ public class FanCurveEngine : IDisposable
         
         // Calculate target speed from curve
         var targetSpeed = CalculateSpeedFromCurve(maxTemp);
+
+        if (maxTemp >= CriticalFanTempC)
+        {
+            targetSpeed = Math.Max(targetSpeed, 100);
+        }
         
         // Apply battery-aware reduction (but keep minimum if temp is critical)
         if (BatteryAwareEnabled && _lastBatteryState && maxTemp < 85)
@@ -149,7 +170,7 @@ public class FanCurveEngine : IDisposable
         }
         
         // Apply smooth transition if enabled
-        if (_config.Fan.SmoothTransition && _lastTargetSpeed >= 0)
+        if (_config.Fan.SmoothTransition && _lastTargetSpeed >= 0 && maxTemp < CriticalFanTempC)
         {
             targetSpeed = SmoothTransition(_lastTargetSpeed, targetSpeed);
         }

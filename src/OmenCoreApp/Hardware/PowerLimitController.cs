@@ -41,7 +41,7 @@ namespace OmenCore.Hardware
         {
             if (!_ecAccess.IsAvailable)
             {
-                throw new InvalidOperationException("EC access not available - PawnIO or legacy WinRing0 backend required");
+                throw new InvalidOperationException("EC access not available - PawnIO backend required");
             }
 
             if (_useSimplifiedMode)

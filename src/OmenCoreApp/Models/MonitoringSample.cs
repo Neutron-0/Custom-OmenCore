@@ -33,6 +33,11 @@ namespace OmenCore.Models
         public TelemetryDataState Fan1RpmState { get; set; } = TelemetryDataState.Unknown;
         public TelemetryDataState Fan2RpmState { get; set; } = TelemetryDataState.Unknown;
 
+        // Commit-4 prototype: explicit telemetry envelopes for CPU temp/power.
+        // Existing scalar/state properties remain for compatibility with current UI/view-model bindings.
+        public TelemetryValue<double> CpuTemperatureTelemetry { get; set; } = new();
+        public TelemetryValue<double> CpuPowerTelemetry { get; set; } = new();
+
         public bool IsGpuInactive => GpuTemperatureState == TelemetryDataState.Inactive;
         
         // Dual fan support (v2.2)
@@ -147,6 +152,8 @@ namespace OmenCore.Models
             GpuTemperatureState       = source.GpuTemperatureState;
             Fan1RpmState              = source.Fan1RpmState;
             Fan2RpmState              = source.Fan2RpmState;
+            CpuTemperatureTelemetry   = new TelemetryValue<double>(source.CpuTemperatureTelemetry);
+            CpuPowerTelemetry         = new TelemetryValue<double>(source.CpuPowerTelemetry);
             Fan1Rpm                   = source.Fan1Rpm;
             Fan2Rpm                   = source.Fan2Rpm;
             SsdTemperatureC           = source.SsdTemperatureC;

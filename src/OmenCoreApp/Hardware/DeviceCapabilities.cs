@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace OmenCore.Hardware
 {
@@ -160,9 +162,45 @@ namespace OmenCore.Hardware
         public bool UsingOghFallback { get; set; }
         
         // Driver status
-        public bool WinRing0Available { get; set; }
         public bool PawnIOAvailable { get; set; }
         public string DriverStatus { get; set; } = "";
+
+        // Structured provider health (commit 3 foundation)
+        public IReadOnlyList<BackendStatus> BackendStatuses { get; set; } = Array.Empty<BackendStatus>();
+
+        /// <summary>
+        /// True when at least one critical backend capability has no healthy provider.
+        /// </summary>
+        public bool HasCriticalBackendDegradation =>
+            !HasHealthyProviderFor(BackendCapability.Telemetry) ||
+            !HasHealthyProviderFor(BackendCapability.FanControl) ||
+            !HasHealthyProviderFor(BackendCapability.PerformanceProfiles);
+
+        /// <summary>
+        /// True when optional backend capabilities are degraded while critical capabilities remain healthy.
+        /// </summary>
+        public bool HasOptionalBackendDegradation =>
+            !HasCriticalBackendDegradation &&
+            (!HasHealthyProviderFor(BackendCapability.ECAccess) ||
+             !HasHealthyProviderFor(BackendCapability.Undervolt));
+
+        public string BackendDegradationSummary
+        {
+            get
+            {
+                if (HasCriticalBackendDegradation)
+                {
+                    return "Critical degradation: at least one required backend capability is unavailable.";
+                }
+
+                if (HasOptionalBackendDegradation)
+                {
+                    return "Optional degradation: core backends are healthy, but some advanced capabilities are unavailable.";
+                }
+
+                return "All tracked backend capabilities are healthy.";
+            }
+        }
         
         // Model family detection (helps identify potential WMI quirks)
         public OmenModelFamily ModelFamily { get; set; } = OmenModelFamily.Unknown;
@@ -216,13 +254,26 @@ namespace OmenCore.Hardware
             
             lines.AppendLine("Undervolt:");
             lines.AppendLine($"  Method: {UndervoltMethod}");
-            lines.AppendLine($"  Secure Boot: {(SecureBootEnabled ? "Enabled (blocks WinRing0)" : "Disabled")}");
+            lines.AppendLine($"  Secure Boot: {(SecureBootEnabled ? "Enabled" : "Disabled")}");
             lines.AppendLine();
             
             lines.AppendLine("OGH Status (optional fallback):");
             lines.AppendLine($"  Installed: {(OghInstalled ? "Yes" : "No")}");
             lines.AppendLine($"  Running: {(OghRunning ? "Yes" : "No")}");
             lines.AppendLine($"  Using as Fallback: {(UsingOghFallback ? "Yes" : "No")}");
+            lines.AppendLine();
+
+            lines.AppendLine("Backend Health:");
+            lines.AppendLine($"  Summary: {BackendDegradationSummary}");
+            foreach (var backend in BackendStatuses)
+            {
+                var state = backend.Healthy ? "Healthy" : backend.Available ? "Degraded" : "Unavailable";
+                lines.AppendLine($"  {backend.Name}: {state} (required: {(backend.Required ? "yes" : "no")})");
+                if (!string.IsNullOrWhiteSpace(backend.FailureReason))
+                {
+                    lines.AppendLine($"    Reason: {backend.FailureReason}");
+                }
+            }
             lines.AppendLine();
             
             // Model database info
@@ -248,6 +299,19 @@ namespace OmenCore.Hardware
             
             return lines.ToString();
         }
+
+        private bool HasHealthyProviderFor(BackendCapability capability)
+        {
+            if (BackendStatuses == null || BackendStatuses.Count == 0)
+            {
+                return false;
+            }
+
+            return BackendStatuses.Any(status =>
+                status.Available &&
+                status.Healthy &&
+                status.Capabilities.Any(c => c == capability));
+        }
     }
 
     /// <summary>
@@ -256,7 +320,7 @@ namespace OmenCore.Hardware
     public enum FanControlMethod
     {
         None = 0,
-        /// <summary>Direct EC register access (requires WinRing0/PawnIO)</summary>
+        /// <summary>Direct EC register access (requires PawnIO)</summary>
         EcDirect,
         /// <summary>HP WMI BIOS commands (no driver needed) - PREFERRED</summary>
         WmiBios,
@@ -278,7 +342,7 @@ namespace OmenCore.Hardware
         None = 0,
         /// <summary>WMI queries (no driver needed)</summary>
         Wmi,
-        /// <summary>LibreHardwareMonitor (may need WinRing0)</summary>
+        /// <summary>LibreHardwareMonitor sensor path</summary>
         LibreHardwareMonitor,
         /// <summary>Direct EC reading (requires driver)</summary>
         EcDirect,
@@ -323,7 +387,7 @@ namespace OmenCore.Hardware
     public enum UndervoltMethod
     {
         None = 0,
-        /// <summary>Intel MSR via WinRing0</summary>
+        /// <summary>Intel MSR via low-level driver</summary>
         IntelMsr,
         /// <summary>Intel MSR via PawnIO (Secure Boot compatible)</summary>
         IntelMsrPawnIO,

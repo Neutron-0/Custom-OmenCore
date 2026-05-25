@@ -128,10 +128,26 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     
+                    <!-- v3.7.0: Quiet thermal safety override banner -->
+                    <Border Grid.Row="0"
+                            Background="#1A2D0A" BorderBrush="#5A9E1A" BorderThickness="1" CornerRadius="8"
+                            Padding="14,10" Margin="0,0,0,12"
+                            Visibility="{Binding IsQuietSafetyOverrideActive, Converter={StaticResource BoolToVisibility}}">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Text="🌡️" FontSize="14" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                            <StackPanel>
+                                <TextBlock Text="THERMAL SAFETY ACTIVE" FontSize="10" FontWeight="Bold" Foreground="#9AE83A"/>
+                                <TextBlock Text="Temperature critical — fans running at Max. Quiet curve will resume when temp drops." 
+                                           FontSize="10" Foreground="#7ACC2A" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
                     <!-- Section Header -->
-                    <Border Grid.Row="0" Background="#0D0D0F" CornerRadius="8" Padding="14,10" Margin="0,0,0,16">
+                    <Border Grid.Row="1" Background="#0D0D0F" CornerRadius="8" Padding="14,10" Margin="0,0,0,16">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
@@ -147,7 +163,7 @@
                     </Border>
 
                     <!-- Profile Cards Grid -->
-                    <UniformGrid Grid.Row="1" Rows="1" Columns="4">
+                    <UniformGrid Grid.Row="2" Rows="1" Columns="4">
                         <!-- Performance Profile -->
                         <Border Style="{StaticResource ProfileCard}" 
                                 Margin="0,0,8,0" Padding="16,20"
@@ -301,7 +317,7 @@
                                 BorderBrush="{Binding SelectedProfileBorder_Custom}"
                                 BorderThickness="2"
                                 MouseLeftButtonUp="Profile_Custom_Click"
-                                ToolTip="User-defined fan curves and power settings via the OMEN tab">
+                                ToolTip="User-defined fan curves and power settings via the Custom tab">
                             <Grid>
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto"/>
@@ -331,7 +347,7 @@
                                         <TextBlock Text="Manual" FontSize="9" Foreground="#A855F7"/>
                                     </Border>
                                     <Border Background="#20A855F7" CornerRadius="4" Padding="6,3">
-                                        <TextBlock Text="OMEN Tab" FontSize="9" Foreground="#A855F7"/>
+                                        <TextBlock Text="Custom Tab" FontSize="9" Foreground="#A855F7"/>
                                     </Border>
                                 </StackPanel>
                                 

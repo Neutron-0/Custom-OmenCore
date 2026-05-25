@@ -21,7 +21,7 @@ namespace OmenCore.Services
     /// For true dust removal, users should use compressed air or open the chassis for cleaning.
     /// 
     /// BACKEND PRIORITY:
-    /// 1. EC Access (PawnIO/legacy WinRing0) - Direct EC control, most responsive
+    /// 1. EC Access (PawnIO) - Direct EC control, most responsive
     /// 2. OMEN Gaming Hub WMI - Uses OGH services if installed and running  
     /// 3. HP WMI BIOS - Standard HP WMI interface for fan control
     /// </summary>
@@ -40,7 +40,7 @@ namespace OmenCore.Services
         public enum FanControlBackend
         {
             None,
-            EcAccess,      // Direct EC via PawnIO/legacy WinRing0
+            EcAccess,      // Direct EC via PawnIO
             OghProxy,      // OMEN Gaming Hub WMI
             WmiBios        // HP WMI BIOS
         }
@@ -126,7 +126,7 @@ namespace OmenCore.Services
             if (_ecAccess != null && _ecAccess.IsAvailable && CanPerformEcWrite())
             {
                 _activeBackend = FanControlBackend.EcAccess;
-                _logging.Info("Fan boost using EC access backend (PawnIO/legacy WinRing0)");
+                _logging.Info("Fan boost using EC access backend (PawnIO)");
                 return;
             }
             
@@ -156,7 +156,7 @@ namespace OmenCore.Services
         /// </summary>
         public string ActiveBackendName => _activeBackend switch
         {
-            FanControlBackend.EcAccess => "EC Access (WinRing0/PawnIO)",
+            FanControlBackend.EcAccess => "EC Access (PawnIO)",
             FanControlBackend.OghProxy => "OMEN Gaming Hub WMI",
             FanControlBackend.WmiBios => "HP WMI BIOS",
             _ => "None"
@@ -226,7 +226,7 @@ namespace OmenCore.Services
                 var reasons = new List<string>();
                 
                 if (_ecAccess == null || !_ecAccess.IsAvailable)
-                    reasons.Add("EC driver (WinRing0/PawnIO) not available");
+                    reasons.Add("EC driver (PawnIO) not available");
                 else if (!CanPerformEcWrite())
                     reasons.Add("Secure Boot blocking EC access");
                     
@@ -396,13 +396,13 @@ namespace OmenCore.Services
                             "• Install PawnIO from pawnio.eu (Secure Boot compatible)\n" +
                             "• Download LpcACPIEC.bin from github.com/namazso/PawnIO.Modules/releases\n" +
                             "• Place it in: C:\\Program Files\\PawnIO\\modules\\\n" +
-                            "• Or disable Secure Boot and use WinRing0",
+                            "• Restart after PawnIO installation if the driver has not activated",
                         FanControlBackend.WmiBios =>
                             "HP WMI BIOS fan commands failed.\n\n" +
                             "Your model may require direct EC access.\n\n" +
                             "Solutions:\n" +
                             "• Install PawnIO from pawnio.eu (Secure Boot compatible)\n" +
-                            "• Or disable Secure Boot and use WinRing0",
+                            "• Restart after PawnIO installation if the driver has not activated",
                         _ => $"Failed to enable max fan via {ActiveBackendName}"
                     };
                     throw new InvalidOperationException(helpMessage);
@@ -441,7 +441,7 @@ namespace OmenCore.Services
         }
         
         /// <summary>
-        /// Enable max fan via direct EC access (WinRing0/PawnIO)
+        /// Enable max fan via direct EC access (PawnIO)
         /// Uses OmenMon-style EC registers which work better on 2022+ OMEN models.
         /// </summary>
         private bool EnableMaxFanViaEc()

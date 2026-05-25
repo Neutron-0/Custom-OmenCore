@@ -138,5 +138,124 @@ namespace OmenCoreApp.Tests.ViewModels
                 logging.Dispose();
             }
         }
+
+        [Fact]
+        public void OnSampleUpdated_WithoutWpfApplication_ProjectsQueuedSampleSynchronously()
+        {
+            RuntimeUiPerformanceCounters.ResetForTests();
+
+            var tmp = Path.Combine(Path.GetTempPath(), "OmenCoreTests", Guid.NewGuid().ToString());
+            Directory.CreateDirectory(tmp);
+            Environment.SetEnvironmentVariable("OMENCORE_CONFIG_DIR", tmp);
+
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            try
+            {
+                var monitoring = new HardwareMonitoringService(
+                    new MonitoringBridgeStub(),
+                    logging,
+                    new MonitoringPreferences(),
+                    new ResumeRecoveryDiagnosticsService());
+                using var vm = new DashboardViewModel(monitoring);
+
+                var onSampleUpdated = typeof(DashboardViewModel).GetMethod("OnSampleUpdated", BindingFlags.Instance | BindingFlags.NonPublic);
+                onSampleUpdated.Should().NotBeNull();
+
+                var sample = new MonitoringSample
+                {
+                    Timestamp = DateTime.UtcNow,
+                    CpuTemperatureC = 62,
+                    GpuTemperatureC = 49,
+                    CpuLoadPercent = 24,
+                    GpuLoadPercent = 12,
+                    CpuPowerWatts = 28,
+                    GpuPowerWatts = 33,
+                    Fan1Rpm = 2100,
+                    Fan2Rpm = 1900
+                };
+
+                onSampleUpdated!.Invoke(vm, new object?[] { null, sample });
+
+                vm.LatestMonitoringSample.Should().BeSameAs(sample);
+                vm.ThermalSamples.Should().ContainSingle("headless projection should still maintain chart history");
+
+                var pendingField = typeof(DashboardViewModel).GetField("_pendingUIUpdate", BindingFlags.Instance | BindingFlags.NonPublic);
+                pendingField.Should().NotBeNull();
+                pendingField!.GetValue(vm).Should().Be(false, "headless projection must not leave the coalescing gate stuck closed");
+
+                var counters = RuntimeUiPerformanceCounters.GetSnapshot();
+                counters.DashboardSamplesReceived.Should().Be(1);
+                counters.DashboardSamplesProjected.Should().Be(1);
+                counters.DashboardSamplesSkipped.Should().Be(0);
+            }
+            finally
+            {
+                logging.Dispose();
+            }
+        }
+
+        [Fact]
+        public void DashboardDisplayProperties_FormatPowerTotalWithoutStringConverters()
+        {
+            var tmp = Path.Combine(Path.GetTempPath(), "OmenCoreTests", Guid.NewGuid().ToString());
+            Directory.CreateDirectory(tmp);
+            Environment.SetEnvironmentVariable("OMENCORE_CONFIG_DIR", tmp);
+
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            try
+            {
+                var monitoring = new HardwareMonitoringService(
+                    new MonitoringBridgeStub(),
+                    logging,
+                    new MonitoringPreferences(),
+                    new ResumeRecoveryDiagnosticsService());
+                using var vm = new DashboardViewModel(monitoring);
+
+                var latestProperty = typeof(DashboardViewModel).GetProperty(nameof(DashboardViewModel.LatestMonitoringSample));
+                latestProperty.Should().NotBeNull();
+
+                latestProperty!.GetSetMethod(nonPublic: true)!.Invoke(vm, new object?[]
+                {
+                    new MonitoringSample
+                    {
+                        CpuTemperatureC = 67,
+                        GpuTemperatureC = 74,
+                        SsdTemperatureC = 41,
+                        CpuPowerWatts = 32.4,
+                        GpuPowerWatts = 81.6,
+                        CpuTemperatureState = TelemetryDataState.Valid,
+                        GpuTemperatureState = TelemetryDataState.Valid
+                    }
+                });
+
+                vm.PowerTotalDisplay.Should().Be("114W");
+                vm.CpuTempChipDisplay.Should().Be("67°C");
+                vm.GpuTempChipDisplay.Should().Be("74°C");
+                vm.SsdTempDisplay.Should().Be("41°C");
+                vm.CpuSummaryDisplay.Should().Be("67°C | 0% | 32W");
+
+                latestProperty.GetSetMethod(nonPublic: true)!.Invoke(vm, new object?[]
+                {
+                    new MonitoringSample
+                    {
+                        CpuTemperatureC = 68,
+                        GpuTemperatureC = 0,
+                        CpuTemperatureState = TelemetryDataState.Valid,
+                        GpuTemperatureState = TelemetryDataState.Inactive
+                    }
+                });
+
+                vm.GpuTempChipDisplay.Should().Be("Idle");
+                vm.RefreshCommand.Should().NotBeNull("the Dashboard refresh button should be connected to the view model");
+            }
+            finally
+            {
+                logging.Dispose();
+            }
+        }
     }
 }

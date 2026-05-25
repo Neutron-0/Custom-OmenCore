@@ -24,6 +24,7 @@ This changelog is updated continuously as fixes land.
 - **Discord:** OMEN Max per-key RGB-capable keyboard shown as unsupported.
 - **Discord:** Victus 16-s0xxx / ProductId `8BD4` startup fans could remain stopped until thermal emergency, and custom fan presets were rejected by unsupported EC readback.
 - **Discord:** OMEN 16-am0xxx / ProductId `8D2F` reported as AMD on an Intel Core Ultra + RTX 5070 model, with confusing direct CPU PL1/PL2 status.
+- **Discord:** OMEN 16-xd0xxx / ProductId `8BCD` v3.6.3 reports covered hot-window CPU temperature rise, abrupt temperature authority jumps, fan presets not reaching max at high temperatures, Max/Extreme/Gaming/Auto/Quiet profile lag or stuck RPM, General profile fan/profile sync drift, and a request for a profile-cycle hotkey.
 - **Reddit:** OMEN Max 16 / RTX 5080 felt sluggish on a 4K external monitor and could not match OGH Unleashed tuning behavior.
 
 ---
@@ -155,6 +156,23 @@ This changelog is updated continuously as fixes land.
 - **Files:** `VERSION.txt`, `README.md`, `INSTALL.md`, `CHANGELOG.md`, `src/OmenCoreApp/OmenCoreApp.csproj`, `src/OmenCore.HardwareWorker/OmenCore.HardwareWorker.csproj`, `src/OmenCore.Linux/OmenCore.Linux.csproj`, `src/OmenCore.Avalonia/OmenCore.Avalonia.csproj`, `src/OmenCore.Desktop/OmenCore.Desktop.csproj`, `installer/OmenCoreInstaller.iss`
 - **Status:** Fixed.
 
+### 12. OMEN 16-xd0xxx Fan Curve and Profile Recovery for 3.7.0 Readiness
+- **Issue:** v3.6.3 field logs from ProductId `8BCD` showed WMI V1 fan control with repeated CPU/GPU frozen-temperature recovery, abrupt fan curve target jumps, General profiles falling back to firmware-only fan modes, and built-in fan curves that no longer reached full cooling at the temperatures users expected.
+- **Root Cause:** The v3.6 fan-curve rebalance pushed Auto/Gaming/Extreme full-speed endpoints too high for this cohort. General profile buttons used Auto/Quiet firmware fan modes instead of the matching curve payloads, so high-temperature max behavior depended on firmware policy. Curve control also consumed raw recovered temperatures directly, so authority changes such as `54C -> 70C` could jerk fan targets.
+- **Fix Deployed:**
+  - Restored aggressive high-temp endpoints:
+    - Performance profile max at `70C`.
+    - Auto/Balanced and Extreme max at `75C`.
+    - Gaming max at `80C`.
+    - Quiet max at `85C`.
+  - General Performance/Balanced/Quiet profiles now apply curve-backed cooling presets with immediate curve evaluation instead of relying only on firmware fan modes.
+  - Quiet profile UI sync now selects the Quiet fan preset instead of Auto.
+  - Fan curve control now slew-limits warm temperature jumps before `75C`, while bypassing smoothing at hot/safety temperatures so cooling can still react immediately.
+  - ProductId `8BCD` keeps non-strict EC fan-mode readback but re-enables the V1 auto-mode floor clear, matching the field evidence that the old conservative handoff could leave the fan floor stuck after Max/manual transitions.
+  - Added `Ctrl+Shift+E` to cycle General profiles: Balanced -> Performance -> Quiet -> Custom.
+- **Files:** `src/OmenCoreApp/Services/FanService.cs`, `src/OmenCoreApp/ViewModels/FanControlViewModel.cs`, `src/OmenCoreApp/ViewModels/GeneralViewModel.cs`, `src/OmenCoreApp/ViewModels/MainViewModel.cs`, `src/OmenCoreApp/Services/HotkeyService.cs`, `src/OmenCoreApp/Models/FanModeNameResolver.cs`, `src/OmenCoreApp/Hardware/FanControllerFactory.cs`
+- **Status:** Fixed in software; needs v3.7.0 field validation on OMEN 16-xd0xxx / ProductId `8BCD`.
+
 ---
 
 ## Tests Added
@@ -175,6 +193,8 @@ This changelog is updated continuously as fixes land.
 - Conservative WMI fan handoff skips manual-zero floor clear on unverified/WMI-only profiles.
 - Non-strict fan-mode readback for WMI-only profiles.
 - ProductId `8D2F` shared AMD/Intel model identity regression.
+- OMEN 16-xd0xxx aggressive fan-curve endpoints, curve-temperature smoothing, and General profile fan sync.
+- Ctrl+Shift+E General profile-cycle hotkey registration path.
 
 ---
 
@@ -210,6 +230,9 @@ This changelog is updated continuously as fixes land.
   - Result: 44 passed, 0 failed.
 - Version metadata sweep completed:
   - Active project/readme/install/installer metadata now reports `3.6.3`; older release references remain only as historical changelog/history links.
+- 3.7.0 readiness fan/profile regression passed:
+  - `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --filter "FanSmoothingTests|FanControlViewModelTests|GeneralViewModelTests|PowerAutomationServiceTests|HotkeyAndMonitoringTests"`
+  - Result: 71 passed, 0 failed.
 
 ---
 

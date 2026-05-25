@@ -309,7 +309,14 @@
                             <Border Background="#1A9C27B0" CornerRadius="8" Padding="8,3" Margin="12,0,0,0" VerticalAlignment="Center">
                                 <TextBlock Text="{Binding CurrentSceneName, StringFormat='Active: {0}'}" FontSize="10" Foreground="#9C27B0"/>
                             </Border>
+                            <ToggleButton IsChecked="{Binding SceneQuickSelectCardEnabled, Mode=TwoWay}"
+                                          Style="{StaticResource ToggleButtonStyle}"
+                                          Margin="12,0,0,0"
+                                          VerticalAlignment="Center"
+                                          ToolTip="Enable or disable Scene Quick Select controls in this card"/>
                         </StackPanel>
+
+                        <StackPanel Visibility="{Binding IsSceneQuickSelectCardContentVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
                         
                         <!-- Scene Grid -->
                         <ItemsControl ItemsSource="{Binding Scenes}">
@@ -416,6 +423,7 @@
                             <Slider Grid.Column="4" Minimum="0.1" Maximum="1" TickFrequency="0.05" IsSnapToTickEnabled="True"
                                     Value="{Binding AudioReactiveSensitivity, Mode=TwoWay}"/>
                         </Grid>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
                 
@@ -435,7 +443,14 @@
                                     <TextBlock Text="{Binding CorsairStatusDetail}" FontSize="10" Foreground="{Binding CorsairStatusBrush}"/>
                                 </StackPanel>
                             </Border>
+                            <ToggleButton IsChecked="{Binding CorsairCardEnabled, Mode=TwoWay}"
+                                          Style="{StaticResource ToggleButtonStyle}"
+                                          Margin="12,0,0,0"
+                                          VerticalAlignment="Center"
+                                          ToolTip="Enable or disable Corsair controls in this card"/>
                         </StackPanel>
+
+                        <StackPanel Visibility="{Binding IsCorsairCardContentVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
                         
                         <!-- Device Discovery -->
                         <Grid Margin="0,0,0,16">
@@ -658,6 +673,7 @@
                                 </Grid>
                             </StackPanel>
                         </Expander>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 
@@ -677,7 +693,14 @@
                                     <TextBlock Text="{Binding LogitechStatusDetail}" FontSize="10" Foreground="{Binding LogitechStatusBrush}"/>
                                 </StackPanel>
                             </Border>
+                            <ToggleButton IsChecked="{Binding LogitechCardEnabled, Mode=TwoWay}"
+                                          Style="{StaticResource ToggleButtonStyle}"
+                                          Margin="12,0,0,0"
+                                          VerticalAlignment="Center"
+                                          ToolTip="Enable or disable Logitech controls in this card"/>
                         </StackPanel>
+
+                        <StackPanel Visibility="{Binding IsLogitechCardContentVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
 
                         <!-- System RGB Section -->
                         <Border Background="{StaticResource SurfaceDarkBrush}" CornerRadius="10" Padding="16" Margin="0,0,0,16">
@@ -811,6 +834,7 @@
                                     Padding="16,8" 
                                     VerticalAlignment="Bottom"/>
                         </Grid>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 
@@ -833,7 +857,14 @@
                                     <TextBlock Text="{Binding RazerStatusDetail}" FontSize="10" Foreground="{Binding RazerStatusBrush}"/>
                                 </StackPanel>
                             </Border>
+                            <ToggleButton IsChecked="{Binding RazerCardEnabled, Mode=TwoWay}"
+                                          Style="{StaticResource ToggleButtonStyle}"
+                                          Margin="12,0,0,0"
+                                          VerticalAlignment="Center"
+                                          ToolTip="Enable or disable Razer controls in this card"/>
                         </StackPanel>
+
+                        <StackPanel Visibility="{Binding IsRazerCardContentVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
                         
                         <TextBlock Text="Requires Razer Synapse to be installed and running" 
                                    FontSize="12" 
@@ -981,6 +1012,7 @@
                                        Foreground="{StaticResource TextSecondaryBrush}"
                                        TextWrapping="Wrap"/>
                         </Border>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 
@@ -1114,12 +1146,19 @@
                                     <TextBlock Text="{Binding KeyboardLightingBackend}" FontSize="10" Foreground="{StaticResource AccentBrush}"/>
                                 </StackPanel>
                             </Border>
+                            <ToggleButton IsChecked="{Binding HpOmenKeyboardCardEnabled, Mode=TwoWay}"
+                                          Style="{StaticResource ToggleButtonStyle}"
+                                          Margin="12,0,0,0"
+                                          VerticalAlignment="Center"
+                                          ToolTip="Enable or disable HP OMEN keyboard controls in this card"/>
                         </StackPanel>
                         
                         <TextBlock Text="Your laptop's built-in 4-zone RGB keyboard" 
                                    FontSize="12" 
                                    Foreground="{StaticResource TextSecondaryBrush}"
                                    Margin="0,0,0,12"/>
+
+                        <StackPanel Visibility="{Binding IsHpOmenKeyboardCardContentVisible, Converter={StaticResource BooleanToVisibilityConverter}}">
                         
                         <!-- Quick Color Buttons -->
                         <TextBlock Text="⚡ QUICK COLORS (click to apply to all zones)" 
@@ -1472,6 +1511,7 @@
                                 </StackPanel>
                             </StackPanel>
                         </Border>
+                        </StackPanel>
                     </StackPanel>
                 </Border>
 

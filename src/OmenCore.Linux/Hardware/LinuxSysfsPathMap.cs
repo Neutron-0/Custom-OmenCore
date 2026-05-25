@@ -44,6 +44,22 @@ public static class LinuxSysfsPathMap
         "/sys/devices/platform/hp-wmi/thermal-profile"
     };
 
+    public static readonly string[] HpWmiPerformanceProfilePaths =
+    {
+        "/sys/devices/platform/hp-wmi/performance_profile",
+        "/sys/devices/platform/hp-wmi/performance-profile"
+    };
+
+    public static readonly string[] HpWmiProfilePaths =
+    {
+        "/sys/devices/platform/hp-wmi/thermal_profile",
+        "/sys/devices/platform/hp-wmi/thermal-profile",
+        "/sys/devices/platform/hp-wmi/platform_profile",
+        "/sys/devices/platform/hp-wmi/platform-profile",
+        "/sys/devices/platform/hp-wmi/performance_profile",
+        "/sys/devices/platform/hp-wmi/performance-profile"
+    };
+
     public static readonly string[] HpWmiPlatformProfileChoicePaths =
     {
         "/sys/devices/platform/hp-wmi/platform_profile_choices",
@@ -54,6 +70,22 @@ public static class LinuxSysfsPathMap
     {
         "/sys/devices/platform/hp-wmi/thermal_profile_choices",
         "/sys/devices/platform/hp-wmi/thermal-profile-choices"
+    };
+
+    public static readonly string[] HpWmiPerformanceProfileChoicePaths =
+    {
+        "/sys/devices/platform/hp-wmi/performance_profile_choices",
+        "/sys/devices/platform/hp-wmi/performance-profile-choices"
+    };
+
+    public static readonly string[] HpWmiProfileChoicePaths =
+    {
+        "/sys/devices/platform/hp-wmi/thermal_profile_choices",
+        "/sys/devices/platform/hp-wmi/thermal-profile-choices",
+        "/sys/devices/platform/hp-wmi/platform_profile_choices",
+        "/sys/devices/platform/hp-wmi/platform-profile-choices",
+        "/sys/devices/platform/hp-wmi/performance_profile_choices",
+        "/sys/devices/platform/hp-wmi/performance-profile-choices"
     };
 
     public static string? ResolveFirstExistingFile(IEnumerable<string> candidates)

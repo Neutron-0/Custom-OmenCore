@@ -357,7 +357,6 @@ namespace OmenCore.Services.Diagnostics
 
                 // Driver status
                 sb.AppendLine("=== DRIVER STATUS ===");
-                sb.AppendLine($"Legacy WinRing0: {GetWinRing0Status()}");
                 sb.AppendLine($"PawnIO: {GetPawnIOStatus()}");
                 sb.AppendLine();
 
@@ -631,6 +630,12 @@ namespace OmenCore.Services.Diagnostics
                 sb.AppendLine($"PopupRenderCacheMisses: {uiCounters.PopupRenderCacheMisses}");
                 sb.AppendLine($"PopupRenderCacheHitRatio: {uiCounters.PopupRenderCacheHitRatio:F2}");
                 sb.AppendLine($"LatestSampleReplacements: {uiCounters.LatestSampleReplacements}");
+                sb.AppendLine($"FanTelemetrySyncs: {uiCounters.FanTelemetrySyncs}");
+                sb.AppendLine($"FanTelemetryCollectionResizes: {uiCounters.FanTelemetryCollectionResizes}");
+                sb.AppendLine($"FanTelemetryItemsUpdated: {uiCounters.FanTelemetryItemsUpdated}");
+                sb.AppendLine($"FanTelemetryPropertyOnlySyncs: {uiCounters.FanTelemetryPropertyOnlySyncs}");
+                sb.AppendLine($"FanTelemetryCollectionResizeRatio: {uiCounters.FanTelemetryCollectionResizeRatio:F2}");
+                sb.AppendLine($"FanTelemetryPropertyOnlySyncRatio: {uiCounters.FanTelemetryPropertyOnlySyncRatio:F2}");
                 sb.AppendLine();
 
                 sb.AppendLine("[Omen-Related Processes]");
@@ -745,6 +750,8 @@ namespace OmenCore.Services.Diagnostics
                     sb.AppendLine($"HiddenSurfaceSamplesSkipped: {s.Ui.HiddenSurfaceSamplesSkipped}");
                     sb.AppendLine($"TrayRenderCacheHitRatio: {s.Ui.TrayRenderCacheHitRatio:F2}");
                     sb.AppendLine($"PopupRenderCacheHitRatio: {s.Ui.PopupRenderCacheHitRatio:F2}");
+                    sb.AppendLine($"FanTelemetryCollectionResizeRatio: {s.Ui.FanTelemetryCollectionResizeRatio:F2}");
+                    sb.AppendLine($"FanTelemetryPropertyOnlySyncRatio: {s.Ui.FanTelemetryPropertyOnlySyncRatio:F2}");
                     sb.AppendLine($"TrayRenderCacheClass: {ClassifyCacheHitRatio(s.Ui.TrayRenderCacheHitRatio)}");
                     sb.AppendLine($"PopupRenderCacheClass: {ClassifyCacheHitRatio(s.Ui.PopupRenderCacheHitRatio)}");
                     sb.AppendLine();
@@ -763,6 +770,10 @@ namespace OmenCore.Services.Diagnostics
                 sb.AppendLine($"GeneralSamplesProjectedDelta: {last.Ui.GeneralSamplesProjected - first.Ui.GeneralSamplesProjected}");
                 sb.AppendLine($"HiddenSurfaceSamplesSkippedDelta: {last.Ui.HiddenSurfaceSamplesSkipped - first.Ui.HiddenSurfaceSamplesSkipped}");
                 sb.AppendLine($"LatestSampleReplacementsDelta: {last.Ui.LatestSampleReplacements - first.Ui.LatestSampleReplacements}");
+                sb.AppendLine($"FanTelemetrySyncsDelta: {last.Ui.FanTelemetrySyncs - first.Ui.FanTelemetrySyncs}");
+                sb.AppendLine($"FanTelemetryCollectionResizesDelta: {last.Ui.FanTelemetryCollectionResizes - first.Ui.FanTelemetryCollectionResizes}");
+                sb.AppendLine($"FanTelemetryItemsUpdatedDelta: {last.Ui.FanTelemetryItemsUpdated - first.Ui.FanTelemetryItemsUpdated}");
+                sb.AppendLine($"FanTelemetryPropertyOnlySyncsDelta: {last.Ui.FanTelemetryPropertyOnlySyncs - first.Ui.FanTelemetryPropertyOnlySyncs}");
                 sb.AppendLine($"ScenarioAssessment: {BuildBoundedScenarioAssessment(last, first, estimatedCpuPercent)}");
 
                 File.WriteAllText(Path.Combine(exportPath, "runtime-performance-bounded.txt"), sb.ToString());
@@ -1578,27 +1589,6 @@ namespace OmenCore.Services.Diagnostics
                 _logging.Warn($"[DiagnosticExportService] {nameof(GetHvciStatus)} failed: {ex.Message}");
             }
             return "Not Configured";
-        }
-
-        private string GetWinRing0Status()
-        {
-            try
-            {
-                // Check if legacy WinRing0 artifacts are present
-                var driverPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "drivers", "WinRing0x64.sys");
-                if (File.Exists(driverPath))
-                    return "Installed";
-                
-                // Also check temp directory (some apps drop it there)
-                var tempPath = Path.Combine(Path.GetTempPath(), "WinRing0x64.sys");
-                if (File.Exists(tempPath))
-                    return "Installed (temp)";
-            }
-            catch (Exception ex)
-            {
-                _logging.Warn($"[DiagnosticExportService] {nameof(GetWinRing0Status)} failed: {ex.Message}");
-            }
-            return "Not Found";
         }
 
         [SupportedOSPlatform("windows")]

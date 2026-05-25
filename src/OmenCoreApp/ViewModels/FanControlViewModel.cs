@@ -1858,16 +1858,15 @@ namespace OmenCore.ViewModels
 
         private static List<FanCurvePoint> GetDefaultAutoCurve()
         {
-            // v3.6.0: Balanced Auto curve; Max remains the explicit full-cooling mode.
+            // v3.7.0: field reports on OMEN 16-xd0xxx need Balanced/Auto to reach max
+            // before the high-80s instead of hovering below full cooling.
             return new List<FanCurvePoint>
             {
                 new() { TemperatureC = 40, FanPercent = 30 },
                 new() { TemperatureC = 50, FanPercent = 38 },
                 new() { TemperatureC = 60, FanPercent = 50 },
-                new() { TemperatureC = 70, FanPercent = 62 },
-                new() { TemperatureC = 80, FanPercent = 78 },
-                new() { TemperatureC = 88, FanPercent = 92 },
-                new() { TemperatureC = 95, FanPercent = 100 }
+                new() { TemperatureC = 68, FanPercent = 72 },
+                new() { TemperatureC = 75, FanPercent = 100 }
             };
         }
 
@@ -1883,42 +1882,39 @@ namespace OmenCore.ViewModels
         
         private static List<FanCurvePoint> GetQuietCurve()
         {
-            // Silent mode: delayed fan ramp, allows higher temps for quiet operation
+            // Quiet stays capped; QuietSafetyMonitor owns emergency Max fan override.
             return new List<FanCurvePoint>
             {
                 new() { TemperatureC = 50, FanPercent = 25 },
-                new() { TemperatureC = 65, FanPercent = 35 },
-                new() { TemperatureC = 75, FanPercent = 50 },
-                new() { TemperatureC = 85, FanPercent = 70 },
-                new() { TemperatureC = 95, FanPercent = 100 }
+                new() { TemperatureC = 65, FanPercent = 38 },
+                new() { TemperatureC = 75, FanPercent = 60 },
+                new() { TemperatureC = 80, FanPercent = 85 }
             };
         }
         
         private static List<FanCurvePoint> GetGamingCurve()
         {
-            // Gaming mode: stronger than Auto, but avoids near-Max fan at moderate temps.
+            // Gaming mode: stronger than Auto, full cooling at 80C for sustained load.
             return new List<FanCurvePoint>
             {
                 new() { TemperatureC = 40, FanPercent = 30 },
                 new() { TemperatureC = 50, FanPercent = 42 },
                 new() { TemperatureC = 60, FanPercent = 58 },
                 new() { TemperatureC = 70, FanPercent = 72 },
-                new() { TemperatureC = 80, FanPercent = 88 },
-                new() { TemperatureC = 90, FanPercent = 100 }
+                new() { TemperatureC = 80, FanPercent = 100 }
             };
         }
         
         private static List<FanCurvePoint> GetExtremeCurve()
         {
-            // Extreme mode: highest non-Max curve; 100% is reserved for genuinely hot operation.
+            // Extreme mode: highest non-Max curve; restored to the long-standing 75C max target.
             return new List<FanCurvePoint>
             {
                 new() { TemperatureC = 40, FanPercent = 38 },
                 new() { TemperatureC = 50, FanPercent = 50 },
                 new() { TemperatureC = 60, FanPercent = 66 },
-                new() { TemperatureC = 70, FanPercent = 82 },
-                new() { TemperatureC = 80, FanPercent = 94 },
-                new() { TemperatureC = 88, FanPercent = 100 }
+                new() { TemperatureC = 70, FanPercent = 88 },
+                new() { TemperatureC = 75, FanPercent = 100 }
             };
         }
         

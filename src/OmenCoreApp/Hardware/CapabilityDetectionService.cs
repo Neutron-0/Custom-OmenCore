@@ -13,8 +13,12 @@ namespace OmenCore.Hardware
     /// </summary>
     public class CapabilityDetectionService : IDisposable
     {
+        private static readonly object BackendStatusLock = new();
+        private static readonly Dictionary<string, (bool Available, bool Healthy)> LastBackendState = new(StringComparer.OrdinalIgnoreCase);
+
         private readonly LoggingService? _logging;
         private bool _disposed;
+        private readonly Dictionary<string, string> _backendFailures = new(StringComparer.OrdinalIgnoreCase);
         
         public DeviceCapabilities Capabilities { get; private set; } = new();
         
@@ -73,6 +77,9 @@ namespace OmenCore.Hardware
             
             // Phase 11: Refine capabilities based on model database
             RefineCapabilitiesFromModel();
+
+            // Phase 12: Structured backend health snapshot (additive diagnostics)
+            BuildBackendStatuses();
             
             // Log summary
             _logging?.Info("═══════════════════════════════════════════════════");
@@ -477,7 +484,7 @@ namespace OmenCore.Hardware
                 
                 if (Capabilities.SecureBootEnabled)
                 {
-                    _logging?.Warn("  ⚠️ Secure Boot blocks unsigned drivers (WinRing0)");
+                    _logging?.Warn("  ⚠️ Secure Boot blocks unsigned low-level drivers; PawnIO remains the supported EC/MSR backend.");
                 }
             }
             catch (Exception ex)
@@ -521,18 +528,10 @@ namespace OmenCore.Hardware
                 _logging?.Info($"  PawnIO: Available ✓ (Secure Boot compatible)");
             }
             
-            // Check WinRing0
-            Capabilities.WinRing0Available = CheckWinRing0Available();
-            _logging?.Info($"  WinRing0: {(Capabilities.WinRing0Available ? "Available" : "Not available")}");
-            
             // Determine overall driver status
             if (Capabilities.PawnIOAvailable)
             {
                 Capabilities.DriverStatus = "PawnIO available (Secure Boot compatible)";
-            }
-            else if (Capabilities.WinRing0Available)
-            {
-                Capabilities.DriverStatus = "WinRing0 available";
             }
             else if (Capabilities.SecureBootEnabled)
             {
@@ -541,25 +540,6 @@ namespace OmenCore.Hardware
             else
             {
                 Capabilities.DriverStatus = "No EC driver available";
-            }
-        }
-
-        private bool CheckWinRing0Available()
-        {
-            // Use registry check — Win32_SystemDriver WMI scan takes 15-20s on some machines.
-            // HKLM\SYSTEM\CurrentControlSet\Services is always available without elevated permissions.
-            try
-            {
-                using var k1 = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
-                    @"SYSTEM\CurrentControlSet\Services\WinRing0_1_2_0");
-                if (k1 != null) return true;
-                using var k2 = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
-                    @"SYSTEM\CurrentControlSet\Services\WinRing0x64");
-                return k2 != null;
-            }
-            catch
-            {
-                return false;
             }
         }
 
@@ -611,10 +591,12 @@ namespace OmenCore.Hardware
                 _logging?.Warn("  PawnIO: Found in registry but driver initialization failed");
                 _logging?.Warn("    → EC and MSR features will be unavailable until driver is operational");
                 _logging?.Info("    → Possible causes: driver awaiting reboot, service not started, or module missing");
+                RecordBackendFailure("PawnIO", "PawnIO detected but EC access probe failed.", "Restart and reinstall PawnIO if needed.");
                 return false;
             }
-            catch
+            catch (Exception ex)
             {
+                RecordBackendFailure("PawnIO", ex.Message, "Retry probe or reinstall PawnIO.");
                 return false;
             }
         }
@@ -648,6 +630,7 @@ namespace OmenCore.Hardware
             catch (Exception ex)
             {
                 _logging?.Warn($"WMI BIOS detection error: {ex.Message}");
+                RecordBackendFailure("WMI", ex.Message, "Verify HP WMI BIOS provider availability.");
             }
         }
 
@@ -665,9 +648,8 @@ namespace OmenCore.Hardware
             // Priority order (OGH-independent methods first):
             // 1. WMI BIOS (no driver needed, works on most OMEN laptops)
             // 2. Direct EC via PawnIO (Secure Boot compatible)
-            // 3. Direct EC via WinRing0 (requires Secure Boot disabled)
-            // 4. OGH Proxy (LAST RESORT - only if WMI BIOS fails)
-            // 5. Monitoring only
+            // 3. OGH Proxy (LAST RESORT - only if WMI BIOS fails)
+            // 4. Monitoring only
             
             // Check if model database says WMI is ineffective for this model
             // Some models (Transcend, 17-ck2xxx) have WMI that returns success but doesn't work
@@ -696,16 +678,6 @@ namespace OmenCore.Hardware
                 Capabilities.CanSetFanSpeed = true;
                 Capabilities.CanReadRpm = true;
                 _logging?.Info("  → Using PawnIO for EC access (OGH-independent, Secure Boot compatible)");
-                return;
-            }
-            
-            // Tertiary: WinRing0 for EC access (requires Secure Boot disabled)
-            if (Capabilities.WinRing0Available)
-            {
-                Capabilities.FanControl = FanControlMethod.EcDirect;
-                Capabilities.CanSetFanSpeed = true;
-                Capabilities.CanReadRpm = true;
-                _logging?.Info("  → Using WinRing0 for EC access (OGH-independent)");
                 return;
             }
             
@@ -757,7 +729,7 @@ namespace OmenCore.Hardware
                 Capabilities.ThermalMethod = ThermalSensorMethod.Wmi;
                 _logging?.Info("  → Using WMI for thermal sensors");
             }
-            else if (Capabilities.WinRing0Available || Capabilities.PawnIOAvailable)
+            else if (Capabilities.PawnIOAvailable)
             {
                 Capabilities.ThermalMethod = ThermalSensorMethod.LibreHardwareMonitor;
                 _logging?.Info("  → Using LibreHardwareMonitor for thermal sensors");
@@ -818,6 +790,7 @@ namespace OmenCore.Hardware
             catch (Exception ex)
             {
                 _logging?.Warn($"GPU detection error: {ex.Message}");
+                RecordBackendFailure("NVAPI", ex.Message, "Update GPU driver and verify vendor APIs are available.");
             }
         }
 
@@ -840,12 +813,6 @@ namespace OmenCore.Hardware
                     Capabilities.UndervoltMethod = UndervoltMethod.None;
                     _logging?.Warn("  → Undervolt unavailable (Secure Boot blocks MSR access)");
                 }
-            }
-            else if (Capabilities.WinRing0Available)
-            {
-                Capabilities.CanUndervolt = true;
-                Capabilities.UndervoltMethod = UndervoltMethod.IntelMsr;
-                _logging?.Info("  → Undervolt available via WinRing0");
             }
             else
             {
@@ -887,6 +854,118 @@ namespace OmenCore.Hardware
             {
                 _logging?.Warn($"Lighting detection error: {ex.Message}");
             }
+        }
+
+        private void BuildBackendStatuses()
+        {
+            var nowUtc = DateTime.UtcNow;
+            var wmiAvailable = _wmiBios?.IsAvailable == true;
+            var pawnIoAvailable = Capabilities.PawnIOAvailable;
+            var nvapiAvailable = Capabilities.NvApiAvailable;
+
+            var winRingFailure = pawnIoAvailable
+                ? "Legacy WinRing0 backend is retired; PawnIO is active."
+                : "Legacy WinRing0 backend is retired in current builds.";
+            var winRingAction = pawnIoAvailable
+                ? "No action required while PawnIO remains healthy."
+                : "Install PawnIO for Secure Boot compatible EC/MSR access.";
+
+            var statuses = new List<BackendStatus>
+            {
+                new()
+                {
+                    Name = "WMI",
+                    Required = true,
+                    Available = wmiAvailable,
+                    Healthy = wmiAvailable,
+                    Capabilities = new[]
+                    {
+                        BackendCapability.Telemetry,
+                        BackendCapability.FanControl,
+                        BackendCapability.PerformanceProfiles
+                    },
+                    FailureReason = wmiAvailable ? null : GetFailureReason("WMI", "WMI BIOS provider unavailable"),
+                    RecommendedAction = wmiAvailable ? null : "Verify HP WMI BIOS provider and permissions.",
+                    LastUpdatedUtc = nowUtc
+                },
+                new()
+                {
+                    Name = "PawnIO",
+                    Required = false,
+                    Available = pawnIoAvailable,
+                    Healthy = pawnIoAvailable,
+                    Capabilities = new[]
+                    {
+                        BackendCapability.ECAccess,
+                        BackendCapability.Undervolt
+                    },
+                    FailureReason = pawnIoAvailable ? null : GetFailureReason("PawnIO", "PawnIO driver not available"),
+                    RecommendedAction = pawnIoAvailable ? null : "Install or repair PawnIO.",
+                    LastUpdatedUtc = nowUtc
+                },
+                new()
+                {
+                    Name = "NVAPI",
+                    Required = false,
+                    Available = nvapiAvailable,
+                    Healthy = nvapiAvailable,
+                    Capabilities = new[] { BackendCapability.Telemetry },
+                    FailureReason = nvapiAvailable ? null : GetFailureReason("NVAPI", "NVAPI unavailable or no NVIDIA GPU detected"),
+                    RecommendedAction = nvapiAvailable ? null : "Optional for NVIDIA-specific telemetry.",
+                    LastUpdatedUtc = nowUtc
+                },
+                new()
+                {
+                    Name = "WinRing0",
+                    Required = false,
+                    Available = false,
+                    Healthy = false,
+                    Capabilities = new[]
+                    {
+                        BackendCapability.ECAccess,
+                        BackendCapability.Undervolt
+                    },
+                    FailureReason = winRingFailure,
+                    RecommendedAction = winRingAction,
+                    LastUpdatedUtc = nowUtc
+                }
+            };
+
+            Capabilities.BackendStatuses = statuses;
+            LogBackendStatusChanges(statuses);
+        }
+
+        private void LogBackendStatusChanges(IEnumerable<BackendStatus> statuses)
+        {
+            lock (BackendStatusLock)
+            {
+                foreach (var status in statuses)
+                {
+                    if (LastBackendState.TryGetValue(status.Name, out var previous) &&
+                        previous.Available == status.Available &&
+                        previous.Healthy == status.Healthy)
+                    {
+                        continue;
+                    }
+
+                    LastBackendState[status.Name] = (status.Available, status.Healthy);
+                    var levelPrefix = status.Required && !status.Healthy
+                        ? "[Backend][CriticalLoss]"
+                        : "[Backend][AvailabilityChange]";
+                    _logging?.Warn($"{levelPrefix} {status.Name}: available={status.Available}, healthy={status.Healthy}, required={status.Required}, reason={status.FailureReason ?? "n/a"}");
+                }
+            }
+        }
+
+        private void RecordBackendFailure(string backendName, string message, string recommendedAction)
+        {
+            _backendFailures[backendName] = $"{message} (action: {recommendedAction})";
+            _logging?.Warn($"[Backend][InitFailure] {backendName}: {message}");
+        }
+
+        private string GetFailureReason(string backendName, string fallback)
+        {
+            return _backendFailures.TryGetValue(backendName, out var reason) ? reason : fallback;
         }
 
         /// <summary>
@@ -1078,7 +1157,7 @@ namespace OmenCore.Hardware
             {
                 FanControlMethod.WmiBios => "HpWmiBios",
                 FanControlMethod.OghProxy => "OghServiceProxy",
-                FanControlMethod.EcDirect => "WinRing0EcAccess",
+                FanControlMethod.EcDirect => "PawnIOEcAccess",
                 FanControlMethod.Steps => "StepFanController",
                 FanControlMethod.Percent => "PwmFanController",
                 _ => "None"

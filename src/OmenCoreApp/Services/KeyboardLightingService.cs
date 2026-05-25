@@ -266,6 +266,7 @@ namespace OmenCore.Services
                 if (_useV2Backend && _v2Service != null)
                 {
                     var result = await _v2Service.ApplyProfileAsync(profile);
+                    TrackV2Result(result.Success);
                     if (result.Success)
                     {
                         _logging.Info($"✓ Profile applied via V2 engine ({_v2Service.BackendName})");
@@ -410,6 +411,7 @@ namespace OmenCore.Services
                     }
                     
                     var result = await _v2Service.SetZoneColorsAsync(orderedColors);
+                    TrackV2Result(result.Success);
                     if (result.Success)
                     {
                         _logging.Info($"✓ Zone colors set via V2 engine ({_v2Service.BackendName})");
@@ -593,13 +595,16 @@ namespace OmenCore.Services
             if ((backend == "EC" || backend == "Auto") && IsExperimentalEcEnabled && _ecAvailable && _ecAccess != null)
             {
                 SetZoneColorViaEc(zone, color);
+                TrackEcResult(true);
                 return true; // Assume success for EC
             }
             
             // Try WMI BIOS
             if (_wmiBiosAvailable && _wmiBios != null)
             {
-                if (_wmiBios.SetZoneColor((int)zone, color.R, color.G, color.B))
+                var wmiSuccess = _wmiBios.SetZoneColor((int)zone, color.R, color.G, color.B);
+                TrackWmiResult(wmiSuccess);
+                if (wmiSuccess)
                 {
                     return true; // Success
                 }
@@ -866,6 +871,30 @@ namespace OmenCore.Services
             {
                 _totalAttempts++;
                 if (success) _oghSuccessCount++; else _oghFailureCount++;
+            }
+        }
+
+        private void TrackV2Result(bool success)
+        {
+            if (_v2Service == null)
+            {
+                return;
+            }
+
+            switch (_v2Service.ActiveMethod)
+            {
+                case KeyboardMethod.EcDirect:
+                    TrackEcResult(success);
+                    break;
+                case KeyboardMethod.ColorTable2020:
+                case KeyboardMethod.NewWmi2023:
+                case KeyboardMethod.HidPerKey:
+                case KeyboardMethod.BacklightOnly:
+                case KeyboardMethod.Unknown:
+                case KeyboardMethod.Unsupported:
+                default:
+                    TrackWmiResult(success);
+                    break;
             }
         }
 

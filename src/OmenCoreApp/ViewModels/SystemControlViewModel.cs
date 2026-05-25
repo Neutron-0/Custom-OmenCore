@@ -28,7 +28,7 @@ namespace OmenCore.ViewModels
         private readonly AmdGpuService? _amdGpuService;
         private readonly FanService? _fanService;
         private readonly HardwareMonitoringService? _hardwareMonitoringService;
-        private IMsrAccess? _msrAccess;  // Changed from WinRing0MsrAccess to IMsrAccess
+        private IMsrAccess? _msrAccess;
         private readonly IEcAccess? _ecAccess;
         private readonly RuntimeEcOperationCoordinator _ecOperationCoordinator;
         private EdpThrottlingMitigationService? _edpMitigationService;
@@ -767,7 +767,7 @@ namespace OmenCore.ViewModels
             "Minimum" => "Base TGP only - Lower power, quieter operation, better battery life",
             "Medium" => "Custom TGP enabled - Balanced performance and thermals",
             "Maximum" => "Custom TGP + Dynamic Boost (PPAB) - Maximum GPU wattage (+15W boost)",
-            "Extended" => "Extended Boost (PPAB+) - For RTX 5080/newer GPUs that support +25W or more",
+            "Extended" => "Extended Boost (PPAB+) - Try if Maximum doesn't reach your GPU's rated TGP (RTX 50-series and up)",
             _ => "Select GPU power level"
         };
 
@@ -778,7 +778,7 @@ namespace OmenCore.ViewModels
                 if (!GpuPowerBoostAvailable)
                     return "GPU Power Boost not available on this system";
 
-                var nvapiNote = GpuNvapiAvailable ?
+                var nvapiNote = GpuPowerLimitAvailable ?
                     " (NVAPI power limits available for fine-tuning)" : "";
 
                 return $"{GpuPowerBoostDescription}{nvapiNote}";
@@ -864,6 +864,7 @@ namespace OmenCore.ViewModels
                     _gpuOcTestPending = value;
                     OnPropertyChanged();
                     OnPropertyChanged(nameof(GpuOcTestActionText));
+                    OnPropertyChanged(nameof(GpuPowerLimitControlEnabled));
                     (TestGpuOcCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
                     (ConfirmGpuOcTestCommand as RelayCommand)?.RaiseCanExecuteChanged();
                     (ApplyGpuOcCommand as RelayCommand)?.RaiseCanExecuteChanged();
@@ -1059,7 +1060,6 @@ namespace OmenCore.ViewModels
                 {
                     _gpuOcAvailable = value;
                     OnPropertyChanged();
-                    OnPropertyChanged(nameof(GpuOcNotAvailable));
                     NotifyGpuOcMetadataChanged();
                     (ApplyGpuOcCommand as RelayCommand)?.RaiseCanExecuteChanged();
                     (ResetGpuOcCommand as RelayCommand)?.RaiseCanExecuteChanged();
@@ -1078,7 +1078,24 @@ namespace OmenCore.ViewModels
                 {
                     _gpuNvapiAvailable = value;
                     OnPropertyChanged();
-                    OnPropertyChanged(nameof(GpuOcNotAvailable));
+                    NotifyGpuOcMetadataChanged();
+                    (ApplyGpuOcCommand as RelayCommand)?.RaiseCanExecuteChanged();
+                    (ResetGpuOcCommand as RelayCommand)?.RaiseCanExecuteChanged();
+                    (TestGpuOcCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+                }
+            }
+        }
+
+        private bool _gpuPowerLimitAvailable;
+        public bool GpuPowerLimitAvailable
+        {
+            get => _gpuPowerLimitAvailable;
+            private set
+            {
+                if (_gpuPowerLimitAvailable != value)
+                {
+                    _gpuPowerLimitAvailable = value;
+                    OnPropertyChanged();
                     NotifyGpuOcMetadataChanged();
                     (ApplyGpuOcCommand as RelayCommand)?.RaiseCanExecuteChanged();
                     (ResetGpuOcCommand as RelayCommand)?.RaiseCanExecuteChanged();
@@ -1088,19 +1105,32 @@ namespace OmenCore.ViewModels
         }
         
         /// <summary>
-        /// True when NVAPI is available but clock offsets are not supported.
+        /// True when NVAPI is available, power limits are writable, but clock offsets are not supported.
         /// Used to show informational message in UI.
         /// </summary>
-        public bool GpuOcNotAvailable => GpuNvapiAvailable && !GpuOcAvailable;
-        public bool GpuExtendedOffsetsAvailable => GpuCoreOffsetMax > 200 || GpuMemoryOffsetMax > 500 || GpuPowerLimitMax > 115;
-        public string GpuOcCapabilityBadgeText => GpuOcNotAvailable ? "Power Limit Only" : GpuExtendedOffsetsAvailable ? "Extended Range" : "Detected Range";
-        public string GpuOcCapabilityDescription => GpuOcNotAvailable
-            ? "This GPU/driver exposes NVAPI power tuning, but clock and voltage offsets remain locked."
-            : GpuExtendedOffsetsAvailable
+        public bool GpuOcNotAvailable => GpuNvapiAvailable && !GpuOcAvailable && GpuPowerLimitAvailable;
+        public bool GpuPowerLimitUnavailable => GpuNvapiAvailable && !GpuPowerLimitAvailable;
+        public bool GpuPowerLimitControlEnabled => GpuNvapiAvailable && GpuPowerLimitAvailable && !IsGpuOcTestPending;
+        public string GpuPowerLimitUnavailableText => "Power limit is locked by this NVIDIA driver or HP firmware path. Core and memory offsets can still be applied when available, but TGP changes must come from firmware/BIOS/OEM controls.";
+        public bool GpuExtendedOffsetsAvailable => GpuCoreOffsetMax > 200 || GpuMemoryOffsetMax > 500 || (GpuPowerLimitAvailable && GpuPowerLimitMax > 115);
+        public string GpuOcCapabilityBadgeText => GpuPowerLimitUnavailable
+            ? GpuOcAvailable ? "Power Locked" : "Locked"
+            : GpuOcNotAvailable ? "Power Limit Only" : GpuExtendedOffsetsAvailable ? "Extended Range" : "Detected Range";
+        public string GpuOcCapabilityDescription => GpuPowerLimitUnavailable
+            ? GpuOcAvailable
+                ? "NVAPI clock offsets are available, but power limit writes are locked by the current driver or firmware path."
+                : "NVAPI detected the GPU, but both clock offsets and power limit writes are locked by the current driver or firmware path."
+            : GpuOcNotAvailable
+                ? "This GPU/driver exposes NVAPI power tuning, but clock and voltage offsets remain locked."
+                : GpuExtendedOffsetsAvailable
                 ? "NVAPI reported a wider-than-default range for this GPU. Values near the top end should be treated as experimental."
                 : "This GPU is using the standard laptop-safe NVAPI range. Stability still varies by silicon and BIOS.";
         public string GpuOcDetectedLimitHeadline => string.IsNullOrWhiteSpace(GpuDisplayName)
             ? "Detected GPU tuning limits will appear after initialization."
+            : GpuPowerLimitUnavailable
+                ? GpuOcAvailable
+                    ? $"Detected clock limits for {GpuDisplayName}: Core {GpuCoreOffsetRangeText}, Memory {GpuMemoryOffsetRangeText}. Power limit writes are locked."
+                    : $"{GpuDisplayName} was detected, but NVAPI tuning writes are locked by the current driver or firmware path."
             : GpuOcNotAvailable
                 ? $"Detected power range for {GpuDisplayName}: {GpuPowerLimitRangeText}. Clock offsets are blocked by the current driver or firmware path."
                 : $"Detected limits for {GpuDisplayName}: Core {GpuCoreOffsetRangeText}, Memory {GpuMemoryOffsetRangeText}, Power {GpuPowerLimitRangeText}.";
@@ -1248,9 +1278,10 @@ namespace OmenCore.ViewModels
                     return false;
                 }
 
+                var powerMismatch = GpuPowerLimitAvailable && _nvapiService.PowerLimitPercent != GpuPowerLimitPercent;
                 return _nvapiService.CoreClockOffsetMHz != GpuCoreClockOffset
                     || _nvapiService.MemoryClockOffsetMHz != GpuMemoryClockOffset
-                    || _nvapiService.PowerLimitPercent != GpuPowerLimitPercent
+                    || powerMismatch
                     || _nvapiService.VoltageOffsetMv != GpuVoltageOffsetMv;
             }
         }
@@ -1305,13 +1336,16 @@ namespace OmenCore.ViewModels
         public int GpuCoreOffsetMin { get; private set; } = -500;
         public int GpuCoreOffsetMax { get; private set; } = 200;
         public int GpuMemoryOffsetMin { get; private set; } = -500;
-        public int GpuMemoryOffsetMax { get; private set; } = 500;
+        public int GpuMemoryOffsetMax { get; private set; } = 2000;
         public int GpuPowerLimitMin { get; private set; } = 50;
         public int GpuPowerLimitMax { get; private set; } = 115;
 
         private void NotifyGpuOcMetadataChanged()
         {
             OnPropertyChanged(nameof(GpuOcNotAvailable));
+            OnPropertyChanged(nameof(GpuPowerLimitUnavailable));
+            OnPropertyChanged(nameof(GpuPowerLimitControlEnabled));
+            OnPropertyChanged(nameof(GpuPowerLimitUnavailableText));
             OnPropertyChanged(nameof(GpuExtendedOffsetsAvailable));
             OnPropertyChanged(nameof(GpuOcCapabilityBadgeText));
             OnPropertyChanged(nameof(GpuOcCapabilityDescription));
@@ -1360,6 +1394,11 @@ namespace OmenCore.ViewModels
 
         private int GetRecommendedGpuPowerLimit()
         {
+            if (!GpuPowerLimitAvailable)
+            {
+                return 100;
+            }
+
             var preferred = IsLaptopGpuModel() ? 105 : 110;
             if (GpuPowerLimitMax < 100)
             {
@@ -1376,9 +1415,21 @@ namespace OmenCore.ViewModels
                 return "NVAPI tuning guidance will appear after the GPU is detected.";
             }
 
+            if (!GpuOcAvailable && !GpuPowerLimitAvailable)
+            {
+                return "NVAPI detected the GPU, but this driver/firmware path does not expose writable tuning controls.";
+            }
+
             if (GpuOcNotAvailable)
             {
                 return $"Model-aware guardrail: this {GetGpuOcPlatformLabel()} currently supports power tuning only. Start near {GetRecommendedGpuPowerLimit()}% and treat any clock work as an external-tool workflow.";
+            }
+
+            if (GpuPowerLimitUnavailable)
+            {
+                return GpuOcAvailable
+                    ? $"Model-aware guardrail for {GetGpuOcPlatformLabel()}: start around Core {FormatSignedValue(GetRecommendedGpuCoreOffset(), "MHz")} and Memory {FormatSignedValue(GetRecommendedGpuMemoryOffset(), "MHz")}. Leave Power at 100% because NVAPI power policy writes are locked."
+                    : "NVAPI tuning writes are locked on this driver/firmware path. Use OEM performance modes for TGP behavior if the machine exposes them.";
             }
 
             return $"Model-aware guardrail for {GetGpuOcPlatformLabel()}: start around Core {FormatSignedValue(GetRecommendedGpuCoreOffset(), "MHz")}, Memory {FormatSignedValue(GetRecommendedGpuMemoryOffset(), "MHz")}, Power {GetRecommendedGpuPowerLimit()}%. Values close to the detected max should be considered experimental until validated under load.";
@@ -1413,7 +1464,7 @@ namespace OmenCore.ViewModels
         {
             GpuCoreClockOffset = GpuOcAvailable ? requestedCoreOffset : 0;
             GpuMemoryClockOffset = GpuOcAvailable ? requestedMemoryOffset : 0;
-            GpuPowerLimitPercent = requestedPowerLimit;
+            GpuPowerLimitPercent = GpuPowerLimitAvailable ? requestedPowerLimit : 100;
             GpuVoltageOffsetMv = GpuOcAvailable ? requestedVoltageOffset : 0;
 
             var adjustments = new List<string>();
@@ -1429,7 +1480,9 @@ namespace OmenCore.ViewModels
 
             if (requestedPowerLimit != GpuPowerLimitPercent)
             {
-                adjustments.Add($"power {requestedPowerLimit}% -> {GpuPowerLimitPercent}%");
+                adjustments.Add(GpuPowerLimitAvailable
+                    ? $"power {requestedPowerLimit}% -> {GpuPowerLimitPercent}%"
+                    : $"power {requestedPowerLimit}% ignored (locked by driver/firmware)");
             }
 
             if (requestedVoltageOffset != GpuVoltageOffsetMv)
@@ -1513,6 +1566,11 @@ namespace OmenCore.ViewModels
                     Description = "Factory defaults - no overclocking"
                 }
             };
+
+            if (!GpuOcAvailable && !GpuPowerLimitAvailable)
+            {
+                return profiles;
+            }
 
             if (GpuOcNotAvailable)
             {
@@ -1625,10 +1683,31 @@ namespace OmenCore.ViewModels
                     _logging.Info($"GPU memory clock offset {(memSuccess ? "applied" : "failed")}: {GpuMemoryClockOffset} MHz");
                 }
 
-                if (GpuPowerLimitPercent != 100 || _nvapiService.PowerLimitPercent != 100)
+                if (GpuPowerLimitAvailable && (GpuPowerLimitPercent != 100 || _nvapiService.PowerLimitPercent != 100))
                 {
                     powerSuccess = _nvapiService.SetPowerLimit(GpuPowerLimitPercent);
                     _logging.Info($"GPU power limit {(powerSuccess ? "applied" : "failed")}: {GpuPowerLimitPercent}%");
+
+                    if (!powerSuccess && !_nvapiService.SupportsPowerLimit)
+                    {
+                        GpuPowerLimitAvailable = false;
+                        GpuPowerLimitMin = 100;
+                        GpuPowerLimitMax = 100;
+                        GpuPowerLimitPercent = 100;
+                        OnPropertyChanged(nameof(GpuPowerLimitMin));
+                        OnPropertyChanged(nameof(GpuPowerLimitMax));
+                        NotifyGpuOcMetadataChanged();
+
+                        var powerLockNote = "power limit ignored (locked by driver/firmware)";
+                        guardrailNote = string.IsNullOrEmpty(guardrailNote)
+                            ? powerLockNote
+                            : $"{guardrailNote}, {powerLockNote}";
+                        powerSuccess = true;
+                    }
+                }
+                else if (!GpuPowerLimitAvailable && requestedPowerLimit != 100)
+                {
+                    _logging.Warn("GPU power limit request ignored because NVAPI power policy writes are locked by driver/firmware");
                 }
 
                 if (GpuOcAvailable && (GpuVoltageOffsetMv != 0 || _nvapiService.VoltageOffsetMv != 0))
@@ -1814,7 +1893,9 @@ namespace OmenCore.ViewModels
             SaveGpuOcToConfig(applyOnStartup: true);
             GpuOcStatus = GpuOcAvailable
                 ? $"✓ Test confirmed: Core {GpuCoreClockOffsetText}, Mem {GpuMemoryClockOffsetText}, Power {GpuPowerLimitText}, Voltage {GpuVoltageOffsetText}"
-                : $"✓ Test confirmed: Power {GpuPowerLimitText}";
+                : GpuPowerLimitAvailable
+                    ? $"✓ Test confirmed: Power {GpuPowerLimitText}"
+                    : "✓ Test confirmed: supported GPU tuning kept";
             GpuOcTestStatusText = "Test tuning was kept and saved for startup reapply.";
             _logging.Info("GPU OC test apply confirmed by user");
         }
@@ -2443,9 +2524,9 @@ namespace OmenCore.ViewModels
             CreateRestorePointCommand = new AsyncRelayCommand(_ => CreateRestorePointAsync());
             SwitchGpuModeCommand = new AsyncRelayCommand(_ => SwitchGpuModeAsync());
             ApplyGpuPowerBoostCommand = new RelayCommand(_ => ApplyGpuPowerBoost(), _ => GpuPowerBoostAvailable);
-            ApplyGpuOcCommand = new RelayCommand(_ => ApplyGpuOc(), _ => GpuNvapiAvailable && !IsGpuOcTestPending);
-            ResetGpuOcCommand = new RelayCommand(_ => ResetGpuOc(), _ => GpuNvapiAvailable && !IsGpuOcTestPending);
-            TestGpuOcCommand = new AsyncRelayCommand(_ => StartGpuOcTestApplyAsync(), _ => GpuNvapiAvailable && !IsGpuOcTestPending);
+            ApplyGpuOcCommand = new RelayCommand(_ => ApplyGpuOc(), _ => GpuNvapiAvailable && (GpuOcAvailable || GpuPowerLimitAvailable) && !IsGpuOcTestPending);
+            ResetGpuOcCommand = new RelayCommand(_ => ResetGpuOc(), _ => GpuNvapiAvailable && (GpuOcAvailable || GpuPowerLimitAvailable) && !IsGpuOcTestPending);
+            TestGpuOcCommand = new AsyncRelayCommand(_ => StartGpuOcTestApplyAsync(), _ => GpuNvapiAvailable && (GpuOcAvailable || GpuPowerLimitAvailable) && !IsGpuOcTestPending);
             ConfirmGpuOcTestCommand = new RelayCommand(_ => ConfirmGpuOcTest(), _ => IsGpuOcTestPending);
             
             // AMD GPU OC commands
@@ -2838,12 +2919,10 @@ namespace OmenCore.ViewModels
         {
             if (_msrAccess == null)
             {
-                _logging.Warn("Cannot apply TCC offset: MSR access not available (install PawnIO or disable Secure Boot)");
+                _logging.Warn("Cannot apply TCC offset: MSR access not available (install PawnIO)");
                 System.Windows.MessageBox.Show(
                     "TCC offset cannot be applied - MSR access not available.\n\n" +
-                    "This requires either:\n" +
-                    "• PawnIO driver installed (pawnio.eu)\n" +
-                    "• Secure Boot disabled with WinRing0\n\n" +
+                    "This requires PawnIO driver access (pawnio.eu).\n\n" +
                     "Without MSR access, CPU temperature limits cannot be modified.",
                     "TCC Offset Unavailable",
                     System.Windows.MessageBoxButton.OK,
@@ -2910,7 +2989,7 @@ namespace OmenCore.ViewModels
                 _logging.Error($"Failed to apply TCC offset: {ex.Message}", ex);
                 System.Windows.MessageBox.Show(
                     $"Failed to apply TCC offset: {ex.Message}\n\n" +
-                    "Ensure you have MSR access via PawnIO or WinRing0.",
+                    "Ensure you have MSR access via PawnIO.",
                     "TCC Offset Error",
                     System.Windows.MessageBoxButton.OK,
                     System.Windows.MessageBoxImage.Error);
@@ -3411,8 +3490,8 @@ namespace OmenCore.ViewModels
                         return;
                     }
 
-                    // If NVAPI is available, suggest using power limits for fine-tuning
-                    if (GpuNvapiAvailable && GpuPowerLimitPercent != 100)
+                    // If NVAPI power limits are writable, include the fine-tuning layer.
+                    if (GpuPowerLimitAvailable && GpuPowerLimitPercent != 100)
                     {
                         GpuPowerBoostStatus = $"{baseStatus} + NVAPI {GpuPowerLimitPercent}% limit";
                     }
@@ -3762,6 +3841,7 @@ namespace OmenCore.ViewModels
             if (_nvapiService == null)
             {
                 GpuOcAvailable = false;
+                GpuPowerLimitAvailable = false;
                 GpuOcStatus = "NVAPI not available";
                 return;
             }
@@ -3772,6 +3852,7 @@ namespace OmenCore.ViewModels
                 {
                     GpuNvapiAvailable = true;
                     GpuOcAvailable = _nvapiService.SupportsOverclocking;
+                    GpuPowerLimitAvailable = _nvapiService.SupportsPowerLimit;
                     GpuVendor = "NVIDIA";
                     GpuDisplayName = _nvapiService.GpuName;
                     
@@ -3797,24 +3878,31 @@ namespace OmenCore.ViewModels
                     GpuCoreOffsetMax = _nvapiService.MaxCoreOffset;
                     GpuMemoryOffsetMin = _nvapiService.MinMemoryOffset;
                     GpuMemoryOffsetMax = _nvapiService.MaxMemoryOffset;
-                    GpuPowerLimitMin = _nvapiService.MinPowerLimit;
-                    GpuPowerLimitMax = _nvapiService.MaxPowerLimit;
+                    GpuPowerLimitMin = GpuPowerLimitAvailable ? _nvapiService.MinPowerLimit : 100;
+                    GpuPowerLimitMax = GpuPowerLimitAvailable ? _nvapiService.MaxPowerLimit : 100;
                     
                     // Get current values
                     GpuCoreClockOffset = _nvapiService.CoreClockOffsetMHz;
                     GpuMemoryClockOffset = _nvapiService.MemoryClockOffsetMHz;
-                    GpuPowerLimitPercent = _nvapiService.PowerLimitPercent;
+                    GpuPowerLimitPercent = GpuPowerLimitAvailable ? _nvapiService.PowerLimitPercent : 100;
                     GpuVoltageOffsetMv = _nvapiService.VoltageOffsetMv;
                     
                     if (GpuOcAvailable)
                     {
-                        GpuOcStatus = $"✓ {_nvapiService.GpuName} - Ready";
-                        _logging.Info($"GPU OC initialized: {_nvapiService.GpuName}, Supports OC: {_nvapiService.SupportsOverclocking}");
+                        GpuOcStatus = GpuPowerLimitAvailable
+                            ? $"✓ {_nvapiService.GpuName} - Ready"
+                            : $"✓ {_nvapiService.GpuName} - Clock OC ready, power limit locked";
+                        _logging.Info($"GPU OC initialized: {_nvapiService.GpuName}, Supports OC: {_nvapiService.SupportsOverclocking}, Supports Power Limit: {_nvapiService.SupportsPowerLimit}");
                     }
-                    else
+                    else if (GpuPowerLimitAvailable)
                     {
                         GpuOcStatus = $"{_nvapiService.GpuName} - Power limit tuning available, clock offsets blocked";
                         _logging.Info($"GPU detected with power-only NVAPI tuning: {_nvapiService.GpuName}");
+                    }
+                    else
+                    {
+                        GpuOcStatus = $"{_nvapiService.GpuName} - NVAPI tuning locked by driver/firmware";
+                        _logging.Info($"GPU detected but NVAPI tuning writes are locked: {_nvapiService.GpuName}. Power status: {_nvapiService.PowerLimitStatusMessage}");
                     }
 
                     // Restore saved settings for both full-OC and power-only NVAPI systems.
@@ -3823,6 +3911,7 @@ namespace OmenCore.ViewModels
                 else
                 {
                     GpuOcAvailable = false;
+                    GpuPowerLimitAvailable = false;
                     GpuOcStatus = "NVIDIA GPU not detected";
                     
                     // Try AMD GPU initialization
@@ -3832,6 +3921,7 @@ namespace OmenCore.ViewModels
             catch (Exception ex)
             {
                 GpuOcAvailable = false;
+                GpuPowerLimitAvailable = false;
                 GpuOcStatus = $"Initialization failed: {ex.Message}";
                 _logging.Error($"GPU OC initialization failed: {ex.Message}", ex);
             }
@@ -4016,12 +4106,17 @@ namespace OmenCore.ViewModels
                     _nvapiService.SetVoltageOffset(0);
                 }
 
-                _nvapiService.SetPowerLimit(100);
+                if (GpuPowerLimitAvailable)
+                {
+                    _nvapiService.SetPowerLimit(100);
+                }
             }
             
             GpuOcStatus = GpuOcAvailable
                 ? "Reset to defaults (Core: 0 MHz, Memory: 0 MHz, Power: 100%, Voltage: 0 mV)"
-                : "Reset to defaults (Power: 100%)";
+                : GpuPowerLimitAvailable
+                    ? "Reset to defaults (Power: 100%)"
+                    : "Reset to defaults for supported GPU tuning controls";
             SaveGpuOcToConfig(applyOnStartup: false);
             _logging.Info("GPU OC reset to defaults");
         }

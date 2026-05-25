@@ -63,6 +63,7 @@ namespace OmenCore.Services
             _logging = logging;
             _modelCapabilities = modelCapabilities;
             _ecOperationCoordinator = ecOperationCoordinator ?? new RuntimeEcOperationCoordinator(logging);
+            AllowDecoupledWmiThermalPolicyFallback = modelCapabilities?.AllowDecoupledWmiThermalPolicyFallback ?? false;
         }
 
         public void Apply(PerformanceMode mode)
@@ -434,6 +435,9 @@ namespace OmenCore.Services
                 
                 if (FanPolicyAvailable)
                     capabilities.Add("Fan Policy");
+
+                if (AllowDecoupledWmiThermalPolicyFallback && FanPolicyAvailable)
+                    capabilities.Add("WMI Performance Policy Fallback");
                     
                 if (_powerLimitController != null && _powerLimitController.IsAvailable)
                     capabilities.Add("CPU/GPU Power Limits");

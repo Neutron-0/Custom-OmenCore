@@ -67,7 +67,8 @@ public static class PerformanceCommand
         if (!ec.IsAvailable)
         {
             Console.ForegroundColor = ConsoleColor.Red;
-            Console.WriteLine("Error: Cannot access EC. Ensure ec_sys module is loaded.");
+            Console.WriteLine("Error: no supported performance-control backend is available.");
+            Console.WriteLine("Try: sudo modprobe hp-wmi, or for legacy boards sudo modprobe ec_sys write_support=1.");
             Console.ResetColor();
             return;
         }
@@ -84,16 +85,18 @@ public static class PerformanceCommand
             if (success)
             {
                 var readback = ec.GetPerformanceMode();
-                if (perfMode.HasValue && readback == perfMode.Value)
+                if (perfMode.HasValue && ArePerformanceModesEquivalent(readback, perfMode.Value))
                 {
                     Console.ForegroundColor = ConsoleColor.Green;
                     Console.WriteLine($"OK: Performance mode set to: {mode}");
+                    Console.WriteLine($"Backend: {ec.LastPerformanceModeBackend ?? ec.GetPerformanceModeBackendDescription()}");
                     Console.ResetColor();
                 }
                 else
                 {
                     Console.ForegroundColor = ConsoleColor.Yellow;
                     Console.WriteLine($"WARN: Performance mode write returned success, but readback is {readback} (requested {mode})");
+                    Console.WriteLine($"Backend: {ec.LastPerformanceModeBackend ?? ec.GetPerformanceModeBackendDescription()}");
                     Console.ResetColor();
                 }
             }
@@ -183,6 +186,17 @@ public static class PerformanceCommand
         };
     }
 
+    private static bool ArePerformanceModesEquivalent(PerformanceMode current, PerformanceMode requested)
+    {
+        if (current == requested)
+        {
+            return true;
+        }
+
+        return (current is PerformanceMode.Default or PerformanceMode.Balanced)
+            && (requested is PerformanceMode.Default or PerformanceMode.Balanced);
+    }
+
     private static void SaveHoldConfig(LinuxEcController ec, string? mode, int? power, int? holdInterval)
     {
         var config = OmenCoreConfig.Load(OmenCoreConfig.SystemConfigPath);
@@ -236,6 +250,7 @@ public static class PerformanceCommand
         };
 
         Console.WriteLine($"Mode: {modeStr}");
+        Console.WriteLine($"Backend: {ec.GetPerformanceModeBackendDescription()}");
         Console.WriteLine();
     }
 }

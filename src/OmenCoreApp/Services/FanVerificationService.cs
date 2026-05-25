@@ -142,7 +142,8 @@ namespace OmenCore.Services
         // MaxRpm calibrated to 6000 RPM � covers high-end OMEN 16/17 models (5500-6500 RPM peaks).
         // Victus and mid-range HP fans (3800-4500 RPM peak) still pass because the absolute 500 RPM
         // floor tolerance in VerifyRpm() keeps low-step-count fans within range regardless.
-        private const int MaxLevel = 55;  // HP uses 55 as max on most models
+        private const int DefaultMaxLevel = 55;
+        private const int MaxLevelCeiling = 100;
         private const int MinRpm = 0;
         private const int MaxRpm = 6000;  // Covers high-end OMEN fans (5500-6500 RPM); Victus-class handled by 500 RPM floor tolerance
         
@@ -326,8 +327,9 @@ namespace OmenCore.Services
                     
                     // Verify the change with explicit evidence path
                     var rpmMatched = VerifyRpm(result);
-                    result.VerificationEvidence = DetermineVerificationEvidence(rpmMatched, result.LevelReadbackMatched);
-                    result.VerificationPassed = rpmMatched || result.LevelReadbackMatched;
+                    var levelEvidenceAccepted = IsLevelOnlyEvidenceAcceptable(result);
+                    result.VerificationEvidence = DetermineVerificationEvidence(rpmMatched, levelEvidenceAccepted);
+                    result.VerificationPassed = rpmMatched || levelEvidenceAccepted;
 
                     if (result.VerificationPassed)
                     {
@@ -462,8 +464,9 @@ namespace OmenCore.Services
 
                     // Verify with explicit evidence path
                     var rpmMatched = VerifyRpm(result);
-                    result.VerificationEvidence = DetermineVerificationEvidence(rpmMatched, result.LevelReadbackMatched);
-                    result.VerificationPassed = rpmMatched || result.LevelReadbackMatched;
+                    var levelEvidenceAccepted = IsLevelOnlyEvidenceAcceptable(result);
+                    result.VerificationEvidence = DetermineVerificationEvidence(rpmMatched, levelEvidenceAccepted);
+                    result.VerificationPassed = rpmMatched || levelEvidenceAccepted;
 
                     if (result.VerificationPassed)
                     {
@@ -561,7 +564,7 @@ namespace OmenCore.Services
         {
             percent = Math.Clamp(percent, 0, 100);
             // Linear mapping: 0% -> 0, 100% -> MaxLevel
-            return (int)Math.Round(percent / 100.0 * MaxLevel);
+            return (int)Math.Round(percent / 100.0 * GetEffectiveMaxLevel());
         }
         
         /// <summary>
@@ -569,8 +572,9 @@ namespace OmenCore.Services
         /// </summary>
         private int LevelToPercent(int level)
         {
-            level = Math.Clamp(level, 0, MaxLevel);
-            return (int)Math.Round(level / (double)MaxLevel * 100);
+            var maxLevel = GetEffectiveMaxLevel();
+            level = Math.Clamp(level, 0, maxLevel);
+            return (int)Math.Round(level / (double)maxLevel * 100);
         }
 
         /// <summary>
@@ -593,7 +597,7 @@ namespace OmenCore.Services
         {
             if (rpm <= 0) return 0;
             var percent = Math.Min(100, (rpm / (double)MaxRpm) * 100);
-            return (int)Math.Round(percent / 100.0 * MaxLevel);
+            return (int)Math.Round(percent / 100.0 * GetEffectiveMaxLevel());
         }
 
         /// <summary>
@@ -642,6 +646,38 @@ namespace OmenCore.Services
 
             return Math.Abs(result.ActualLevelAfter - result.ExpectedLevel) <= tolerance;
         }
+
+        private int GetEffectiveMaxLevel()
+        {
+            if (_wmiBios?.IsAvailable == true)
+            {
+                return Math.Clamp(_wmiBios.MaxFanLevel, 1, MaxLevelCeiling);
+            }
+
+            return DefaultMaxLevel;
+        }
+
+        private static bool IsLevelOnlyEvidenceAcceptable(FanApplyResult result)
+        {
+            if (!result.LevelReadbackMatched)
+            {
+                return false;
+            }
+
+            if (result.RequestedPercent <= 40)
+            {
+                return true;
+            }
+
+            if (result.ExpectedRpm <= 0)
+            {
+                return result.ActualRpmAfter <= 1000;
+            }
+
+            // For medium/high requests, level-only confirmation is not enough if RPM remains far below target.
+            var minimumRpmForLevelOnlyPass = Math.Max(1800, (int)Math.Round(result.ExpectedRpm * 0.55));
+            return result.ActualRpmAfter >= minimumRpmForLevelOnlyPass;
+        }
         
         /// <summary>
         /// Check if the actual RPM is within tolerance of expected.
@@ -683,7 +719,7 @@ namespace OmenCore.Services
 
         private bool VerifyAppliedState(FanApplyResult result)
         {
-            return VerifyRpm(result) || result.LevelReadbackMatched;
+            return VerifyRpm(result) || IsLevelOnlyEvidenceAcceptable(result);
         }
 
         #endregion

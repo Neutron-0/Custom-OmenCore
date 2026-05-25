@@ -1010,6 +1010,26 @@
                             </StackPanel>
                         </Border>
 
+                        <Border Background="#2A2018"
+                                BorderBrush="#FF9800"
+                                BorderThickness="1"
+                                CornerRadius="8"
+                                Padding="12"
+                                Margin="0,0,0,16"
+                                Visibility="{Binding GpuPowerLimitUnavailable, Converter={StaticResource BooleanToVisibilityConverter}}">
+                            <StackPanel>
+                                <TextBlock Text="Power Limit Locked"
+                                           FontSize="12"
+                                           FontWeight="Bold"
+                                           Foreground="#FFB45A"/>
+                                <TextBlock Text="{Binding GpuPowerLimitUnavailableText}"
+                                           FontSize="12"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,4,0,0"/>
+                            </StackPanel>
+                        </Border>
+
                         <!-- Clock Offsets Section -->
                         <Border Background="{StaticResource SurfaceDarkBrush}"
                                 CornerRadius="8"
@@ -1137,6 +1157,7 @@
                                             Maximum="{Binding GpuPowerLimitMax}"
                                             TickFrequency="5"
                                             IsSnapToTickEnabled="True"
+                                            IsEnabled="{Binding GpuPowerLimitControlEnabled}"
                                             Margin="8,0"/>
                                     
                                     <Border Grid.Column="2" 

@@ -206,6 +206,112 @@ namespace OmenCoreApp.Tests.Hardware
 
         #endregion
 
+        #region Backend degradation classification
+
+        [Fact]
+        public void HasCriticalBackendDegradation_IsTrue_WhenTelemetryProviderMissing()
+        {
+            var caps = new DeviceCapabilities
+            {
+                BackendStatuses = new[]
+                {
+                    new BackendStatus
+                    {
+                        Name = "WMI",
+                        Available = false,
+                        Healthy = false,
+                        Capabilities = new[]
+                        {
+                            BackendCapability.Telemetry,
+                            BackendCapability.FanControl,
+                            BackendCapability.PerformanceProfiles
+                        }
+                    }
+                }
+            };
+
+            caps.HasCriticalBackendDegradation.Should().BeTrue();
+            caps.BackendDegradationSummary.Should().StartWith("Critical degradation");
+        }
+
+        [Fact]
+        public void HasOptionalBackendDegradation_IsTrue_WhenOnlyOptionalCapabilityMissing()
+        {
+            var caps = new DeviceCapabilities
+            {
+                BackendStatuses = new[]
+                {
+                    new BackendStatus
+                    {
+                        Name = "WMI",
+                        Available = true,
+                        Healthy = true,
+                        Capabilities = new[]
+                        {
+                            BackendCapability.Telemetry,
+                            BackendCapability.FanControl,
+                            BackendCapability.PerformanceProfiles
+                        }
+                    },
+                    new BackendStatus
+                    {
+                        Name = "PawnIO",
+                        Available = false,
+                        Healthy = false,
+                        Capabilities = new[]
+                        {
+                            BackendCapability.ECAccess,
+                            BackendCapability.Undervolt
+                        }
+                    }
+                }
+            };
+
+            caps.HasCriticalBackendDegradation.Should().BeFalse();
+            caps.HasOptionalBackendDegradation.Should().BeTrue();
+            caps.BackendDegradationSummary.Should().StartWith("Optional degradation");
+        }
+
+        [Fact]
+        public void BackendDegradationSummary_IsHealthy_WhenAllTrackedCapabilitiesPresent()
+        {
+            var caps = new DeviceCapabilities
+            {
+                BackendStatuses = new[]
+                {
+                    new BackendStatus
+                    {
+                        Name = "WMI",
+                        Available = true,
+                        Healthy = true,
+                        Capabilities = new[]
+                        {
+                            BackendCapability.Telemetry,
+                            BackendCapability.FanControl,
+                            BackendCapability.PerformanceProfiles
+                        }
+                    },
+                    new BackendStatus
+                    {
+                        Name = "PawnIO",
+                        Available = true,
+                        Healthy = true,
+                        Capabilities = new[]
+                        {
+                            BackendCapability.ECAccess,
+                            BackendCapability.Undervolt
+                        }
+                    }
+                }
+            };
+
+            caps.HasCriticalBackendDegradation.Should().BeFalse();
+            caps.HasOptionalBackendDegradation.Should().BeFalse();
+            caps.BackendDegradationSummary.Should().Be("All tracked backend capabilities are healthy.");
+        }
+
+        #endregion
+
         #region Fan write safety gating
 
         [Fact]

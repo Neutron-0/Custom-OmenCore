@@ -38,6 +38,10 @@ public class LinuxEcController
     private const string HP_WMI_PLATFORM_PROFILE_ALT = "/sys/devices/platform/hp-wmi/platform-profile";
     private const string HP_WMI_PLATFORM_PROFILE_CHOICES = "/sys/devices/platform/hp-wmi/platform_profile_choices";
     private const string HP_WMI_PLATFORM_PROFILE_CHOICES_ALT = "/sys/devices/platform/hp-wmi/platform-profile-choices";
+    private const string HP_WMI_PERFORMANCE_PROFILE = "/sys/devices/platform/hp-wmi/performance_profile";
+    private const string HP_WMI_PERFORMANCE_PROFILE_ALT = "/sys/devices/platform/hp-wmi/performance-profile";
+    private const string HP_WMI_PERFORMANCE_PROFILE_CHOICES = "/sys/devices/platform/hp-wmi/performance_profile_choices";
+    private const string HP_WMI_PERFORMANCE_PROFILE_CHOICES_ALT = "/sys/devices/platform/hp-wmi/performance-profile-choices";
     
     // HP-WMI hwmon paths (2025+ models use standard hwmon interface for fan control)
     // Discovered at runtime since hwmon number varies
@@ -107,6 +111,7 @@ public class LinuxEcController
     public bool HasHwmonPwmDutyAccess => _hwmonPwm1EnablePath != null && _hwmonPwm1Path != null;
     public bool IsUnsafeEcModel { get; }
     public string AccessMethod { get; }
+    public string? LastPerformanceModeBackend { get; private set; }
     public string? DetectedModel { get; }
     public string? DetectedBoardId { get; }
     
@@ -186,7 +191,28 @@ public class LinuxEcController
 
     private static string? ResolveHpWmiThermalPath()
     {
-        return ResolveFirstExistingPath(HP_WMI_THERMAL, HP_WMI_THERMAL_ALT);
+        return LinuxSysfsPathMap.ResolveFirstExistingFile(LinuxSysfsPathMap.HpWmiProfilePaths);
+    }
+
+    public string GetPerformanceModeBackendDescription()
+    {
+        var hpWmiPath = ResolveHpWmiThermalPath();
+        if (HasHpWmiAccess && hpWmiPath != null)
+        {
+            return $"hp-wmi {Path.GetFileName(hpWmiPath)}";
+        }
+
+        if (HasAcpiProfileAccess)
+        {
+            return "ACPI platform_profile";
+        }
+
+        if (HasEcAccess)
+        {
+            return "ec_sys performance register";
+        }
+
+        return "none";
     }
 
     /// <summary>
@@ -476,11 +502,17 @@ public class LinuxEcController
 
         try
         {
-            var validProfiles = new[] { "quiet", "balanced", "balanced-performance", "performance", "extreme" };
-            if (!validProfiles.Contains(profile.ToLower()))
+            var normalized = profile.Trim().ToLowerInvariant();
+            var choices = GetHpWmiProfileChoices();
+            normalized = ResolveSupportedProfileAlias(normalized, choices);
+
+            if (choices.Length > 0 && !choices.Contains(normalized, StringComparer.OrdinalIgnoreCase))
                 return false;
 
-            File.WriteAllText(thermalPath, profile.ToLower());
+            if (choices.Length == 0 && !IsKnownProfileValue(normalized))
+                return false;
+
+            File.WriteAllText(thermalPath, normalized);
             return true;
         }
         catch
@@ -595,6 +627,8 @@ public class LinuxEcController
             ACPI_PLATFORM_PROFILE_CHOICES,
             HP_WMI_PLATFORM_PROFILE_CHOICES,
             HP_WMI_PLATFORM_PROFILE_CHOICES_ALT,
+            HP_WMI_PERFORMANCE_PROFILE_CHOICES,
+            HP_WMI_PERFORMANCE_PROFILE_CHOICES_ALT,
             HP_WMI_THERMAL_CHOICES,
             HP_WMI_THERMAL_CHOICES_ALT
         };
@@ -608,7 +642,7 @@ public class LinuxEcController
 
             try
             {
-                return File.ReadAllText(path).Trim().Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                return ParseProfileChoices(File.ReadAllText(path));
             }
             catch
             {
@@ -668,32 +702,108 @@ public class LinuxEcController
             return requested;
         }
 
-        if (requested.Equals("performance", StringComparison.OrdinalIgnoreCase) &&
-            choices.Contains("balanced-performance", StringComparer.OrdinalIgnoreCase))
+        var exact = choices.FirstOrDefault(choice => choice.Equals(requested, StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(exact))
         {
-            return "balanced-performance";
+            return exact.ToLowerInvariant();
         }
 
-        if (requested.Equals("balanced-performance", StringComparison.OrdinalIgnoreCase) &&
-            choices.Contains("performance", StringComparer.OrdinalIgnoreCase))
+        if (IsPerformanceProfile(requested))
         {
-            return "performance";
+            return FirstSupportedProfile(choices, "performance", "balanced-performance", "extreme", "high-performance") ?? requested;
         }
 
-        if ((requested.Equals("quiet", StringComparison.OrdinalIgnoreCase) || requested.Equals("cool", StringComparison.OrdinalIgnoreCase)) &&
-            choices.Contains("low-power", StringComparer.OrdinalIgnoreCase))
+        if (IsExtremeProfile(requested))
         {
-            return "low-power";
+            return FirstSupportedProfile(choices, "extreme", "performance", "balanced-performance") ?? requested;
         }
 
-        if (requested.Equals("low-power", StringComparison.OrdinalIgnoreCase) &&
-            choices.Contains("quiet", StringComparer.OrdinalIgnoreCase))
+        if (IsCoolProfile(requested))
         {
-            return "quiet";
+            return FirstSupportedProfile(choices, "quiet", "low-power", "power-saver", "cool") ?? requested;
+        }
+
+        if (IsBalancedProfile(requested))
+        {
+            return FirstSupportedProfile(choices, "balanced", "default", "normal") ?? requested;
         }
 
         return requested;
     }
+
+    private static string[] GetHpWmiProfileChoices()
+    {
+        foreach (var path in LinuxSysfsPathMap.HpWmiProfileChoicePaths)
+        {
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+
+            try
+            {
+                return ParseProfileChoices(File.ReadAllText(path));
+            }
+            catch
+            {
+                // Try the next hp-wmi choices path.
+            }
+        }
+
+        return Array.Empty<string>();
+    }
+
+    private static string[] ParseProfileChoices(string choices)
+    {
+        return choices
+            .Split(new[] { ' ', '\t', '\r', '\n', ',' }, StringSplitOptions.RemoveEmptyEntries)
+            .Select(choice => choice.Trim().Trim('[', ']').ToLowerInvariant())
+            .Where(choice => !string.IsNullOrWhiteSpace(choice))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static string? FirstSupportedProfile(string[] choices, params string[] candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            var match = choices.FirstOrDefault(choice => choice.Equals(candidate, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrWhiteSpace(match))
+            {
+                return match.ToLowerInvariant();
+            }
+        }
+
+        return null;
+    }
+
+    private static bool IsKnownProfileValue(string profile) =>
+        IsBalancedProfile(profile) ||
+        IsPerformanceProfile(profile) ||
+        IsExtremeProfile(profile) ||
+        IsCoolProfile(profile);
+
+    private static bool IsBalancedProfile(string profile) =>
+        profile.Equals("balanced", StringComparison.OrdinalIgnoreCase) ||
+        profile.Equals("default", StringComparison.OrdinalIgnoreCase) ||
+        profile.Equals("normal", StringComparison.OrdinalIgnoreCase) ||
+        profile.Equals("auto", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsPerformanceProfile(string profile) =>
+        profile.Equals("performance", StringComparison.OrdinalIgnoreCase) ||
+        profile.Equals("balanced-performance", StringComparison.OrdinalIgnoreCase) ||
+        profile.Equals("high-performance", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsExtremeProfile(string profile) =>
+        profile.Equals("extreme", StringComparison.OrdinalIgnoreCase) ||
+        profile.Equals("max", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsCoolProfile(string profile) =>
+        profile.Equals("quiet", StringComparison.OrdinalIgnoreCase) ||
+        profile.Equals("cool", StringComparison.OrdinalIgnoreCase) ||
+        profile.Equals("silent", StringComparison.OrdinalIgnoreCase) ||
+        profile.Equals("low-power", StringComparison.OrdinalIgnoreCase) ||
+        profile.Equals("power-saver", StringComparison.OrdinalIgnoreCase);
     
     #endregion
     
@@ -947,7 +1057,10 @@ public class LinuxEcController
         // Try hp-wmi thermal_profile first (newer 2023+ models)
         if (HasHpWmiAccess && ResolveHpWmiThermalPath() != null)
         {
-            return SetHpWmiThermalProfile(profile);
+            if (SetHpWmiThermalProfile(profile))
+            {
+                return true;
+            }
         }
         
         // Try ACPI platform_profile + hwmon pwm (2025+ OMEN Max models)
@@ -982,19 +1095,16 @@ public class LinuxEcController
             FanProfile.Silent => "quiet",
             FanProfile.Balanced => "balanced", 
             FanProfile.Gaming => "performance",
-            FanProfile.Max => "performance",
+            FanProfile.Max => "extreme",
             _ => "balanced"
         };
         
         try
         {
-            var thermalPath = ResolveHpWmiThermalPath();
-            if (thermalPath == null)
+            if (!SetHpWmiThermalProfile(profileValue))
             {
                 return false;
             }
-
-            File.WriteAllText(thermalPath, profileValue);
             
             // For Max mode, also enable fan_always_on if available
             if (profile == FanProfile.Max && File.Exists(HP_WMI_FAN_ALWAYS_ON))
@@ -1240,8 +1350,17 @@ public class LinuxEcController
                 {
                     "performance" => PerformanceMode.Performance,
                     "balanced-performance" => PerformanceMode.Performance,
+                    "high-performance" => PerformanceMode.Performance,
+                    "extreme"     => PerformanceMode.Performance,
                     "quiet"       => PerformanceMode.Cool,
+                    "cool"        => PerformanceMode.Cool,
+                    "silent"      => PerformanceMode.Cool,
+                    "low-power"   => PerformanceMode.Cool,
+                    "power-saver" => PerformanceMode.Cool,
                     "balanced"    => PerformanceMode.Default,
+                    "default"     => PerformanceMode.Default,
+                    "normal"      => PerformanceMode.Default,
+                    "auto"        => PerformanceMode.Default,
                     _             => PerformanceMode.Default
                 };
             }
@@ -1289,6 +1408,7 @@ public class LinuxEcController
         // Priority 1: hp-wmi thermal_profile (Secure Boot safe, most compatible)
         if (HasHpWmiAccess)
         {
+            var hpWmiPath = ResolveHpWmiThermalPath();
             var wmiProfile = mode switch
             {
                 PerformanceMode.Performance => "performance",
@@ -1296,7 +1416,12 @@ public class LinuxEcController
                 _                           => "balanced"
             };
             if (SetHpWmiThermalProfile(wmiProfile))
+            {
+                LastPerformanceModeBackend = hpWmiPath != null
+                    ? $"hp-wmi {Path.GetFileName(hpWmiPath)}"
+                    : "hp-wmi profile";
                 return true;
+            }
             // Fall through to next backend on failure
         }
 
@@ -1313,7 +1438,10 @@ public class LinuxEcController
                 _                           => "balanced"
             };
             if (SetAcpiProfile(acpiProfile))
+            {
+                LastPerformanceModeBackend = "ACPI platform_profile";
                 return true;
+            }
         }
 
         // Priority 3: Direct EC register (requires ec_sys / HasEcAccess)
@@ -1327,7 +1455,13 @@ public class LinuxEcController
                 PerformanceMode.Balanced    => PERF_MODE_DEFAULT,
                 _                           => PERF_MODE_DEFAULT
             };
-            return WriteByte(REG_PERF_MODE, value);
+            var success = WriteByte(REG_PERF_MODE, value);
+            if (success)
+            {
+                LastPerformanceModeBackend = "ec_sys performance register";
+            }
+
+            return success;
         }
 
         return false;

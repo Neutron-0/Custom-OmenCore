@@ -68,6 +68,7 @@ namespace OmenCore.ViewModels
         public HardwareMonitoringService HardwareMonitoringService => _hardwareMonitoringService;
         private readonly SystemRestoreService _systemRestoreService;
         private readonly OmenGamingHubCleanupService _hubCleanupService;
+        private readonly QuietSafetyMonitor _quietSafetyMonitor = new();
         private readonly SystemInfoService _systemInfoService;
         private readonly AutoUpdateService _autoUpdateService;
         private readonly ProcessMonitoringService _processMonitoringService;
@@ -220,7 +221,7 @@ namespace OmenCore.ViewModels
             {
                 if (_dashboard == null)
                 {
-                    _dashboard = new DashboardViewModel(_hardwareMonitoringService, pollingCoordinator: _pollingCoordinator);
+                    _dashboard = new DashboardViewModel(_hardwareMonitoringService, _fanService, _pollingCoordinator);
                     // Initialize with current values without forcing lazy sub-viewmodels to load.
                     var confirmedPerformanceMode = _performanceModeService.GetCurrentMode()
                         ?? CurrentPerformanceMode;
@@ -354,6 +355,8 @@ namespace OmenCore.ViewModels
                     _general.SetFanControlViewModel(_fanControl);
                     // Keep SystemControl lazy; wire it only if something else already loaded it.
                     _general.SetSystemControlViewModel(_systemControl);
+                    // v3.7.0: Navigate to Custom tab when user clicks the Custom profile card
+                    _general.CustomTabNavigationRequested += (_, _) => SelectedTabIndex = OmenTabIndex;
                     OnPropertyChanged(nameof(General));
                 }
                 return _general;
@@ -513,7 +516,7 @@ namespace OmenCore.ViewModels
         public string FanBackend { get; private set; } = "Detecting...";
         
         /// <summary>
-        /// The active EC access backend (typically PawnIO; legacy WinRing0 is optional).
+        /// The active EC access backend (PawnIO when direct EC access is available).
         /// </summary>
         public string EcBackend { get; private set; } = "None";
         
@@ -743,6 +746,9 @@ namespace OmenCore.ViewModels
                 
                 // v2.6.1: Push update to GeneralViewModel for enhanced General tab
                 _general?.UpdateFromMonitoringSample(normalized);
+
+                // v3.7.0: Feed sample to Quiet safety monitor (no-op unless Quiet profile armed)
+                _quietSafetyMonitor.ProcessSample(normalized);
                 
                 // Notify only telemetry-bound properties whose rendered output changed.
                 OnPropertyChanged(nameof(LatestMonitoringSample));
@@ -1511,7 +1517,7 @@ namespace OmenCore.ViewModels
             // ═══════════════════════════════════════════════════════════════════
             // SELF-SUSTAINING MONITORING ARCHITECTURE (v2.8.6+)
             // 
-            // OmenCore is SELF-SUSTAINING — no LHM/WinRing0/NVML dependencies.
+            // OmenCore is self-sustaining without external monitoring dependencies.
             // Primary: WMI BIOS (temps, fans) + NVAPI (GPU metrics)
             // Optional: PawnIO MSR (CPU throttling detection only)
             //
@@ -1610,6 +1616,8 @@ namespace OmenCore.ViewModels
             // Run capability detection to identify available backends
             var capabilityService = new CapabilityDetectionService(_logging);
             var capabilities = capabilityService.DetectCapabilities();
+            var pawnIoBackend = capabilities.BackendStatuses.FirstOrDefault(b =>
+                string.Equals(b.Name, "PawnIO", StringComparison.OrdinalIgnoreCase));
             
             // Run runtime probing to verify capability accuracy (especially for undervolt MSR access)
             capabilityService.ProbeRuntimeCapabilities();
@@ -1627,7 +1635,7 @@ namespace OmenCore.ViewModels
                 CapabilityWarning = $"Undervolt disabled: {capabilities.UndervoltBlockReason ?? "MSR access unavailable"}";
                 _logging.Warn(CapabilityWarning);
             }
-            else if (capabilities.SecureBootEnabled && !capabilities.PawnIOAvailable && !capabilities.OghRunning)
+            else if (capabilities.SecureBootEnabled && pawnIoBackend is { Healthy: false })
             {
                 CapabilityWarning = "Secure Boot enabled — install PawnIO for EC/MSR features. Core monitoring and many controls continue via WMI.";
             }
@@ -1637,7 +1645,7 @@ namespace OmenCore.ViewModels
             }
             
             // Initialize EC access with automatic backend selection.
-            // PawnIO is primary; legacy WinRing0 fallback is optional/opt-in.
+            // PawnIO is the direct EC backend.
             IEcAccess? ec = null;
             try
             {
@@ -1870,6 +1878,7 @@ namespace OmenCore.ViewModels
             _hotkeyService.ToggleFanModeRequested += OnHotkeyToggleFanMode;
             _hotkeyService.ToggleMaxFanRequested += OnHotkeyToggleMaxFan;
             _hotkeyService.TogglePerformanceModeRequested += OnHotkeyTogglePerformanceMode;
+            _hotkeyService.TogglePerformanceProfileRequested += OnHotkeyTogglePerformanceProfile;
             _hotkeyService.ToggleBoostModeRequested += OnHotkeyToggleBoostMode;
             _hotkeyService.ToggleQuietModeRequested += OnHotkeyToggleQuietMode;
             _hotkeyService.ShowWindowRequested += OnHotkeyShowWindow;
@@ -1885,6 +1894,10 @@ namespace OmenCore.ViewModels
             // Subscribe to service events for UI synchronization (e.g., power automation changes)
             _fanService!.PresetApplied += OnFanPresetApplied;
             _performanceModeService!.ModeApplied += OnPerformanceModeApplied;
+
+            // v3.7.0: Wire QuietSafetyMonitor events
+            _quietSafetyMonitor.SafetyOverrideActivated += OnQuietSafetyOverrideActivated;
+            _quietSafetyMonitor.SafetyOverrideCleared += OnQuietSafetyOverrideCleared;
 
             // Initialize sub-ViewModels that don't depend on async services
             // InitializeSubViewModels(); // Removed in favor of lazy loading
@@ -2335,6 +2348,25 @@ namespace OmenCore.ViewModels
             }
 
             return true;
+        }
+
+        private bool IsVictusModel()
+        {
+            var model = SystemInfo?.Model ?? string.Empty;
+            return model.Contains("Victus", StringComparison.OrdinalIgnoreCase);
+        }
+
+        private bool IsVictus16S0Model()
+        {
+            var model = SystemInfo?.Model ?? string.Empty;
+            if (!model.Contains("Victus", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return model.Contains("16-s0", StringComparison.OrdinalIgnoreCase) ||
+                   model.Contains("16 s0", StringComparison.OrdinalIgnoreCase) ||
+                   model.Contains("16s0", StringComparison.OrdinalIgnoreCase);
         }
 
         private async Task InitializeGameProfilesAsync()
@@ -3772,9 +3804,17 @@ namespace OmenCore.ViewModels
                             {
                                 var failedModeName = targetPreset.IsBuiltIn ? mode : targetPreset.Name;
                                 PushEvent($"Fan mode failed: {failedModeName}");
-                                _notificationService.ShowWarning(
-                                    "Fan Mode",
-                                    $"Could not apply {failedModeName}. Check Diagnostics for backend state.");
+                                var warningMessage = $"Could not apply {failedModeName}. Check Diagnostics for backend state.";
+                                if (IsVictus16S0Model())
+                                {
+                                    warningMessage = $"Could not apply {failedModeName}. Victus 16-s0 models may require firmware-path validation; run Diagnostics and share report + WMI logs in guide format.";
+                                }
+                                else if (IsVictusModel())
+                                {
+                                    warningMessage = $"Could not apply {failedModeName}. On Victus models, share Diagnostics output in guide format so backend mapping can be verified.";
+                                }
+
+                                _notificationService.ShowWarning("Fan Mode", warningMessage);
                             });
                         }
                         return;
@@ -3920,7 +3960,8 @@ namespace OmenCore.ViewModels
                             _fanService.ApplyPreset(CreatePerformanceQuickProfileFanPreset(), immediate: true);
                         });
                         performanceMode = "Performance";
-                        fanMode = "Gaming";
+                        fanMode = "Performance";
+                        DisarmQuietSafetyMonitor();
                         break;
 
                     case "balanced":
@@ -3931,6 +3972,7 @@ namespace OmenCore.ViewModels
                         });
                         performanceMode = "Balanced";
                         fanMode = "Auto";
+                        DisarmQuietSafetyMonitor();
                         break;
 
                     case "quiet":
@@ -3941,7 +3983,20 @@ namespace OmenCore.ViewModels
                         });
                         performanceMode = "Quiet";
                         fanMode = "Quiet";
+                        ArmQuietSafetyMonitor();
                         break;
+
+                    case "custom":
+                        DisarmQuietSafetyMonitor();
+                        var customApplied = ApplyCustomQuickProfileFromHotkey();
+                        if (!customApplied)
+                        {
+                            // No saved custom preset — navigate to the Custom tab so the user can configure one
+                            var d = Application.Current?.Dispatcher;
+                            if (d != null)
+                                await d.InvokeAsync(() => { SelectedTabIndex = OmenTabIndex; });
+                        }
+                        return;
 
                     default:
                         _logging.Warn($"Unknown profile: {profile}");
@@ -3975,17 +4030,15 @@ namespace OmenCore.ViewModels
         {
             return new FanPreset
             {
-                Name = "Gaming",
+                Name = "Performance",
                 Mode = FanMode.Performance,
                 IsBuiltIn = true,
                 Curve = new()
                 {
-                    new FanCurvePoint { TemperatureC = 40, FanPercent = 30 },
-                    new FanCurvePoint { TemperatureC = 50, FanPercent = 42 },
-                    new FanCurvePoint { TemperatureC = 60, FanPercent = 58 },
-                    new FanCurvePoint { TemperatureC = 70, FanPercent = 72 },
-                    new FanCurvePoint { TemperatureC = 80, FanPercent = 88 },
-                    new FanCurvePoint { TemperatureC = 90, FanPercent = 100 }
+                    new FanCurvePoint { TemperatureC = 40, FanPercent = 38 },
+                    new FanCurvePoint { TemperatureC = 50, FanPercent = 52 },
+                    new FanCurvePoint { TemperatureC = 60, FanPercent = 72 },
+                    new FanCurvePoint { TemperatureC = 70, FanPercent = 100 }
                 }
             };
         }
@@ -4139,7 +4192,17 @@ namespace OmenCore.ViewModels
                 {
                     if (!_fanService.FanWritesAvailable)
                     {
-                        _notificationService.ShowWarning("Fan Mode", "Fan control backend is unavailable. Max fan hotkey was not applied.");
+                        if (IsVictusModel())
+                        {
+                            _notificationService.ShowWarning(
+                                "Fan Mode",
+                                "Victus fan backend is unavailable, so Max fan was not applied. Run Diagnostics and share the report using the guide format.");
+                        }
+                        else
+                        {
+                            _notificationService.ShowWarning("Fan Mode", "Fan control backend is unavailable. Max fan hotkey was not applied.");
+                        }
+
                         _logging.Warn("Hotkey max fan toggle skipped: fan writes unavailable");
                         return;
                     }
@@ -4281,6 +4344,165 @@ namespace OmenCore.ViewModels
                     mainWindow.Focus();
                     
                     _logging.Info("Window shown and activated");
+                }
+            });
+        }
+
+        private void OnHotkeyTogglePerformanceProfile(object? sender, EventArgs e)
+        {
+            _hotkeyCoordinator.EnqueueUiAction("TogglePerformanceProfile", () =>
+            {
+                if (General == null) return;
+
+                var current = string.IsNullOrWhiteSpace(General.SelectedProfile)
+                    ? "Balanced"
+                    : General.SelectedProfile;
+                var nextProfile = ResolveNextHotkeyPerformanceProfile(current);
+
+                try
+                {
+                    switch (nextProfile)
+                    {
+                        case "Performance":
+                            General.ApplyPerformanceProfile();
+                            DisarmQuietSafetyMonitor();
+                            break;
+                        case "Quiet":
+                            General.ApplyQuietProfile();
+                            ArmQuietSafetyMonitor();
+                            break;
+                        case "Custom":
+                            if (!ApplyCustomQuickProfileFromHotkey())
+                            {
+                                _logging.Warn("Hotkey profile cycle skipped Custom because no saved custom curve could be applied");
+                                return;
+                            }
+                            DisarmQuietSafetyMonitor();
+                            break;
+                        default:
+                            General.ApplyBalancedProfile();
+                            DisarmQuietSafetyMonitor();
+                            break;
+                    }
+
+                    ShowHotkeyOsd("Profile", nextProfile, "Ctrl+Shift+E");
+                    PushEvent($"Profile: {nextProfile} (hotkey)");
+                }
+                catch (Exception ex)
+                {
+                    _logging.Warn($"Hotkey performance profile change failed: {ex.Message}");
+                }
+            });
+        }
+
+        private string ResolveNextHotkeyPerformanceProfile(string currentProfile)
+        {
+            return ProfileCycleService.ResolveNextPerformanceProfile(
+                currentProfile,
+                ResolveQuickAccessCurvePreset() != null);
+        }
+
+        private bool ApplyCustomQuickProfileFromHotkey()
+        {
+            var customPreset = ResolveQuickAccessCurvePreset();
+            if (customPreset == null)
+            {
+                return false;
+            }
+
+            var applied = _fanService.ApplyPreset(customPreset, immediate: true);
+            if (!applied)
+            {
+                PushEvent($"Custom profile failed: {customPreset.Name}");
+                _notificationService.ShowWarning(
+                    "Profile",
+                    $"Could not apply custom fan preset '{customPreset.Name}'. Check Diagnostics for backend state.");
+                return false;
+            }
+
+            var confirmedPerformanceMode = _performanceModeService.GetCurrentMode()
+                ?? General?.CurrentPerformanceMode
+                ?? CurrentPerformanceMode;
+            var confirmedFanMode = _fanService.GetCurrentFanMode()
+                ?? _fanService.ActivePresetName
+                ?? customPreset.Name;
+
+            _fanControl?.SelectPresetByNameNoApply(customPreset.Name);
+            General?.SyncRuntimeState(confirmedPerformanceMode, confirmedFanMode);
+            if (General != null)
+            {
+                General.SelectedProfile = "Custom";
+            }
+
+            CurrentPerformanceMode = confirmedPerformanceMode;
+            CurrentFanMode = confirmedFanMode;
+            SelectedPreset = customPreset;
+            return true;
+        }
+
+        // ─── v3.7.0: Quiet Safety Monitor helpers ─────────────────────────────
+
+        private void ArmQuietSafetyMonitor()
+        {
+            var settings = _config.QuietSafety;
+            if (!settings.Enabled) return;
+            _quietSafetyMonitor.Arm(settings.SafetyOnTempC, settings.SafetyOffTempC);
+            _logging.Debug($"[QuietSafety] Armed (on={settings.SafetyOnTempC}°C off={settings.SafetyOffTempC}°C)");
+        }
+
+        private void DisarmQuietSafetyMonitor()
+        {
+            _quietSafetyMonitor.ClearAndDisarm();
+            // Clear UI indicator on the UI thread; may be called from any thread
+            var dispatcher = Application.Current?.Dispatcher;
+            if (dispatcher != null && !dispatcher.CheckAccess())
+                dispatcher.InvokeAsync(() => General?.SetQuietSafetyOverride(false));
+            else
+                General?.SetQuietSafetyOverride(false);
+        }
+
+        private void OnQuietSafetyOverrideActivated(object? sender, EventArgs e)
+        {
+            _logging.Info("[QuietSafety] Temperature critical — switching to Max cooling (Quiet power mode retained)");
+            var dispatcher = Application.Current?.Dispatcher;
+            if (dispatcher == null) return;
+            dispatcher.InvokeAsync(() =>
+            {
+                try
+                {
+                    _fanService.ApplyMaxCooling();
+                    var confirmedFanMode = _fanService.GetCurrentFanMode() ?? "Max";
+                    CurrentFanMode = confirmedFanMode;
+                    General?.SetQuietSafetyOverride(true);
+                    General?.SyncRuntimeState(CurrentPerformanceMode, confirmedFanMode);
+                    PushEvent("🌡️ Quiet safety: fans → Max (temp critical)");
+                }
+                catch (Exception ex)
+                {
+                    _logging.Warn($"[QuietSafety] Failed to apply Max cooling: {ex.Message}");
+                }
+            });
+        }
+
+        private void OnQuietSafetyOverrideCleared(object? sender, EventArgs e)
+        {
+            _logging.Info("[QuietSafety] Temperature recovered — restoring Quiet fan curve");
+            var dispatcher = Application.Current?.Dispatcher;
+            if (dispatcher == null) return;
+            dispatcher.InvokeAsync(() =>
+            {
+                try
+                {
+                    _fanService.ApplyQuietMode();
+                    var confirmedFanMode = _fanService.GetCurrentFanMode() ?? "Quiet";
+                    CurrentFanMode = confirmedFanMode;
+                    General?.SetQuietSafetyOverride(false);
+                    General?.SyncRuntimeState(CurrentPerformanceMode, confirmedFanMode);
+                    PushEvent("✅ Quiet safety: fans → Quiet (temp recovered)");
+                }
+                catch (Exception ex)
+                {
+                    _logging.Warn($"[QuietSafety] Failed to restore Quiet fans: {ex.Message}");
                 }
             });
         }
@@ -4806,6 +5028,7 @@ namespace OmenCore.ViewModels
                 _hotkeyService.ToggleFanModeRequested -= OnHotkeyToggleFanMode;
                 _hotkeyService.ToggleMaxFanRequested -= OnHotkeyToggleMaxFan;
                 _hotkeyService.TogglePerformanceModeRequested -= OnHotkeyTogglePerformanceMode;
+                _hotkeyService.TogglePerformanceProfileRequested -= OnHotkeyTogglePerformanceProfile;
                 _hotkeyService.ToggleBoostModeRequested -= OnHotkeyToggleBoostMode;
                 _hotkeyService.ToggleQuietModeRequested -= OnHotkeyToggleQuietMode;
                 _hotkeyService.ShowWindowRequested -= OnHotkeyShowWindow;
@@ -4970,36 +5193,12 @@ namespace OmenCore.ViewModels
 
         private string ResolveNextHotkeyFanMode(string currentCycleMode, out string targetMode)
         {
-            // Required deterministic cycle when all modes exist:
-            // Auto -> Gaming -> Extreme -> Custom -> Quiet.
-            // If there is no saved/active custom curve, skip the Custom display slot so OSD
-            // and tray history never claim "Custom" while applying Auto as a fallback.
-            var cycle = new[] { "Auto", "Gaming", "Extreme", "Custom", "Quiet" };
-            var currentIndex = Array.IndexOf(cycle, currentCycleMode);
-            if (currentIndex < 0)
-            {
-                currentIndex = 0;
-            }
-
-            for (var offset = 1; offset <= cycle.Length; offset++)
-            {
-                var candidate = cycle[(currentIndex + offset) % cycle.Length];
-                if (!string.Equals(candidate, "Custom", StringComparison.OrdinalIgnoreCase))
-                {
-                    targetMode = candidate;
-                    return candidate;
-                }
-
-                var customPreset = ResolveQuickAccessCurvePreset();
-                if (customPreset != null)
-                {
-                    targetMode = customPreset.Name;
-                    return "Custom";
-                }
-            }
-
-            targetMode = "Auto";
-            return "Auto";
+            var customPreset = ResolveQuickAccessCurvePreset();
+            return ProfileCycleService.ResolveNextFanMode(
+                currentCycleMode,
+                customPreset != null,
+                customPreset?.Name,
+                out targetMode);
         }
 
         private static string MapFanModeToPerformanceMode(string fanMode)

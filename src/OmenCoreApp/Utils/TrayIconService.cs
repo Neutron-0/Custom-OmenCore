@@ -176,10 +176,13 @@ namespace OmenCore.Utils
             profileBalanced.Click += (s, e) => QuickProfileChangeRequested?.Invoke("Balanced");
             var profileQuiet = new MenuItem { Header = "🤫 Quiet — Quiet fans + Power saving" };
             profileQuiet.Click += (s, e) => QuickProfileChangeRequested?.Invoke("Quiet");
+            var profileCustom = new MenuItem { Header = "⚙️ Custom — User-defined fans + power settings" };
+            profileCustom.Click += (s, e) => QuickProfileChangeRequested?.Invoke("Custom");
 
             quickProfileMenuItem.Items.Add(profilePerformance);
             quickProfileMenuItem.Items.Add(profileBalanced);
             quickProfileMenuItem.Items.Add(profileQuiet);
+            quickProfileMenuItem.Items.Add(profileCustom);
 
             // Ensure submenu items use our dark MenuItem style
             quickProfileMenuItem.ItemContainerStyle = menuItemStyle;

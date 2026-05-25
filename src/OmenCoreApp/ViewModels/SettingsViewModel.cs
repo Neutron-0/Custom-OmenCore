@@ -1286,7 +1286,6 @@ namespace OmenCore.ViewModels
                     
                     // Update the static flag immediately so EC writes work without restart
                     Hardware.PawnIOEcAccess.EnableExperimentalKeyboardWrites = value;
-                    Hardware.WinRing0EcAccess.EnableExperimentalKeyboardWrites = value;
                     _logging.Info($"EC keyboard writes flag updated at runtime: {value}");
                     
                     OnPropertyChanged();
@@ -1332,7 +1331,6 @@ namespace OmenCore.ViewModels
                     
                     // Update the static flags immediately
                     Hardware.PawnIOEcAccess.EnableExclusiveEcAccessDiagnostics = value;
-                    Hardware.WinRing0EcAccess.EnableExclusiveEcAccessDiagnostics = value;
                     _logging.Info($"Exclusive EC diagnostics flag updated at runtime: {value}");
                     
                     OnPropertyChanged();
@@ -3474,21 +3472,6 @@ namespace OmenCore.ViewModels
 
                 var pawnIoAvailable = IsPawnIOAvailable();
 
-                // Legacy WinRing0 check (non-invasive): avoid opening device handles,
-                // which can trigger Defender/anti-cheat alerts on some systems.
-                bool winRing0Available = false;
-                try
-                {
-                    using var wrService = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
-                        @"SYSTEM\CurrentControlSet\Services\WinRing0_1_2_0");
-                    if (wrService != null)
-                        winRing0Available = true;
-                }
-                catch (Exception ex)
-                {
-                    _logging.Debug($"WinRing0 registry check failed: {ex.Message}");
-                }
-                
                 // Check for XTU service conflict (check SERVICES not processes)
                 bool xtuRunning = false;
                 string? xtuServiceName = null;
@@ -3529,20 +3512,11 @@ namespace OmenCore.ViewModels
                     DriverStatusDetail = "✓ Secure Boot compatible driver backend available (recommended). Won't trigger Windows Defender false positives.";
                     DriverStatusColor = new SolidColorBrush(Color.FromRgb(102, 187, 106)); // Green
                 }
-                else if (winRing0Available)
+                else if (xtuRunning)
                 {
-                    if (xtuRunning)
-                    {
-                        DriverStatusText = "Legacy WinRing0 Detected (XTU Conflict)";
-                        DriverStatusDetail = $"Intel XTU service ({xtuServiceName}) may block undervolting. Stop XTU to use OmenCore undervolting. PawnIO remains the recommended backend. (Legacy WinRing0 may trigger Defender false positives.)";
-                        DriverStatusColor = new SolidColorBrush(Color.FromRgb(255, 183, 77)); // Orange
-                    }
-                    else
-                    {
-                        DriverStatusText = "Legacy WinRing0 Detected";
-                        DriverStatusDetail = "Legacy driver backend detected. OmenCore defaults to PawnIO/WMI paths; WinRing0 is legacy/optional and may trigger Windows Defender false positives.";
-                        DriverStatusColor = new SolidColorBrush(Color.FromRgb(255, 183, 77)); // Orange-yellow (warn about legacy)
-                    }
+                    DriverStatusText = "XTU Conflict Detected";
+                    DriverStatusDetail = $"Intel XTU service ({xtuServiceName}) may block undervolting. Stop XTU to use OmenCore undervolting. PawnIO remains the recommended backend.";
+                    DriverStatusColor = new SolidColorBrush(Color.FromRgb(255, 183, 77)); // Orange
                 }
                 else
                 {
@@ -3561,7 +3535,7 @@ namespace OmenCore.ViewModels
                     else
                     {
                         DriverStatusDetail =
-                            "Install PawnIO (recommended - no Defender false positives). Legacy WinRing0 fallback is optional and not required for core operation.";
+                            "Install PawnIO (recommended - no Defender false positives). OmenCore no longer supports the legacy low-level backend.";
                     }
 
                     DriverStatusColor = new SolidColorBrush(Color.FromRgb(239, 83, 80)); // Red

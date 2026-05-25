@@ -28,6 +28,8 @@ namespace OmenCoreApp.Tests.Services
             RuntimeUiPerformanceCounters.RecordGeneralSampleReceived();
             RuntimeUiPerformanceCounters.RecordGeneralSampleProjected();
             RuntimeUiPerformanceCounters.RecordGeneralSampleSkipped();
+            RuntimeUiPerformanceCounters.RecordFanTelemetrySync(collectionResized: true, itemsUpdated: 2);
+            RuntimeUiPerformanceCounters.RecordFanTelemetrySync(collectionResized: false, itemsUpdated: 2);
 
             var snapshot = RuntimeUiPerformanceCounters.GetSnapshot();
 
@@ -50,6 +52,12 @@ namespace OmenCoreApp.Tests.Services
             snapshot.MainProjectionAcceptanceRatio.Should().Be(1);
             snapshot.DashboardProjectionAcceptanceRatio.Should().Be(1);
             snapshot.GeneralProjectionAcceptanceRatio.Should().Be(1);
+            snapshot.FanTelemetrySyncs.Should().Be(2);
+            snapshot.FanTelemetryCollectionResizes.Should().Be(1);
+            snapshot.FanTelemetryItemsUpdated.Should().Be(4);
+            snapshot.FanTelemetryPropertyOnlySyncs.Should().Be(1);
+            snapshot.FanTelemetryCollectionResizeRatio.Should().Be(0.5d, "1 resize out of 2 fan telemetry syncs");
+            snapshot.FanTelemetryPropertyOnlySyncRatio.Should().Be(0.5d, "1 property-only update out of 2 fan telemetry syncs");
         }
 
         [Fact]
@@ -59,6 +67,7 @@ namespace OmenCoreApp.Tests.Services
             RuntimeUiPerformanceCounters.RecordMainMonitoringSampleQueued();
             RuntimeUiPerformanceCounters.RecordDashboardSampleReceived();
             RuntimeUiPerformanceCounters.RecordGeneralSampleReceived();
+            RuntimeUiPerformanceCounters.RecordFanTelemetrySync(collectionResized: true, itemsUpdated: 1);
 
             RuntimeUiPerformanceCounters.ResetForTests();
             var snapshot = RuntimeUiPerformanceCounters.GetSnapshot();
@@ -67,6 +76,10 @@ namespace OmenCoreApp.Tests.Services
             snapshot.MainMonitoringSamplesQueued.Should().Be(0);
             snapshot.DashboardSamplesReceived.Should().Be(0);
             snapshot.GeneralSamplesReceived.Should().Be(0);
+            snapshot.FanTelemetrySyncs.Should().Be(0);
+            snapshot.FanTelemetryCollectionResizes.Should().Be(0);
+            snapshot.FanTelemetryItemsUpdated.Should().Be(0);
+            snapshot.FanTelemetryPropertyOnlySyncs.Should().Be(0);
         }
 
         /// <summary>

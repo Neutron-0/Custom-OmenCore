@@ -166,11 +166,11 @@
                             <ToggleSwitch Name="DebugLoggingToggle" Grid.Column="1"/>
                         </Grid>
                         
-                        <!-- WinRing0 Driver -->
+                        <!-- Hardware Driver -->
                         <Grid ColumnDefinitions="*,Auto">
                             <StackPanel Grid.Column="0">
                                 <TextBlock Text="Hardware Driver"/>
-                                <TextBlock Name="DriverStatusText" Text="WinRing0: Not loaded"
+                                <TextBlock Name="DriverStatusText" Text="PawnIO: Not loaded"
                                            Foreground="#888888" FontSize="12"/>
                             </StackPanel>
                             <Button Content="Reinstall" Grid.Column="1"

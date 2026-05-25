@@ -520,7 +520,10 @@ namespace OmenCore.Services
                 // Unregister the app from toast notifications
                 ToastNotificationManagerCompat.Uninstall();
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logging.Debug($"Toast notification unregister failed during dispose: {ex.Message}");
+            }
         }
         
         #region In-App Notification Center

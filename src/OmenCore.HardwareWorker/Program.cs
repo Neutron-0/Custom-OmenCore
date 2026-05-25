@@ -48,7 +48,7 @@ class Program
     private static DateTime _lastClientActivity = DateTime.Now;
     private static Mutex? _singleInstanceMutex;
     
-    // PawnIO fallback for CPU temp when LibreHardwareMonitor fails (Defender blocks WinRing0)
+    // PawnIO fallback for CPU temp when direct monitoring is blocked by security policy.
     private static PawnIOCpuTemp? _pawnIOCpuTemp;
     private static bool _pawnIOFallbackActive = false;
     private static int _consecutiveNullCpuTemp = 0;
@@ -1140,8 +1140,9 @@ class Program
                        hardware.Name.Contains("Ryzen", StringComparison.OrdinalIgnoreCase);
 
         // Preferred stable sources first (Intel and AMD package-level sensors).
+        // "IA Cores" covers Intel Core Ultra (Meteor/Arrow Lake) P-core cluster temperature in LHM.
         var preferredByName = GetSensorValueMulti(hardware, SensorType.Temperature,
-            "CPU Package", "Package", "CPU DTS",
+            "CPU Package", "Package", "CPU DTS", "IA Cores",
             "Core (Tctl/Tdie)", "CPU (Tctl/Tdie)", "Tctl/Tdie",
             "Tctl", "Tdie", "CCDs Max", "CCDs Average", "Core Max", "Core Average");
 
@@ -1152,7 +1153,18 @@ class Program
                 return preferredByName;
             }
 
-            return tempSensors.Max(s => s.Value);
+            // Fallback: prefer any sensor whose name hints at a package or cluster aggregate
+            // rather than taking Max() over individual cores, which can surface transient
+            // single-core spikes (e.g. 105 °C for one poll interval at game launch).
+            var packageHintFallback = tempSensors
+                .Where(s => s.Sensor.Name.Contains("Package", StringComparison.OrdinalIgnoreCase) ||
+                            s.Sensor.Name.Contains("Core Max", StringComparison.OrdinalIgnoreCase) ||
+                            s.Sensor.Name.Contains("IA Cores", StringComparison.OrdinalIgnoreCase))
+                .Select(s => s.Value)
+                .DefaultIfEmpty(0)
+                .Max();
+
+            return packageHintFallback > 0 ? packageHintFallback : tempSensors.Max(s => s.Value);
         }
 
         var amdAggregateCandidates = tempSensors

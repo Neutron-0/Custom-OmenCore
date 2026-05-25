@@ -11,6 +11,10 @@ namespace OmenCore.Hardware
         private readonly LibreHardwareMonitorImpl? _bridge;
         private readonly WmiBiosMonitor? _wmiBiosMonitor;
         private readonly HpWmiBios? _wmiBios;
+        private const int LastGoodTemperatureReuseSeconds = 15;
+        private double _lastGoodCpuTemp;
+        private double _lastGoodGpuTemp;
+        private DateTime _lastGoodSampleUtc = DateTime.MinValue;
         
         /// <summary>
         /// Create ThermalSensorProvider with LibreHardwareMonitorImpl for full monitoring
@@ -80,6 +84,7 @@ namespace OmenCore.Hardware
                         {
                             // Timed out on UI thread — return cached/empty values to avoid freeze and log for diagnostics
                             try { App.Logging?.Warn("[ThermalSensorProvider] UI-thread ReadSampleAsync timed out (250ms)"); } catch { }
+                            TryReuseLastGoodTemperatures(ref cpuTemp, ref gpuTemp);
                         }
                     }
                     else
@@ -94,6 +99,7 @@ namespace OmenCore.Hardware
                 {
                     // If ReadSampleAsync fails, temps stay at 0 — log for diagnostics
                     try { App.Logging?.Debug($"[ThermalSensorProvider] ReadSampleAsync failed: {ex.Message}"); } catch { }
+                    TryReuseLastGoodTemperatures(ref cpuTemp, ref gpuTemp);
                 }
             }
             // Last resort: raw WMI BIOS (integer-only, no ACPI overlay)
@@ -107,6 +113,8 @@ namespace OmenCore.Hardware
                     gpuTemp = gpu;
                 }
             }
+
+            RememberLastGoodTemperatures(cpuTemp, gpuTemp);
 
             if (cpuTemp > 0)
             {
@@ -126,6 +134,45 @@ namespace OmenCore.Hardware
             }
 
             return list;
+        }
+
+        private void RememberLastGoodTemperatures(double cpuTemp, double gpuTemp)
+        {
+            if (cpuTemp > 0)
+            {
+                _lastGoodCpuTemp = cpuTemp;
+                _lastGoodSampleUtc = DateTime.UtcNow;
+            }
+
+            if (gpuTemp > 0)
+            {
+                _lastGoodGpuTemp = gpuTemp;
+                _lastGoodSampleUtc = DateTime.UtcNow;
+            }
+        }
+
+        private void TryReuseLastGoodTemperatures(ref double cpuTemp, ref double gpuTemp)
+        {
+            if (_lastGoodSampleUtc == DateTime.MinValue)
+            {
+                return;
+            }
+
+            var ageSeconds = (DateTime.UtcNow - _lastGoodSampleUtc).TotalSeconds;
+            if (ageSeconds > LastGoodTemperatureReuseSeconds)
+            {
+                return;
+            }
+
+            if (cpuTemp <= 0 && _lastGoodCpuTemp > 0)
+            {
+                cpuTemp = _lastGoodCpuTemp;
+            }
+
+            if (gpuTemp <= 0 && _lastGoodGpuTemp > 0)
+            {
+                gpuTemp = _lastGoodGpuTemp;
+            }
         }
     }
 }

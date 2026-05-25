@@ -151,6 +151,7 @@ namespace OmenCore.ViewModels
                 }
 
                 DiagnosticStatus = $"Detection complete. Found {DetectedDevices.Count} device(s).";
+                OnPropertyChanged(nameof(KeyboardLightingTelemetry));
             }
             catch (Exception ex)
             {
@@ -204,19 +205,24 @@ namespace OmenCore.ViewModels
                 // Test HP Omen keyboard
                 if (_keyboardLightingService?.IsAvailable ?? false)
                 {
-                    DiagnosticLogs.Insert(0, $"{DateTime.Now:HH:mm:ss} - Testing HP Omen keyboard zones");
-                    // Apply test colors to zones: Red, Green, Blue, Yellow
-                    var testColors = new[] { "#FF0000", "#00FF00", "#0000FF", "#FFFF00" };
-                    for (int i = 0; i < 4; i++)
+                    DiagnosticLogs.Insert(0, $"{DateTime.Now:HH:mm:ss} - Testing HP Omen keyboard (ColorTable pattern)");
+
+                    var fourZonePattern = new[]
                     {
-                        if (_keyboardLightingService.IsAvailable)
-                        {
-                            var zone = (KeyboardLightingService.KeyboardZone)i;
-                            _keyboardLightingService.SetZoneColor(zone, ColorTranslator.FromHtml(testColors[i]));
-                            DiagnosticLogs.Insert(0, $"{DateTime.Now:HH:mm:ss} - Set zone {zone} to {testColors[i]}");
-                            await Task.Delay(500);
-                        }
-                    }
+                        ColorTranslator.FromHtml("#FF0000"),
+                        ColorTranslator.FromHtml("#00FF00"),
+                        ColorTranslator.FromHtml("#0000FF"),
+                        ColorTranslator.FromHtml("#FFFF00")
+                    };
+
+                    await _keyboardLightingService.SetAllZoneColors(fourZonePattern);
+                    DiagnosticLogs.Insert(0, $"{DateTime.Now:HH:mm:ss} - Applied 4-zone RGB pattern");
+
+                    await Task.Delay(600);
+
+                    var white = ColorTranslator.FromHtml("#FFFFFF");
+                    await _keyboardLightingService.SetAllZoneColors(new[] { white, white, white, white });
+                    DiagnosticLogs.Insert(0, $"{DateTime.Now:HH:mm:ss} - Applied all-white verification pattern");
                 }
 
                 DiagnosticStatus = "Test pattern applied successfully.";
@@ -231,6 +237,7 @@ namespace OmenCore.ViewModels
             finally
             {
                 IsRunningTest = false;
+                OnPropertyChanged(nameof(KeyboardLightingTelemetry));
             }
         }
 
@@ -283,6 +290,8 @@ namespace OmenCore.ViewModels
             {
                 IsRunningTest = false;
             }
+
+            OnPropertyChanged(nameof(KeyboardLightingTelemetry));
 
             return Task.CompletedTask;
         }

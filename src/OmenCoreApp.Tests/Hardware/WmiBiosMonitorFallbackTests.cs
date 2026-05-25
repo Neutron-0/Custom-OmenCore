@@ -26,5 +26,29 @@ namespace OmenCoreApp.Tests.Hardware
 
             cooldownSeconds.Should().Be(expectedSeconds);
         }
+
+        [Theory]
+        [InlineData(79, 30, true)]
+        [InlineData(79, 300, true)]
+        [InlineData(79, 301, false)]
+        [InlineData(0, 30, false)]
+        [InlineData(111, 30, false)]
+        public void IsRecentWorkerCpuTemperatureUsable_OnlyAcceptsPlausibleRecentWorkerReadings(
+            double cpuTemp,
+            int ageSeconds,
+            bool expected)
+        {
+            var method = typeof(WmiBiosMonitor).GetMethod(
+                "IsRecentWorkerCpuTemperatureUsable",
+                BindingFlags.NonPublic | BindingFlags.Static);
+
+            method.Should().NotBeNull();
+
+            var now = new DateTime(2026, 5, 25, 0, 0, 0, DateTimeKind.Utc);
+            var captured = now.AddSeconds(-ageSeconds);
+            var usable = (bool)method!.Invoke(null, new object[] { cpuTemp, captured, now })!;
+
+            usable.Should().Be(expected);
+        }
     }
 }

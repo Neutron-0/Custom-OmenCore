@@ -14,9 +14,9 @@
     <InvariantGlobalization>true</InvariantGlobalization>
     
     <!-- Single version source — consumed by Program.cs via Assembly.GetName().Version -->
-    <Version>3.6.3</Version>
-    <AssemblyVersion>3.6.3.0</AssemblyVersion>
-    <FileVersion>3.6.3.0</FileVersion>
+    <Version>3.7.0</Version>
+    <AssemblyVersion>3.7.0.0</AssemblyVersion>
+    <FileVersion>3.7.0.0</FileVersion>
 
     <!-- Metadata -->
     <Authors>OmenCore Team</Authors>
@@ -26,6 +26,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="artifacts\**\*.cs" />
+    <EmbeddedResource Remove="artifacts\**\*" />
+    <None Remove="artifacts\**\*" />
+
     <!-- Command-line parsing -->
     <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
     

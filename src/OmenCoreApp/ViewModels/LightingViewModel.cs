@@ -48,6 +48,13 @@ namespace OmenCore.ViewModels
         private bool _isAmbientModeActive;
         private bool _isAudioReactiveModeActive;
         private AudioVisualizationMode _selectedAudioVisualizationMode = AudioVisualizationMode.Pulse;
+
+        // RGB tab card visibility toggles (user-controlled directly from RGB tab).
+        private bool _sceneQuickSelectCardEnabled = true;
+        private bool _corsairCardEnabled = true;
+        private bool _logitechCardEnabled = true;
+        private bool _razerCardEnabled = true;
+        private bool _hpOmenKeyboardCardEnabled = true;
         
         // 4-Zone Keyboard colors
         private string _zone1ColorHex = "#E6002E"; // OMEN Red
@@ -215,6 +222,21 @@ namespace OmenCore.ViewModels
         /// Whether scene service is available.
         /// </summary>
         public bool IsSceneServiceEnabled => _sceneService != null;
+
+        public bool SceneQuickSelectCardEnabled
+        {
+            get => _sceneQuickSelectCardEnabled;
+            set
+            {
+                if (SetProperty(ref _sceneQuickSelectCardEnabled, value))
+                {
+                    OnPropertyChanged(nameof(IsSceneQuickSelectCardContentVisible));
+                    PersistRgbCardToggleState();
+                }
+            }
+        }
+
+        public bool IsSceneQuickSelectCardContentVisible => SceneQuickSelectCardEnabled && IsSceneServiceEnabled;
         
         /// <summary>
         /// Current scene name for display.
@@ -257,6 +279,63 @@ namespace OmenCore.ViewModels
         public bool IsCorsairEnabled => _corsairService != null;
         public bool IsLogitechEnabled => _logitechService != null;
         public bool IsRazerEnabled => _razerService != null;
+
+        public bool CorsairCardEnabled
+        {
+            get => _corsairCardEnabled;
+            set
+            {
+                if (SetProperty(ref _corsairCardEnabled, value))
+                {
+                    OnPropertyChanged(nameof(IsCorsairCardContentVisible));
+                    PersistRgbCardToggleState();
+                }
+            }
+        }
+
+        public bool LogitechCardEnabled
+        {
+            get => _logitechCardEnabled;
+            set
+            {
+                if (SetProperty(ref _logitechCardEnabled, value))
+                {
+                    OnPropertyChanged(nameof(IsLogitechCardContentVisible));
+                    PersistRgbCardToggleState();
+                }
+            }
+        }
+
+        public bool RazerCardEnabled
+        {
+            get => _razerCardEnabled;
+            set
+            {
+                if (SetProperty(ref _razerCardEnabled, value))
+                {
+                    OnPropertyChanged(nameof(IsRazerCardContentVisible));
+                    PersistRgbCardToggleState();
+                }
+            }
+        }
+
+        public bool HpOmenKeyboardCardEnabled
+        {
+            get => _hpOmenKeyboardCardEnabled;
+            set
+            {
+                if (SetProperty(ref _hpOmenKeyboardCardEnabled, value))
+                {
+                    OnPropertyChanged(nameof(IsHpOmenKeyboardCardContentVisible));
+                    PersistRgbCardToggleState();
+                }
+            }
+        }
+
+        public bool IsCorsairCardContentVisible => CorsairCardEnabled;
+        public bool IsLogitechCardContentVisible => LogitechCardEnabled;
+        public bool IsRazerCardContentVisible => RazerCardEnabled;
+        public bool IsHpOmenKeyboardCardContentVisible => HpOmenKeyboardCardEnabled && IsKeyboardLightingAvailable;
 
         // Provider status badges — color + detail from IRgbProvider.ConnectionStatus
         private OmenCore.Services.Rgb.RgbProviderConnectionStatus GetProviderStatus(string id)
@@ -1235,6 +1314,7 @@ namespace OmenCore.ViewModels
             
             // Load saved keyboard colors from config
             LoadKeyboardColorsFromConfig();
+            LoadRgbCardToggleStateFromConfig();
 
             // Initialize Corsair commands (only functional if service is available)
             DiscoverCorsairDevicesCommand = new AsyncRelayCommand(async _ =>
@@ -1420,6 +1500,57 @@ namespace OmenCore.ViewModels
             {
                 _performanceModeService.ModeApplied += OnPerformanceModeApplied;
             }
+        }
+
+        private void LoadRgbCardToggleStateFromConfig()
+        {
+            var config = _configService?.Config;
+            if (config == null)
+            {
+                _sceneQuickSelectCardEnabled = true;
+                _corsairCardEnabled = true;
+                _logitechCardEnabled = true;
+                _razerCardEnabled = true;
+                _hpOmenKeyboardCardEnabled = true;
+                return;
+            }
+
+            config.Features ??= new FeaturePreferences();
+
+            _sceneQuickSelectCardEnabled = config.SceneQuickSelectCardEnabled;
+            _corsairCardEnabled = config.Features.CorsairIntegrationEnabled;
+            _logitechCardEnabled = config.Features.LogitechIntegrationEnabled;
+            _razerCardEnabled = config.Features.RazerIntegrationEnabled;
+            _hpOmenKeyboardCardEnabled = config.Features.KeyboardLightingEnabled;
+
+            OnPropertyChanged(nameof(SceneQuickSelectCardEnabled));
+            OnPropertyChanged(nameof(IsSceneQuickSelectCardContentVisible));
+            OnPropertyChanged(nameof(CorsairCardEnabled));
+            OnPropertyChanged(nameof(IsCorsairCardContentVisible));
+            OnPropertyChanged(nameof(LogitechCardEnabled));
+            OnPropertyChanged(nameof(IsLogitechCardContentVisible));
+            OnPropertyChanged(nameof(RazerCardEnabled));
+            OnPropertyChanged(nameof(IsRazerCardContentVisible));
+            OnPropertyChanged(nameof(HpOmenKeyboardCardEnabled));
+            OnPropertyChanged(nameof(IsHpOmenKeyboardCardContentVisible));
+        }
+
+        private void PersistRgbCardToggleState()
+        {
+            var config = _configService?.Config;
+            if (config == null)
+            {
+                return;
+            }
+
+            config.Features ??= new FeaturePreferences();
+            config.SceneQuickSelectCardEnabled = _sceneQuickSelectCardEnabled;
+            config.Features.CorsairIntegrationEnabled = _corsairCardEnabled;
+            config.Features.LogitechIntegrationEnabled = _logitechCardEnabled;
+            config.Features.RazerIntegrationEnabled = _razerCardEnabled;
+            config.Features.KeyboardLightingEnabled = _hpOmenKeyboardCardEnabled;
+
+            _configService?.Save(config);
         }
 
         private void OpenColorPickerForZone(int zoneNumber, string zoneName)

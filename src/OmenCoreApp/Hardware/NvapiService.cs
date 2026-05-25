@@ -258,6 +258,12 @@ namespace OmenCore.Hardware
         /// <summary>Current power limit percentage (100 = default TDP).</summary>
         public int PowerLimitPercent { get; private set; } = 100;
 
+        /// <summary>Whether NVAPI exposes writable client power policy controls.</summary>
+        public bool SupportsPowerLimit { get; private set; }
+
+        /// <summary>Human-readable reason when writable power policy controls are not available.</summary>
+        public string PowerLimitStatusMessage { get; private set; } = "NVAPI power policy support not detected";
+
         /// <summary>Minimum allowed core clock offset.</summary>
         public int MinCoreOffset { get; private set; } = -500;
 
@@ -268,7 +274,7 @@ namespace OmenCore.Hardware
         public int MinMemoryOffset { get; private set; } = -500;
 
         /// <summary>Maximum allowed memory clock offset.</summary>
-        public int MaxMemoryOffset { get; private set; } = 1500;
+        public int MaxMemoryOffset { get; private set; } = 2000;
 
         /// <summary>Minimum power limit percentage.</summary>
         public int MinPowerLimit { get; private set; } = 50;
@@ -374,6 +380,9 @@ namespace OmenCore.Hardware
         
         private void QueryPowerLimitsWrapper()
         {
+            SupportsPowerLimit = false;
+            PowerLimitStatusMessage = "NVAPI power policy support not detected";
+
             if (_primaryGpu == null) return;
             
             try
@@ -386,12 +395,21 @@ namespace OmenCore.Hardware
                     MinPowerLimit = (int)(entry.MinimumPowerInPCM / 1000);
                     MaxPowerLimit = (int)(entry.MaximumPowerInPCM / 1000);
                     DefaultPowerLimitWatts = (int)(entry.DefaultPowerInPCM / 1000);
+                    SupportsPowerLimit = true;
+                    PowerLimitStatusMessage = "NVAPI power policy writes available";
                     
                     _logging.Info($"NVAPI: Power limits - Min: {MinPowerLimit}%, Max: {MaxPowerLimit}%, Default: {DefaultPowerLimitWatts}%");
+                }
+                else
+                {
+                    PowerLimitStatusMessage = "NVAPI returned no writable power policy entries";
+                    _logging.Warn($"NVAPI: {PowerLimitStatusMessage}");
                 }
             }
             catch (Exception ex)
             {
+                SupportsPowerLimit = false;
+                PowerLimitStatusMessage = $"NVAPI power policy API unavailable: {ex.Message}";
                 _logging.Warn($"NVAPI: Failed to query power limits via wrapper: {ex.Message}");
             }
         }
@@ -491,7 +509,10 @@ namespace OmenCore.Hardware
 
         private void QueryPowerLimits()
         {
-            if (_nvAPI_GPU_ClientPowerPoliciesGetInfo == null || GpuCount == 0) return;
+            SupportsPowerLimit = false;
+            PowerLimitStatusMessage = "NVAPI power policy API not available";
+
+            if (_nvAPI_GPU_ClientPowerPoliciesGetInfo == null || _nvAPI_GPU_ClientPowerPoliciesSetStatus == null || GpuCount == 0) return;
 
             try
             {
@@ -509,12 +530,21 @@ namespace OmenCore.Hardware
                     MinPowerLimit = (int)(entry.minPower_mW / 1000);
                     MaxPowerLimit = (int)(entry.maxPower_mW / 1000);
                     DefaultPowerLimitWatts = (int)(entry.defPower_mW / 1000);
+                    SupportsPowerLimit = true;
+                    PowerLimitStatusMessage = "NVAPI power policy writes available";
                     
                     _logging.Info($"NVAPI: Power limits - Min: {MinPowerLimit}%, Max: {MaxPowerLimit}%, Default: {DefaultPowerLimitWatts}%");
+                }
+                else
+                {
+                    PowerLimitStatusMessage = "NVAPI returned no writable power policy entries";
+                    _logging.Warn($"NVAPI: {PowerLimitStatusMessage}");
                 }
             }
             catch (Exception ex)
             {
+                SupportsPowerLimit = false;
+                PowerLimitStatusMessage = $"NVAPI power policy API unavailable: {ex.Message}";
                 _logging.Warn($"NVAPI: Failed to query power limits: {ex.Message}");
             }
         }
@@ -614,14 +644,14 @@ namespace OmenCore.Hardware
                 GpuName.Contains("Mobile", StringComparison.OrdinalIgnoreCase))
             {
                 MaxCoreOffset = 200;
-                MaxMemoryOffset = 500;
+                MaxMemoryOffset = 2000;
                 MaxPowerLimit = 115; // Laptop GPUs often locked
-                _logging.Info("NVAPI: Detected laptop GPU - using conservative limits");
+                _logging.Info("NVAPI: Detected laptop GPU - using conservative core/power limits with extended memory offset range");
             }
             else
             {
                 MaxCoreOffset = 300;
-                MaxMemoryOffset = 1500;
+                MaxMemoryOffset = 2000;
                 MaxPowerLimit = 125;
                 _logging.Info("NVAPI: Desktop GPU limits applied");
             }
@@ -1105,6 +1135,37 @@ namespace OmenCore.Hardware
             try
             {
                 _logging.Info($"NVAPI: Setting power limit to {percent}%");
+
+                if (!SupportsPowerLimit)
+                {
+                    _logging.Warn($"NVAPI: Power policy API not available - request ignored ({PowerLimitStatusMessage})");
+                    return false;
+                }
+
+                if (_primaryGpu != null)
+                {
+                    try
+                    {
+                        var powerStatus = new PrivatePowerPoliciesStatusV1(new[]
+                        {
+                            new PrivatePowerPoliciesStatusV1.PowerPolicyStatusEntry((uint)(percent * 1000))
+                        });
+
+                        GPUApi.ClientPowerPoliciesSetStatus(_primaryGpu.Handle, powerStatus);
+                        PowerLimitPercent = percent;
+                        _logging.Info($"NVAPI: Power limit set to {percent}% via NvAPIWrapper");
+                        return true;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logging.Warn($"NVAPI: NvAPIWrapper power policy set failed: {ex.Message}, trying legacy");
+                        if (_nvAPI_GPU_ClientPowerPoliciesSetStatus == null || GpuCount == 0)
+                        {
+                            SupportsPowerLimit = false;
+                            PowerLimitStatusMessage = $"NVAPI power policy write rejected: {ex.Message}";
+                        }
+                    }
+                }
                 
                 if (_nvAPI_GPU_ClientPowerPoliciesSetStatus != null && GpuCount > 0)
                 {
@@ -1133,19 +1194,26 @@ namespace OmenCore.Hardware
                     else
                     {
                         _logging.Warn($"NVAPI: SetPowerPoliciesStatus failed with code {result}");
-                        PowerLimitPercent = percent;
+                        SupportsPowerLimit = false;
+                        PowerLimitStatusMessage = $"NVAPI power policy write failed with code {result}";
                         return false;
                     }
                 }
                 else
                 {
-                    PowerLimitPercent = percent;
-                    _logging.Warn("NVAPI: Power policy API not available - value stored but not applied");
+                    SupportsPowerLimit = false;
+                    if (string.IsNullOrWhiteSpace(PowerLimitStatusMessage) || PowerLimitStatusMessage == "NVAPI power policy writes available")
+                    {
+                        PowerLimitStatusMessage = "NVAPI power policy set API not available";
+                    }
+                    _logging.Warn($"NVAPI: Power policy API not available - request ignored ({PowerLimitStatusMessage})");
                     return false;
                 }
             }
             catch (Exception ex)
             {
+                SupportsPowerLimit = false;
+                PowerLimitStatusMessage = $"NVAPI power policy write failed: {ex.Message}";
                 _logging.Error($"NVAPI: Failed to set power limit: {ex.Message}", ex);
                 return false;
             }
@@ -1269,7 +1337,10 @@ namespace OmenCore.Hardware
                     var gpuUsage = _primaryGpu.UsageInformation.GPU;
                     sample.GpuLoadPercent = gpuUsage?.Percentage ?? 0;
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _logging.Debug($"NVAPI: lightweight GPU usage read failed: {ex.Message}");
+                }
 
                 // GPU Temperature — ThermalSensors read is safe alongside Afterburner
                 // and is always current regardless of Afterburner's shared-memory poll rate.
@@ -1286,7 +1357,10 @@ namespace OmenCore.Hardware
                             sample.GpuTemperatureC = sensor.CurrentTemperature;
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _logging.Debug($"NVAPI: lightweight temperature read failed: {ex.Message}");
+                }
 
                 // VRAM — lightweight call, reads driver-cached memory counters
                 try
@@ -1297,7 +1371,10 @@ namespace OmenCore.Hardware
                     sample.VramTotalMb = totalKb / 1024.0;
                     sample.VramUsedMb = Math.Max(0, (totalKb - availableKb) / 1024.0);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _logging.Debug($"NVAPI: lightweight VRAM read failed: {ex.Message}");
+                }
             }
             catch (Exception ex)
             {
@@ -1325,7 +1402,10 @@ namespace OmenCore.Hardware
                     var gpuUsage = _primaryGpu.UsageInformation.GPU;
                     sample.GpuLoadPercent = gpuUsage?.Percentage ?? 0;
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _logging.Debug($"NVAPI: GPU usage read failed: {ex.Message}");
+                }
 
                 // GPU Temperature
                 try
@@ -1342,7 +1422,10 @@ namespace OmenCore.Hardware
                             sample.GpuTemperatureC = sensor.CurrentTemperature;
                     }
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _logging.Debug($"NVAPI: temperature read failed: {ex.Message}");
+                }
 
                 // VRAM
                 try
@@ -1353,7 +1436,10 @@ namespace OmenCore.Hardware
                     sample.VramTotalMb = totalKb / 1024.0;
                     sample.VramUsedMb = Math.Max(0, (totalKb - availableKb) / 1024.0);
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _logging.Debug($"NVAPI: VRAM read failed: {ex.Message}");
+                }
 
                 // Power
                 try
@@ -1373,7 +1459,10 @@ namespace OmenCore.Hardware
                     {
                         sample.GpuPowerWatts = GetGpuPowerWatts();
                     }
-                    catch { }
+                    catch (Exception fallbackEx)
+                    {
+                        _logging.Debug($"NVAPI: fallback power read failed: {fallbackEx.Message}");
+                    }
                 }
 
                 // Clocks
@@ -1383,7 +1472,10 @@ namespace OmenCore.Hardware
                     sample.CoreClockMhz = clocks.CoreClockMHz;
                     sample.MemoryClockMhz = clocks.MemoryClockMHz;
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    _logging.Debug($"NVAPI: clock read failed: {ex.Message}");
+                }
             }
             catch (Exception ex)
             {
@@ -1537,12 +1629,12 @@ namespace OmenCore.Hardware
         {
             try
             {
-                SetCoreClockOffset(0);
-                SetMemoryClockOffset(0);
-                SetPowerLimit(100);
+                var coreReset = SetCoreClockOffset(0);
+                var memoryReset = SetMemoryClockOffset(0);
+                var powerReset = !SupportsPowerLimit || SetPowerLimit(100);
                 
                 _logging.Info("NVAPI: Reset all settings to defaults");
-                return true;
+                return coreReset && memoryReset && powerReset;
             }
             catch (Exception ex)
             {

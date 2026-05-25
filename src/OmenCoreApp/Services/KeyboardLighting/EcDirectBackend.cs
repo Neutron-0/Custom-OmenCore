@@ -73,7 +73,7 @@ namespace OmenCore.Services.KeyboardLighting
                 
                 if (!_ecAccess.IsAvailable)
                 {
-                    _logging.Info("[EcDirectBackend] EC access not available (PawnIO or legacy WinRing0 backend required)");
+                    _logging.Info("[EcDirectBackend] EC access not available (PawnIO backend required)");
                     _initialized = false;
                     return Task.FromResult(false);
                 }

@@ -1983,7 +1983,7 @@ namespace OmenCore.Hardware
 
     /// <summary>
     /// PawnIO-based CPU temperature reader as fallback when LibreHardwareMonitor fails.
-    /// LibreHardwareMonitor uses WinRing0 which Windows Defender often blocks.
+    /// LibreHardwareMonitor can use low-level drivers that Windows Defender may block.
     /// PawnIO is a signed driver that works with Secure Boot and Defender.
     /// </summary>
     [SupportedOSPlatform("windows")]

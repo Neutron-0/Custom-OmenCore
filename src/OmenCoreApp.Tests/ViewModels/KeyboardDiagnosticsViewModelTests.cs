@@ -113,8 +113,8 @@ namespace OmenCoreApp.Tests.ViewModels
             vm.DiagnosticStatus.Should().Be("Test pattern applied successfully.");
             vm.IsRunningTest.Should().BeFalse();
 
-            // Verify HP Omen keyboard zones were set (log entries present)
-            vm.DiagnosticLogs.Should().Contain(log => log.Contains("Set zone"));
+            // Verify HP Omen keyboard test pattern was applied through the ColorTable path.
+            vm.DiagnosticLogs.Should().Contain(log => log.Contains("4-zone RGB pattern"));
 
             logging.Dispose();
         }

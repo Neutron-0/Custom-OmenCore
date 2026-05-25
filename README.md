@@ -27,7 +27,7 @@
 
 ### ⚡ Quick Links
 
-[![Version](https://img.shields.io/badge/version-3.6.3-red.svg?style=for-the-badge)](docs/CHANGELOG_v3.6.3.md)
+[![Version](https://img.shields.io/badge/version-3.7.0-red.svg?style=for-the-badge)](docs/CHANGELOG_v3.7.0.md)
 [![License](https://img.shields.io/badge/license-MIT-green.svg?style=for-the-badge)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-8.0-purple.svg?style=for-the-badge)](https://dotnet.microsoft.com/download/dotnet/8.0)
 [![Discord](https://img.shields.io/badge/Discord-Join%20Server-5865F2.svg?style=for-the-badge&logo=discord&logoColor=white)](https://discord.gg/9WhJdabGk8)
@@ -83,21 +83,23 @@ This generates a timestamped folder with:
 
 Attach those files to your GitHub issue for faster triage.
 
-## 🔥 **What's New in v3.6.3**
+## 🔥 **What's New in v3.7.0**
 
-v3.6.3 is the current safety and stability hotfix rollup, focused on post-v3.6.2 field reports: desktop fan-write safety, conservative WMI fan handoff, model identity corrections, OSD startup reliability, UI responsiveness, and lower CPU/RAM overhead while OmenCore is running.
+v3.7.0 is the current stabilization release, focused on deterministic fan/profile behavior, clearer telemetry truth, OMEN MAX 16 power/RGB identity fixes, Linux diagnose improvements, and release hardening after the v3.6.x safety line.
 
-### v3.6.3 Highlights
+### v3.7.0 Highlights
 
-- **Desktop fan-write safety gate** for OMEN desktop systems while preserving telemetry and safe performance controls.
-- **Conservative WMI fan handoff** for Victus and unverified WMI-only profiles to avoid manual-zero fan stops and false EC readback rejection.
-- **Model identity fixes** for shared OMEN 16-am0xxx ProductId `8D2F` and conservative fallback behavior.
-- **OSD and UI polish** with hardened startup initialization, icon-led tabs, lighter logo decoding, and log rendering throttles.
-- **Runtime CPU/RAM overhead reductions** in dashboard history, chart sampling, telemetry projection, and ambient RGB screen sampling.
+- **Profile/fan authority fixes** for OMEN 16 `8BCD`, including restored high-temperature curve endpoints and General profile sync.
+- **OMEN MAX 16 `8D41` recovery** with WMI thermal-policy fallback and exact keyboard identity so RTX 50-series systems no longer fall through unknown paths.
+- **Linux diagnose improvements** for board `8787`, board `8C30`, hp-wmi profile-path variants, and safer fan-curve handling when sensors disappear.
+- **Telemetry truthfulness** with measured-only dashboard power, no synthetic OSD load fallback, and structured backend health reporting.
+- **PawnIO-only low-level access cleanup** after removing the remaining WinRing0 fallback paths.
 
 ### Release Notes
 
-Current release is **v3.6.3**.
+Current release is **v3.7.0**.
+
+→ **[v3.7.0 Changelog](docs/CHANGELOG_v3.7.0.md)**
 
 → **[v3.6.3 Changelog](docs/CHANGELOG_v3.6.3.md)**
 
@@ -109,26 +111,19 @@ Current release is **v3.6.3**.
 
 ## 📦 **Downloads & Artifacts**
 
-**Version:** v3.6.3 | **Status:** In Progress
+**Version:** v3.7.0 | **Status:** Release Candidate rebuild pending
 
-Release artifacts:
+Release artifact names:
 
 | Download | Platform | Details |
 |----------|----------|----------|
-| **OmenCoreSetup-3.6.3.exe** | Windows | Installer (Recommended) — Includes .NET 8 runtime |
-| **OmenCore-3.6.3-win-x64.zip** | Windows | Portable — Extract and run, no installation |
-| **OmenCore-3.6.3-linux-x64.zip** | Linux | CLI + Avalonia GUI, self-contained runtime |
+| **OmenCoreSetup-3.7.0.exe** | Windows | Installer (Recommended) — Includes .NET 8 runtime |
+| **OmenCore-3.7.0-win-x64.zip** | Windows | Portable — Extract and run, no installation |
+| **OmenCore-3.7.0-linux-x64.zip** | Linux | CLI + Avalonia GUI, self-contained runtime |
 
 ### SHA256
 
-`OmenCoreSetup-3.6.3.exe`  
-`3EC5D7E59C0018F0845ED8B8A44C35AEE55C919F1B9E6692F61FF7B498A06346`
-
-`OmenCore-3.6.3-win-x64.zip`  
-`31DE619954DC31B5ECA0394CDB43DF1D0BA93C88347A18E39AE11E7B50BFAF45`
-
-`OmenCore-3.6.3-linux-x64.zip`  
-`1A02ACF34AD073AD044DD2FB5EA6233AC430978CBE90F947A78D3E30B2E0A735`
+Pending rebuild after the late GitHub #134 CPU-temperature authority fix.
 
 ---
 
@@ -235,19 +230,17 @@ OmenCore is designed to replace the core local-control workflows of OMEN Gaming 
   - ? 2023+ models: full WMI BIOS support, no OGH needed
 - **Desktop:** HP OMEN 25L/30L/40L/45L (limited support; monitoring, profiles, and OGH cleanup functional)
 
-### Fan Control Driver Priority
+### Fan Control Backend Priority
 
 1. **WMI BIOS** (default) — no driver, works on all OMEN laptops
 2. **EC via PawnIO** — Secure Boot compatible
-3. **EC via WinRing0** — legacy; may need Secure Boot disabled
-4. **OGH Proxy** — last resort fallback
+3. **OGH Proxy** — last resort fallback
 
 ### Optional Drivers
 
 - **PawnIO** — recommended for advanced EC/MSR access (Secure Boot compatible)
-- **WinRing0 v1.2** — legacy kernel driver
 
-> **Antivirus note:** Some AV products flag OmenCore's kernel driver as suspicious — this is a known false positive for hardware utilities that use low-level driver access. Known detections: `HackTool:Win64/WinRing0` (Windows Defender), `Gen:Application.Venus.Cynthia.Winring` (Bitdefender). See [ANTIVIRUS_FAQ.md](docs/ANTIVIRUS_FAQ.md) for per-vendor exclusion steps and [DEFENDER_FALSE_POSITIVE.md](docs/DEFENDER_FALSE_POSITIVE.md) for Windows Defender specifics.
+> **Antivirus note:** Some AV products flag low-level hardware drivers as suspicious. Current OmenCore builds use PawnIO for direct EC/MSR access; WinRing0 alerts usually indicate older leftovers or another hardware utility. See [ANTIVIRUS_FAQ.md](docs/ANTIVIRUS_FAQ.md) and [DEFENDER_FALSE_POSITIVE.md](docs/DEFENDER_FALSE_POSITIVE.md).
 
 **Compatibility:**
 - HP Spectre: fan control and monitoring work; CPU/GPU power limits unavailable (different EC layout)
@@ -305,7 +298,7 @@ cd src\OmenCoreApp\bin\Release\net8.0-windows10.0.19041.0
 ```powershell
 pwsh ./build-installer.ps1
 # Optional: -Configuration Release -Runtime win-x64 (these are the defaults)
-# Outputs: artifacts/OmenCoreSetup-3.6.3.exe and artifacts/OmenCore-3.6.3-win-x64.zip
+# Outputs: artifacts/OmenCoreSetup-3.7.0.exe and artifacts/OmenCore-3.7.0-win-x64.zip
 ```
 
 ### Tests
@@ -338,7 +331,7 @@ dotnet test OmenCore.sln --collect:"XPlat Code Coverage"
 |---------|-------------|-----|
 | Fan control has no effect | WMI not supported on this model | Try PawnIO/ec_sys mode; check logs |
 | Access denied errors | Not running as Administrator | Right-click ? Run as administrator |
-| WinRing0 not detected | Driver blocked by Secure Boot | Switch to PawnIO (Secure Boot compatible) |
+| PawnIO not detected | Driver missing or awaiting reboot | Install PawnIO and restart Windows |
 | Undervolting not working | MSR locked in BIOS | Check BIOS overclocking settings; verify with Intel XTU |
 | Auto-update fails | SHA256 missing from release notes | Download manually from the Releases page |
 | High CPU at idle | Charts polling too aggressively | Enable Low Overhead Mode in Dashboard settings |
@@ -355,6 +348,7 @@ Detailed logs are in `%LOCALAPPDATA%\OmenCore\`. On Linux, use `sudo omencore-cl
 
 | Version | Key Changes |
 |---------|------------|
+| **v3.7.0** | Runtime recovery, fan/profile authority fixes, OMEN MAX 16 8D41 power/RGB identity, Linux diagnose improvements, telemetry truthfulness, and PawnIO-only cleanup |
 | **v3.6.3** | Safety hotfix rollup: desktop fan-write gate, conservative WMI fan handoff, OSD startup hardening, 8D2F identity correction, UI polish, and runtime CPU/RAM reductions |
 | **v3.6.2** | Stabilization release: runtime source-of-truth hardening, fan/performance confirmation fixes, RGB fallback reliability, Linux diagnostics/package updates, and UI responsiveness cleanup |
 | **v3.6.1** | Stabilization release: fan/performance sync, tray/OSD consistency, WMI fan CPU reduction, EC coordination, capability fallback hardening |
@@ -383,8 +377,10 @@ Older release notes: [docs/](docs/)
 - [docs/LINUX_INSTALL_GUIDE.md](docs/LINUX_INSTALL_GUIDE.md) — Detailed Linux setup
 - [docs/ANTIVIRUS_FAQ.md](docs/ANTIVIRUS_FAQ.md) — Antivirus false positive handling
 - [docs/DEFENDER_FALSE_POSITIVE.md](docs/DEFENDER_FALSE_POSITIVE.md) — Windows Defender exclusion steps
-- [docs/WINRING0_SETUP.md](docs/WINRING0_SETUP.md) — WinRing0 driver setup
-- [docs/CHANGELOG_v3.6.3.md](docs/CHANGELOG_v3.6.3.md) — Current safety and stability hotfix changelog
+- [drivers/PawnIO/README.md](drivers/PawnIO/README.md) — PawnIO direct hardware backend setup
+- [docs/CHANGELOG_v3.7.0.md](docs/CHANGELOG_v3.7.0.md) — Current stabilization changelog
+- [docs/3.7.0-RC-VALIDATION.md](docs/3.7.0-RC-VALIDATION.md) — v3.7.0 field validation checklist
+- [docs/CHANGELOG_v3.6.3.md](docs/CHANGELOG_v3.6.3.md) — Prior safety and stability hotfix changelog
 - [docs/CHANGELOG_v3.6.2.md](docs/CHANGELOG_v3.6.2.md) — Prior stabilization release changelog
 - [docs/CHANGELOG-3.6.1.md](docs/CHANGELOG-3.6.1.md) — Earlier stabilization release changelog
 
@@ -425,7 +421,7 @@ MIT License — see [LICENSE](LICENSE) for details.
 **Third-party components:**
 - [LibreHardwareMonitor](https://github.com/LibreHardwareMonitor/LibreHardwareMonitor) — MPL 2.0
 - [Hardcodet.NotifyIcon.Wpf](https://github.com/hardcodet/wpf-notifyicon) — CPOL
-- WinRing0 driver — OpenLibSys license
+- PawnIO driver and modules — see [drivers/PawnIO/README.md](drivers/PawnIO/README.md)
 
 ---
 

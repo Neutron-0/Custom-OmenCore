@@ -53,41 +53,11 @@ namespace OmenCore.Hardware
         }
 
         /// <summary>
-        /// Check if WinRing0 driver is installed on the system.
-        /// Checks registry for driver installation.
-        /// </summary>
-        public static bool IsWinRing0Installed()
-        {
-            try
-            {
-                if (!RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-                {
-                    return false;
-                }
-
-                // Check WinRing0 registry keys
-                using var key1 = Registry.LocalMachine.OpenSubKey(
-                    @"SYSTEM\CurrentControlSet\Services\WinRing0_1_2_0");
-                if (key1 != null) return true;
-
-                using var key2 = Registry.LocalMachine.OpenSubKey(
-                    @"SYSTEM\CurrentControlSet\Services\WinRing0");
-                if (key2 != null) return true;
-
-                return false;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        /// <summary>
         /// Detect if a driver module failed to load due to pending reboot requirement.
         /// Called when a driver is installed but module loading failed.
         /// Guides user to restart for full activation.
         /// </summary>
-        /// <param name="driverName">e.g. "PawnIO", "WinRing0"</param>
+        /// <param name="driverName">e.g. "PawnIO"</param>
         /// <param name="moduleName">e.g. "IntelMSR", "LpcACPIEC"</param>
         /// <param name="logging">Logging service (optional)</param>
         /// <returns>Warning message for user if reboot recommended</returns>

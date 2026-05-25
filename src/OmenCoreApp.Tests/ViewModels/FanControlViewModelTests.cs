@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
@@ -294,18 +295,20 @@ namespace OmenCoreApp.Tests.ViewModels
         }
 
         [Fact]
-        public void BuiltInFanCurves_ReserveNearMaxForHotOperation()
+        public void BuiltInFanCurves_MaxOutAtFieldVerifiedHighTemps()
         {
             var vm = CreateViewModel();
 
             var auto = vm.FanPresets.Single(p => p.Name == "Auto").Curve;
             var extreme = vm.FanPresets.Single(p => p.Name == "Extreme").Curve;
+            var quiet = vm.FanPresets.Single(p => p.Name == "Quiet").Curve;
 
-            auto.Where(p => p.TemperatureC <= 80).Should().OnlyContain(p => p.FanPercent < 90,
-                "Auto should not behave like Max at moderate gaming temperatures");
-            extreme.Where(p => p.TemperatureC <= 70).Should().OnlyContain(p => p.FanPercent < 90,
-                "Extreme is the highest non-Max curve, but Max remains the explicit 100% mode");
-            extreme.Single(p => p.FanPercent == 100).TemperatureC.Should().BeGreaterThan(80);
+            auto.Single(p => p.FanPercent == 100).TemperatureC.Should().Be(75,
+                "Balanced/Auto should reach full cooling before the high-80s on OMEN 16-xd0xxx");
+            extreme.Single(p => p.FanPercent == 100).TemperatureC.Should().Be(75,
+                "Extreme should restore its long-standing 75C full-cooling endpoint");
+            quiet.Last().Should().Match<FanCurvePoint>(p => p.TemperatureC == 80 && p.FanPercent == 85,
+                "Quiet should stay capped; the QuietSafetyMonitor handles emergency Max fan override");
         }
 
         [Fact]
@@ -318,7 +321,7 @@ namespace OmenCoreApp.Tests.ViewModels
         }
 
         [Fact]
-        public void GamingFanCurve_DoesNotReachMaxBeforeHighThermals()
+        public void GamingFanCurve_ReachesMaxAtEightyC()
         {
             var method = typeof(OmenCore.ViewModels.FanControlViewModel)
                 .GetMethod("GetGamingCurve", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
@@ -328,8 +331,7 @@ namespace OmenCoreApp.Tests.ViewModels
                 .OrderBy(p => p.TemperatureC)
                 .ToList();
 
-            gaming.Where(p => p.TemperatureC <= 75).Should().OnlyContain(p => p.FanPercent < 90);
-            gaming.Single(p => p.FanPercent == 100).TemperatureC.Should().BeGreaterThanOrEqualTo(90);
+            gaming.Single(p => p.FanPercent == 100).TemperatureC.Should().Be(80);
         }
 
         [Fact]
@@ -478,14 +480,33 @@ namespace OmenCoreApp.Tests.ViewModels
 
             foreach (var temperature in gamingCurve.Select(p => p.TemperatureC).Where(t => t <= 80))
             {
-                var gamingPoint = gamingCurve.Single(p => p.TemperatureC == temperature);
-                var extremePoint = extremeCurve.Single(p => p.TemperatureC == temperature);
+                var gamingPoint = Interpolate(gamingCurve, temperature);
+                var extremePoint = Interpolate(extremeCurve, temperature);
 
-                extremePoint.FanPercent.Should().BeGreaterThanOrEqualTo(gamingPoint.FanPercent,
+                extremePoint.Should().BeGreaterThanOrEqualTo(gamingPoint,
                     $"Extreme should never trail Gaming at {temperature}C");
             }
 
-            extremeCurve.Single(p => p.FanPercent == 100).TemperatureC.Should().BeGreaterThan(80);
+            extremeCurve.Single(p => p.FanPercent == 100).TemperatureC.Should().Be(75);
+        }
+
+        private static int Interpolate(IReadOnlyList<FanCurvePoint> curve, int temperature)
+        {
+            if (temperature <= curve[0].TemperatureC) return curve[0].FanPercent;
+            if (temperature >= curve[^1].TemperatureC) return curve[^1].FanPercent;
+
+            for (var i = 0; i < curve.Count - 1; i++)
+            {
+                var left = curve[i];
+                var right = curve[i + 1];
+                if (temperature < left.TemperatureC || temperature > right.TemperatureC)
+                    continue;
+
+                var ratio = (temperature - left.TemperatureC) / (double)(right.TemperatureC - left.TemperatureC);
+                return (int)Math.Round(left.FanPercent + ((right.FanPercent - left.FanPercent) * ratio));
+            }
+
+            return curve[^1].FanPercent;
         }
     }
 }

@@ -163,7 +163,7 @@
                                             </Grid.ColumnDefinitions>
                                             <StackPanel Grid.Column="0" HorizontalAlignment="Center">
                                                 <TextBlock Text="CPU" FontSize="9" FontWeight="Bold" Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Center"/>
-                                                <TextBlock Text="{Binding Dashboard.CpuTempDisplay, FallbackValue=--°C}" 
+                                                <TextBlock Text="{Binding Dashboard.CpuTempChipDisplay, FallbackValue=--°C}"
                                                            FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"
                                                            FontFamily="{StaticResource MonospaceFontFamily}">
                                                     <TextBlock.Style>
@@ -182,7 +182,7 @@
                                             <Rectangle Grid.Column="1" Width="1" Fill="{StaticResource BorderBrush}" Margin="8,2"/>
                                             <StackPanel Grid.Column="2" HorizontalAlignment="Center">
                                                 <TextBlock Text="GPU" FontSize="9" FontWeight="Bold" Foreground="{StaticResource TextMutedBrush}" HorizontalAlignment="Center"/>
-                                                <TextBlock Text="{Binding Dashboard.GpuTempDisplay, FallbackValue=--°C}" 
+                                                <TextBlock Text="{Binding Dashboard.GpuTempChipDisplay, FallbackValue=--°C}"
                                                            FontSize="16" FontWeight="Bold" HorizontalAlignment="Center"
                                                            FontFamily="{StaticResource MonospaceFontFamily}">
                                                     <TextBlock.Style>
@@ -652,7 +652,7 @@
                     </StackPanel>
 
                     <TabControl Grid.Row="1" Margin="24,0,24,12" Style="{StaticResource ModernTabControl}" ItemContainerStyle="{StaticResource ModernTabItem}" x:Name="TabControlMain" SelectedIndex="{Binding SelectedTabIndex, Mode=TwoWay}">
-                <!-- Tab indices: General(0), OMEN(1), Tuning(2), Diagnostics(3), Monitoring(4), Optimizer(5), Memory(6), Bloatware(7), RGB(8), Settings(9), Games(10) -->
+                <!-- Tab indices: General(0), Custom(1), Tuning(2), Diagnostics(3), Monitoring(4), Optimizer(5), Memory(6), Bloatware(7), RGB(8), Settings(9), Games(10) -->
                 <!-- General Tab: Performance + Fan Profiles (Paired) -->
                 <TabItem x:Name="GeneralTabItem">
                     <TabItem.Header>
@@ -663,12 +663,12 @@
                     </TabItem.Header>
                 </TabItem>
                 
-                <!-- OMEN Tab: HP OMEN-specific features -->
+                <!-- Custom Tab: Fan curves, power modes, and advanced settings unlocked by Custom profile -->
                 <TabItem x:Name="OmenTabItem" Visibility="{Binding ShowAdvancedControls, Converter={StaticResource BoolToVisibility}}">
                     <TabItem.Header>
                         <StackPanel Orientation="Horizontal">
                             <Path Data="{StaticResource IconCpu}" Style="{StaticResource Omen.TabHeaderIcon}"/>
-                            <TextBlock Text="OMEN" Style="{StaticResource Omen.TabHeaderText}"/>
+                            <TextBlock Text="Custom" Style="{StaticResource Omen.TabHeaderText}"/>
                         </StackPanel>
                     </TabItem.Header>
                 </TabItem>

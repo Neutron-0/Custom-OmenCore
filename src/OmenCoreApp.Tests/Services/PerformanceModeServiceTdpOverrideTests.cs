@@ -313,6 +313,51 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public void Constructor_With8D2FModelCapabilities_EnablesWmiThermalPolicyFallback()
+        {
+            var fan = new RecordingWmiFanController();
+            var caps = ModelCapabilityDatabase.GetCapabilities("8D2F");
+            var service = BuildService(fan, caps);
+
+            service.AllowDecoupledWmiThermalPolicyFallback.Should().BeTrue();
+            service.ControlCapabilityDescription.Should().Contain("WMI Performance Policy Fallback");
+
+            service.LinkFanToPerformanceMode = false;
+            service.Apply(new PerformanceMode
+            {
+                Name = "Performance",
+                CpuPowerLimitWatts = 0,
+                GpuPowerLimitWatts = 0
+            });
+
+            fan.SetPerformanceModeCallCount.Should().Be(1,
+                "8D2F keeps performance-profile control through the OEM WMI policy when direct EC/MSR limits are unavailable");
+            fan.LastPerformanceModeName.Should().Be("Performance");
+        }
+
+        [Fact]
+        public void Constructor_With8D41ModelCapabilities_EnablesWmiThermalPolicyFallback()
+        {
+            var fan = new RecordingWmiFanController();
+            var caps = ModelCapabilityDatabase.GetCapabilities("8D41");
+            var service = BuildService(fan, caps);
+
+            service.AllowDecoupledWmiThermalPolicyFallback.Should().BeTrue();
+
+            service.LinkFanToPerformanceMode = false;
+            service.Apply(new PerformanceMode
+            {
+                Name = "Performance",
+                CpuPowerLimitWatts = 0,
+                GpuPowerLimitWatts = 0
+            });
+
+            fan.SetPerformanceModeCallCount.Should().Be(1,
+                "8D41 must still send the OEM WMI thermal policy when direct EC/MSR power limits report unavailable");
+            fan.LastPerformanceModeName.Should().Be("Performance");
+        }
+
+        [Fact]
         public void ModeApplied_WhenSubscriberThrows_StillNotifiesRemainingSubscribers()
         {
             var service = BuildService();

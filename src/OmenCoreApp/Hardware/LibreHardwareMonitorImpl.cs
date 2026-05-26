@@ -96,10 +96,6 @@ namespace OmenCore.Hardware
         private bool _gpuEngineCountersPrimed;
         private DateTime _lastGpuEngineCounterRefresh = DateTime.MinValue;
         private static readonly TimeSpan _gpuEngineCounterRefreshInterval = TimeSpan.FromSeconds(15);
-        // Temperature smoothing
-        private readonly List<double> _cpuTempHistory = new();
-        private const int CpuTempSmoothingWindow = 3; // 3 readings average
-        private double _smoothedCpuTemp = 0;
         private int _consecutiveZeroTempReadings = 0;
         private const int MaxZeroTempReadingsBeforeReinit = 6;
         private bool _noFanSensorsLogged = false;
@@ -1022,18 +1018,6 @@ namespace OmenCore.Hardware
                                 _consecutiveSameTempReadings = 0;
                             }
                             _lastCpuTempReading = _cachedCpuTemp;
-                            
-                            // Apply temperature smoothing to reduce spurious readings
-                            if (_cachedCpuTemp > 0)
-                            {
-                                _cpuTempHistory.Add(_cachedCpuTemp);
-                                if (_cpuTempHistory.Count > CpuTempSmoothingWindow)
-                                {
-                                    _cpuTempHistory.RemoveAt(0);
-                                }
-                                _smoothedCpuTemp = _cpuTempHistory.Average();
-                                _cachedCpuTemp = _smoothedCpuTemp;
-                            }
                             
                             // If still 0, try refreshing the hardware
                             if (_cachedCpuTemp == 0)

@@ -182,6 +182,8 @@ namespace OmenCore.Hardware
         private volatile bool _staticTraySamplingMode;
         private DateTime _lastExpensiveGpuTelemetryUtc = DateTime.MinValue;
         private static readonly TimeSpan StaticTrayGpuTelemetryInterval = TimeSpan.FromSeconds(30);
+        private static readonly TimeSpan BatteryGpuTelemetryInterval = TimeSpan.FromSeconds(10);
+        private bool _batteryGpuTelemetryThrottledLogged;
 
         // CPU PerformanceCounter — persistent instance avoids 100ms sleep + allocation every poll
         private System.Diagnostics.PerformanceCounter? _cpuPerfCounter;
@@ -539,9 +541,29 @@ namespace OmenCore.Hardware
                 // shared memory (zero contention). NVAPI reduced to load+VRAM only.
                 // ═══════════════════════════════════════════════════════════════
 
+                bool onAcPowerForGpuTelemetry = IsOnAcPower();
+                var expensiveGpuTelemetryInterval = !onAcPowerForGpuTelemetry
+                    ? BatteryGpuTelemetryInterval
+                    : _staticTraySamplingMode
+                        ? StaticTrayGpuTelemetryInterval
+                        : TimeSpan.Zero;
+
                 bool shouldRefreshExpensiveGpuTelemetry =
-                    !_staticTraySamplingMode ||
-                    (DateTime.UtcNow - _lastExpensiveGpuTelemetryUtc) >= StaticTrayGpuTelemetryInterval;
+                    expensiveGpuTelemetryInterval == TimeSpan.Zero ||
+                    (DateTime.UtcNow - _lastExpensiveGpuTelemetryUtc) >= expensiveGpuTelemetryInterval;
+
+                if (!onAcPowerForGpuTelemetry)
+                {
+                    if (!_batteryGpuTelemetryThrottledLogged)
+                    {
+                        _logging?.Info($"[WmiBiosMonitor] Battery power detected — expensive NVAPI GPU telemetry throttled to every {(int)BatteryGpuTelemetryInterval.TotalSeconds}s");
+                        _batteryGpuTelemetryThrottledLogged = true;
+                    }
+                }
+                else
+                {
+                    _batteryGpuTelemetryThrottledLogged = false;
+                }
                 
                 bool afterburnerProvidedData = false;
                 
@@ -1303,7 +1325,12 @@ namespace OmenCore.Hardware
             }
 
             return model.Contains("OMEN MAX 16", StringComparison.OrdinalIgnoreCase) ||
+                   model.Contains("OMEN MAX Gaming Laptop", StringComparison.OrdinalIgnoreCase) ||
                    model.Contains("ah0000", StringComparison.OrdinalIgnoreCase) ||
+                   model.Contains("ah000", StringComparison.OrdinalIgnoreCase) ||
+                   // GitHub #129 / Discord 2026-05-25: OMEN 16-n0xxx / 8A43 WMI CPU temp
+                   // can report a low skin/EC temperature while the Ryzen die is much hotter.
+                   model.Contains("16-n0", StringComparison.OrdinalIgnoreCase) ||
                    model.Contains("16-xd0", StringComparison.OrdinalIgnoreCase) ||
                    model.Contains("16-ap0", StringComparison.OrdinalIgnoreCase) ||
                    model.Contains("8E35", StringComparison.OrdinalIgnoreCase) ||

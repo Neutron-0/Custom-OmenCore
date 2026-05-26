@@ -243,6 +243,8 @@ ls /sys/devices/platform/hp-wmi/*profile* 2>/dev/null
 
 Arch/CachyOS users can test AUR package `hp-omen-gaming-wmi-dkms`. On many OMEN systems this automates the hp-wmi profile-path setup (including multiplex-related behavior) with less manual tuning. Results are still board- and firmware-dependent, and some systems still do not expose usable profile control after installing it.
 
+OmenCore 3.7.0 treats this as an experimental compatibility backend rather than a separate Linux fork. If the DKMS module exposes standard `hp-wmi`/`hwmon` files such as `pwm1_enable`, `pwm1`, and `fan1_input`, `omencore-cli status` and `omencore-cli diagnose --report` will label it as an `hp-omen-gaming-wmi-dkms compatible` backend and use the same safe sysfs path. OmenCore does not install DKMS modules itself; install/remove/sign DKMS packages through your distro tools.
+
 If these steps do not help, capture diagnostics and include board + kernel details:
 
 ```bash

@@ -262,6 +262,12 @@ is absent or false and the dGPU/profile state is desynced, also test the kernel 
 `hp_wmi.force_multiplex=1` and include before/after diagnostics. Do not use legacy EC
 register writes on these boards.
 
+Arch-family users can also test `hp-omen-gaming-wmi-dkms` or related hp-wmi DKMS packages.
+OmenCore does not install DKMS modules, but it now identifies the DKMS-compatible hp-wmi/hwmon
+fan backend when the module exposes standard sysfs files such as `pwm1_enable`, `pwm1`, and
+`fan1_input`. Run `sudo omencore-cli status` or `sudo omencore-cli diagnose --report` and look
+for the `hp-wmi backend` / `HP-WMI compatibility backend` line.
+
 For OMEN Max 16 board `8D41` / RTX 50-series reports where TGP stays capped around 80W and
 `nvidia-powerd` says Dynamic Boost was disabled by SBIOS/client request, include the `nvidia-powerd`
 unit log too. `nvidia-smi -pl` is expected to be blocked on these laptop GPUs; the useful evidence is

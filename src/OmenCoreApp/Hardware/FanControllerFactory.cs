@@ -380,6 +380,7 @@ namespace OmenCore.Hardware
                     _libreHwMonitor!,
                     _logging,
                     _maxFanLevelOverride,
+                    _capabilities?.ModelConfig?.MaxFanLevel,
                     ecAccess: _ecAccess,
                     strictFanModeReadback: !conservativeWmiProfile,
                     allowV1AutoModeFloorClear: allowV1AutoModeFloorClear);

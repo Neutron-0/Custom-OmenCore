@@ -77,6 +77,16 @@ namespace OmenCoreApp.Tests.Services
             }
         }
 
+        private sealed class RecordingEcAccess : IEcAccess
+        {
+            public bool IsAvailable { get; set; } = true;
+            public int WriteCount { get; private set; }
+            public bool Initialize(string devicePath) => true;
+            public byte ReadByte(ushort address) => 0;
+            public void WriteByte(ushort address, byte value) => WriteCount++;
+            public void Dispose() { }
+        }
+
         // ─── helpers ──────────────────────────────────────────────────────────────────
 
         private static PerformanceModeService BuildService(ModelCapabilities? caps = null)
@@ -95,6 +105,16 @@ namespace OmenCoreApp.Tests.Services
             var log = new LoggingService();
             var plan = new PowerPlanService(log);
             return new PerformanceModeService(fanController, plan, null, log, modelCapabilities: caps);
+        }
+
+        private static PerformanceModeService BuildService(
+            IFanController fanController,
+            PowerLimitController powerLimitController,
+            ModelCapabilities? caps = null)
+        {
+            var log = new LoggingService();
+            var plan = new PowerPlanService(log);
+            return new PerformanceModeService(fanController, plan, powerLimitController, log, modelCapabilities: caps);
         }
 
         private static PerformanceMode MakePerformanceMode(int cpu = 65, int gpu = 150) =>
@@ -336,6 +356,62 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public void Apply_With8D2FModelCapabilities_BlocksDirectEcPowerLimits_AndUsesWmiFallback()
+        {
+            var fan = new RecordingWmiFanController();
+            var ec = new RecordingEcAccess();
+            var powerLimits = new PowerLimitController(ec);
+            var caps = ModelCapabilityDatabase.GetCapabilities("8D2F");
+            var service = BuildService(fan, powerLimits, caps);
+
+            service.LinkFanToPerformanceMode = false;
+            service.Apply(new PerformanceMode
+            {
+                Name = "Performance",
+                CpuPowerLimitWatts = 95,
+                GpuPowerLimitWatts = 140
+            });
+
+            ec.WriteCount.Should().Be(0,
+                "8D2F disables direct EC writes and must not touch the legacy performance-mode register even when global profile limits are non-zero");
+            fan.SetPerformanceModeCallCount.Should().Be(1,
+                "8D2F should still hold the requested performance policy through the OEM WMI path");
+            fan.LastPerformanceModeName.Should().Be("Performance");
+            service.EcPowerControlAvailable.Should().BeFalse();
+            service.ControlCapabilityDescription.Should().NotContain("CPU/GPU Power Limits");
+        }
+
+        [Fact]
+        public void Apply_WithEcUnsafeModelCapabilities_BlocksDirectEcPowerLimits_EvenWithoutWmiFallback()
+        {
+            var fan = new RecordingWmiFanController();
+            var ec = new RecordingEcAccess();
+            var powerLimits = new PowerLimitController(ec);
+            var caps = new ModelCapabilities
+            {
+                ModelName = "EC unsafe test model",
+                SupportsFanControlWmi = true,
+                SupportsFanControlEc = false,
+                AllowDecoupledWmiThermalPolicyFallback = false
+            };
+            var service = BuildService(fan, powerLimits, caps);
+
+            service.LinkFanToPerformanceMode = false;
+            service.Apply(new PerformanceMode
+            {
+                Name = "Performance",
+                CpuPowerLimitWatts = 95,
+                GpuPowerLimitWatts = 140
+            });
+
+            ec.WriteCount.Should().Be(0,
+                "models that block direct EC fan/control writes should not receive legacy EC power-limit writes either");
+            fan.SetPerformanceModeCallCount.Should().Be(0,
+                "the WMI policy hold should still require the explicit fallback flag");
+            service.EcPowerControlAvailable.Should().BeFalse();
+        }
+
+        [Fact]
         public void Constructor_With8D41ModelCapabilities_EnablesWmiThermalPolicyFallback()
         {
             var fan = new RecordingWmiFanController();
@@ -378,7 +454,7 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
-        public void Apply_LinkDisabled_AndNoValidEcLimits_DoesNotUseWmiThermalPolicyFallback_ForBalanced()
+        public void Apply_LinkDisabled_AndNoValidEcLimits_DoesNotUseWmiThermalPolicyFallback_ForBalanced_WhenFallbackDisabled()
         {
             var fan = new RecordingWmiFanController();
             var service = BuildService(fan);
@@ -392,7 +468,27 @@ namespace OmenCoreApp.Tests.Services
             });
 
             fan.SetPerformanceModeCallCount.Should().Be(0,
-                "Balanced/Default should continue leaving the decoupled fan policy untouched");
+                "when fallback is disabled, Balanced/Default should continue leaving decoupled fan policy untouched");
+        }
+
+        [Fact]
+        public void Apply_LinkDisabled_AndNoValidEcLimits_UsesWmiThermalPolicyFallback_ForBalanced_WhenEnabled()
+        {
+            var fan = new RecordingWmiFanController();
+            var service = BuildService(fan);
+
+            service.LinkFanToPerformanceMode = false;
+            service.AllowDecoupledWmiThermalPolicyFallback = true;
+            service.Apply(new PerformanceMode
+            {
+                Name = "Balanced",
+                CpuPowerLimitWatts = 0,
+                GpuPowerLimitWatts = 0
+            });
+
+            fan.SetPerformanceModeCallCount.Should().Be(1,
+                "with fallback enabled and no valid EC limits, Balanced must actively clear prior Quiet/Performance WMI thermal policy state");
+            fan.LastPerformanceModeName.Should().Be("Balanced");
         }
 
         // ─── aliases ("Extreme", "Turbo") map to Performance overrides ───────────────

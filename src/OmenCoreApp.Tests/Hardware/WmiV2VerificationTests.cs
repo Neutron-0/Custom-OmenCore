@@ -10,6 +10,26 @@ namespace OmenCoreApp.Tests.Hardware
 {
     public class WmiV2VerificationTests
     {
+        [Fact]
+        public void HpWmiBios_DetectMaxFanLevel_UsesModelOverrideWhenUserOverrideUnset()
+        {
+            using var bios = new HpWmiBios();
+
+            bios.DetectMaxFanLevel(userOverride: 0, modelMaxFanLevel: 60);
+
+            bios.MaxFanLevel.Should().Be(60);
+        }
+
+        [Fact]
+        public void HpWmiBios_DetectMaxFanLevel_UserOverrideWinsOverModelOverride()
+        {
+            using var bios = new HpWmiBios();
+
+            bios.DetectMaxFanLevel(userOverride: 58, modelMaxFanLevel: 60);
+
+            bios.MaxFanLevel.Should().Be(58);
+        }
+
         private class FakeWmiBios : IHpWmiBios
         {
             private bool _maxEnabled = false;
@@ -103,6 +123,38 @@ namespace OmenCoreApp.Tests.Hardware
         }
 
         [Fact]
+        public void ApplyPreset_NonMaxAfterManualLevel_SkipsSetFanMaxFalse_WhenMaxWasNeverActive()
+        {
+            var fake = new ResetSequenceFakeWmiBios();
+            var controller = new WmiFanController(null, null, 0, injectedWmiBios: fake);
+
+            controller.SetFanSpeed(42).Should().BeTrue();
+            fake.SetFanMaxCalls.Clear();
+
+            controller.ApplyPreset(new FanPreset { Name = "Auto", Mode = FanMode.Auto }).Should().BeTrue();
+
+            fake.SetFanMaxCalls.Should().BeEmpty(
+                "manual-to-profile handoff should not issue the slow SetFanMax(false) no-op unless OmenCore enabled max mode");
+            fake.SetFanModeCalls.Should().Contain(HpWmiBios.FanMode.Default);
+        }
+
+        [Fact]
+        public void ApplyPreset_NonMaxAfterMax_ClearsSetFanMaxFalse_WhenMaxWasActive()
+        {
+            var fake = new ResetSequenceFakeWmiBios();
+            var controller = new WmiFanController(null, null, 0, injectedWmiBios: fake);
+
+            controller.ApplyPreset(new FanPreset { Name = "Max" }).Should().BeTrue();
+            fake.SetFanMaxCalls.Clear();
+
+            controller.ApplyPreset(new FanPreset { Name = "Auto", Mode = FanMode.Auto }).Should().BeTrue();
+
+            fake.SetFanMaxCalls.Should().ContainSingle(call => call == false,
+                "leaving a confirmed Max preset must still clear the firmware max-fan override");
+            fake.SetFanModeCalls.Should().Contain(HpWmiBios.FanMode.Default);
+        }
+
+        [Fact]
         public void SetFanSpeeds_DualMax_UsesCeilingFallback_WhenSetFanMaxFails()
         {
             var fake = new MaxFallbackLevelFakeWmiBios();
@@ -151,6 +203,50 @@ namespace OmenCoreApp.Tests.Hardware
             public bool SetFanMode(HpWmiBios.FanMode mode) => true;
             public double? GetTemperature() => 52.0;
             public double? GetGpuTemperature() => 51.0;
+            public void ExtendFanCountdown() { }
+            public (bool customTgp, bool ppab, int dState)? GetGpuPower() => null;
+            public bool SetGpuPower(HpWmiBios.GpuPowerLevel level) => true;
+            public HpWmiBios.GpuMode? GetGpuMode() => null;
+            public void Dispose() { }
+        }
+
+        private sealed class ResetSequenceFakeWmiBios : IHpWmiBios
+        {
+            private bool _maxEnabled;
+
+            public List<bool> SetFanMaxCalls { get; } = new();
+            public List<HpWmiBios.FanMode> SetFanModeCalls { get; } = new();
+
+            public bool IsAvailable => true;
+            public string Status => "ResetSequenceFake";
+            public HpWmiBios.ThermalPolicyVersion ThermalPolicy => HpWmiBios.ThermalPolicyVersion.V1;
+            public int FanCount => 2;
+            public int MaxFanLevel => 55;
+
+            public (int fan1Rpm, int fan2Rpm)? GetFanRpmDirect() => _maxEnabled ? (4200, 4100) : (1200, 1150);
+            public (byte fan1, byte fan2)? GetFanLevel() => _maxEnabled ? ((byte)55, (byte)55) : ((byte)20, (byte)20);
+
+            public bool SetFanMax(bool enabled)
+            {
+                _maxEnabled = enabled;
+                SetFanMaxCalls.Add(enabled);
+                return true;
+            }
+
+            public bool SetFanLevel(byte fan1, byte fan2)
+            {
+                _maxEnabled = fan1 >= 55 && fan2 >= 55;
+                return true;
+            }
+
+            public bool SetFanMode(HpWmiBios.FanMode mode)
+            {
+                SetFanModeCalls.Add(mode);
+                return true;
+            }
+
+            public double? GetTemperature() => 45.0;
+            public double? GetGpuTemperature() => 50.0;
             public void ExtendFanCountdown() { }
             public (bool customTgp, bool ppab, int dState)? GetGpuPower() => null;
             public bool SetGpuPower(HpWmiBios.GpuPowerLevel level) => true;

@@ -47,8 +47,6 @@ namespace OmenCore.ViewModels
         
         private const int SW_RESTORE = 9;
         private const double TelemetryTransientZeroThresholdC = 0.05;
-        private const double TelemetrySpikeDetectionDeltaC = 10.0;
-        private const double TelemetryMaxStepPerSampleC = 8.0;
         
         private readonly LoggingService _logging = App.Logging;
         private readonly ConfigurationService _configService = App.Configuration;
@@ -925,14 +923,7 @@ namespace OmenCore.ViewModels
                 return previous;
             }
 
-            var delta = candidate - previous;
-            if (Math.Abs(delta) < TelemetrySpikeDetectionDeltaC)
-            {
-                return candidate;
-            }
-
-            var stepped = previous + Math.Sign(delta) * TelemetryMaxStepPerSampleC;
-            return Math.Clamp(stepped, min, max);
+            return Math.Clamp(candidate, min, max);
         }
 
         private static bool IsTemperatureStateUsable(TelemetryDataState state)

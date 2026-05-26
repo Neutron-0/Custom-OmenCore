@@ -153,6 +153,7 @@ namespace OmenCore.Hardware
             LibreHardwareMonitorImpl? hwMonitor,
             LoggingService? logging = null,
             int maxFanLevelOverride = 0,
+            int? modelMaxFanLevel = null,
             IHpWmiBios? injectedWmiBios = null,
             IEcAccess? ecAccess = null,
             bool strictFanModeReadback = true,
@@ -165,14 +166,19 @@ namespace OmenCore.Hardware
             _strictFanModeReadback = strictFanModeReadback;
             _allowV1AutoModeFloorClear = allowV1AutoModeFloorClear;
             
-            // Apply user override if set, then read the (possibly overridden) max level
-            if (maxFanLevelOverride > 0 && _wmiBios is HpWmiBios concrete)
+            // Apply user/model override if set, then read the (possibly overridden) max level
+            if ((maxFanLevelOverride > 0 || modelMaxFanLevel.HasValue) && _wmiBios is HpWmiBios concrete)
             {
                 // Only call DetectMaxFanLevel on the real implementation (not on fakes)
-                concrete.DetectMaxFanLevel(maxFanLevelOverride);
+                concrete.DetectMaxFanLevel(maxFanLevelOverride, modelMaxFanLevel);
             }
             _maxFanLevel = _wmiBios.MaxFanLevel;
-            _logging?.Info($"WmiFanController: Max fan level = {_maxFanLevel}{(maxFanLevelOverride > 0 ? $" (user override: {maxFanLevelOverride})" : " (auto-detected)")}");
+            var maxFanLevelSource = maxFanLevelOverride > 0
+                ? $"user override: {maxFanLevelOverride}"
+                : modelMaxFanLevel.HasValue
+                    ? $"model database: {modelMaxFanLevel.Value}"
+                    : "auto-detected";
+            _logging?.Info($"WmiFanController: Max fan level = {_maxFanLevel} ({maxFanLevelSource})");
         }
         
         // Helper methods for getting sensor data with WMI BIOS fallback
@@ -959,18 +965,29 @@ namespace OmenCore.Hardware
             
             try
             {
-                // Step 1: Disable max fan speed
-                if (_wmiBios.SetFanMax(false))
+                // Step 1: Disable max fan speed.
+                // Only issue SetFanMax(false) when we actually enabled max mode — the WMI call
+                // can take 4–5 seconds on some V1 firmware (e.g. 8E41) even for a no-op disable,
+                // and skipping it when _isMaxModeActive is false eliminates that stall on every
+                // non-max preset transition.
+                if (_isMaxModeActive)
                 {
-                    _logging?.Info("  Step 1: SetFanMax(false) succeeded");
+                    if (_wmiBios.SetFanMax(false))
+                    {
+                        _logging?.Info("  Step 1: SetFanMax(false) succeeded");
+                    }
+                    else
+                    {
+                        _logging?.Warn("  Step 1: SetFanMax(false) failed");
+                    }
+
+                    // Small delay between commands (reduced from 50ms to 25ms)
+                    System.Threading.Thread.Sleep(25);
                 }
                 else
                 {
-                    _logging?.Warn("  Step 1: SetFanMax(false) failed");
+                    _logging?.Info("  Step 1: Skipped SetFanMax(false) — not in max mode (avoids firmware stall)");
                 }
-                
-                // Small delay between commands (reduced from 50ms to 25ms)
-                System.Threading.Thread.Sleep(25);
                 
                 // Step 2: Reset thermal policy to Default
                 // This forces BIOS to reconsider fan control

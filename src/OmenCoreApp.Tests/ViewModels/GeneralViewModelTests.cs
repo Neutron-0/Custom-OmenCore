@@ -84,6 +84,10 @@ namespace OmenCoreApp.Tests.ViewModels
 
                 vm.SyncRuntimeState("Balanced", "Auto");
                 vm.SelectedProfile.Should().Be("Balanced");
+
+                vm.SyncRuntimeState("Performance", "Performance");
+                vm.SelectedProfile.Should().Be("Performance",
+                    "General quick profile should remain Performance when runtime fan mode is Performance");
             }
             finally
             {
@@ -106,6 +110,27 @@ namespace OmenCoreApp.Tests.ViewModels
                     "General must report the confirmed FanService state instead of the requested Performance cooling preset when fan apply is rejected");
                 vm.SelectedProfile.Should().Be("Custom",
                     "Performance+Auto is a mixed confirmed state rather than the full Performance quick profile");
+            }
+            finally
+            {
+                logging.Dispose();
+            }
+        }
+
+        [Fact]
+        public void ApplyPerformanceProfile_WhenFanPresetApplies_KeepsPerformanceSelected()
+        {
+            var vm = CreateViewModel(out var logging, out var controller);
+            controller.ApplyPresetResult = true;
+
+            try
+            {
+                vm.ApplyPerformanceProfile();
+
+                vm.CurrentPerformanceMode.Should().Be("Performance");
+                vm.CurrentFanMode.Should().Be("Performance");
+                vm.SelectedProfile.Should().Be("Performance",
+                    "fresh runtime confirmation should win over saved preset state after clicking the General Performance profile");
             }
             finally
             {
@@ -351,6 +376,94 @@ namespace OmenCoreApp.Tests.ViewModels
                 counters.GeneralSamplesReceived.Should().Be(1);
                 counters.GeneralSamplesProjected.Should().Be(0);
                 counters.GeneralSamplesSkipped.Should().Be(1);
+            }
+            finally
+            {
+                logging.Dispose();
+            }
+        }
+
+        [Fact]
+        public void ApplyCustomProfile_WithCustomLastPreset_SetsSelectedProfileToCustom()
+        {
+            // When FanControlViewModel is not wired (null), the preset lookup returns null and
+            // ApplyCustomProfile takes the "navigate-only" branch — but SelectedProfile must still
+            // be set to "Custom" so the profile card highlights correctly.
+            var tmp = Path.Combine(Path.GetTempPath(), "OmenCoreTests", Guid.NewGuid().ToString());
+            Directory.CreateDirectory(tmp);
+            Environment.SetEnvironmentVariable("OMENCORE_CONFIG_DIR", tmp);
+
+            var logging = new LoggingService();
+            logging.Initialize();
+            try
+            {
+                var controller = new StubFanController();
+                var thermalProvider = new ThermalSensorProvider(new LibreHardwareMonitorImpl());
+                var fanService = new FanService(
+                    controller,
+                    thermalProvider,
+                    logging,
+                    new NotificationService(logging),
+                    1000,
+                    new ResumeRecoveryDiagnosticsService());
+                var performanceService = new PerformanceModeService(
+                    controller,
+                    new PowerPlanService(logging),
+                    null,
+                    logging);
+                var configService = new ConfigurationService();
+                configService.Config.LastFanPresetName = "Gaming Curve";   // user-defined preset name
+
+                var vm = new GeneralViewModel(fanService, performanceService, configService, logging);
+
+                vm.ApplyCustomProfile();
+
+                vm.SelectedProfile.Should().Be("Custom",
+                    "clicking the Custom profile card must select Custom even when FanControlViewModel is absent");
+            }
+            finally
+            {
+                logging.Dispose();
+            }
+        }
+
+        [Fact]
+        public void ApplyCustomProfile_WithBuiltInLastPreset_StillSetsSelectedProfileToCustom()
+        {
+            // If the last applied preset was a built-in (e.g. "Auto"), ResolveGeneralProfile returns
+            // "Balanced", so we skip the re-apply and only navigate — but SelectedProfile must still
+            // land on "Custom".
+            var tmp = Path.Combine(Path.GetTempPath(), "OmenCoreTests", Guid.NewGuid().ToString());
+            Directory.CreateDirectory(tmp);
+            Environment.SetEnvironmentVariable("OMENCORE_CONFIG_DIR", tmp);
+
+            var logging = new LoggingService();
+            logging.Initialize();
+            try
+            {
+                var controller = new StubFanController();
+                var thermalProvider = new ThermalSensorProvider(new LibreHardwareMonitorImpl());
+                var fanService = new FanService(
+                    controller,
+                    thermalProvider,
+                    logging,
+                    new NotificationService(logging),
+                    1000,
+                    new ResumeRecoveryDiagnosticsService());
+                var performanceService = new PerformanceModeService(
+                    controller,
+                    new PowerPlanService(logging),
+                    null,
+                    logging);
+                var configService = new ConfigurationService();
+                configService.Config.LastFanPresetName = "Auto";   // built-in preset → should not trigger re-apply
+
+                var vm = new GeneralViewModel(fanService, performanceService, configService, logging);
+
+                vm.ApplyCustomProfile();
+
+                vm.SelectedProfile.Should().Be("Custom",
+                    "ApplyCustomProfile always navigates to Custom regardless of the last built-in preset");
             }
             finally
             {

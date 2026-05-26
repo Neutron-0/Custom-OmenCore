@@ -919,13 +919,13 @@ namespace OmenCore.Hardware
                     Name = "WinRing0",
                     Required = false,
                     Available = false,
-                    Healthy = false,
+                    Healthy = pawnIoAvailable,
                     Capabilities = new[]
                     {
                         BackendCapability.ECAccess,
                         BackendCapability.Undervolt
                     },
-                    FailureReason = winRingFailure,
+                    FailureReason = pawnIoAvailable ? null : winRingFailure,
                     RecommendedAction = winRingAction,
                     LastUpdatedUtc = nowUtc
                 }
@@ -952,7 +952,16 @@ namespace OmenCore.Hardware
                     var levelPrefix = status.Required && !status.Healthy
                         ? "[Backend][CriticalLoss]"
                         : "[Backend][AvailabilityChange]";
-                    _logging?.Warn($"{levelPrefix} {status.Name}: available={status.Available}, healthy={status.Healthy}, required={status.Required}, reason={status.FailureReason ?? "n/a"}");
+                    var message = $"{levelPrefix} {status.Name}: available={status.Available}, healthy={status.Healthy}, required={status.Required}, reason={status.FailureReason ?? "n/a"}";
+
+                    if (status.Required && !status.Healthy)
+                    {
+                        _logging?.Warn(message);
+                    }
+                    else
+                    {
+                        _logging?.Info(message);
+                    }
                 }
             }
         }

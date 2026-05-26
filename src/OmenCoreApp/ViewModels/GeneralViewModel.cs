@@ -356,7 +356,7 @@ namespace OmenCore.ViewModels
 
             CurrentPerformanceMode = confirmedPerformanceMode;
             CurrentFanMode = confirmedFanMode;
-            DetermineActiveProfile();
+            DetermineActiveProfile(preferSavedPreset: false);
             _logging.Info($"{context}: confirmed Performance='{confirmedPerformanceMode}', Fan='{confirmedFanMode}', GeneralProfile='{SelectedProfile}'");
         }
 
@@ -439,7 +439,7 @@ namespace OmenCore.ViewModels
         }
 
         /// <summary>
-        /// Custom profile: User-defined settings (redirect to Custom tab)
+        /// Custom profile: User-defined settings (redirect to Custom tab, re-apply last preset)
         /// </summary>
         public void ApplyCustomProfile()
         {
@@ -448,6 +448,27 @@ namespace OmenCore.ViewModels
                 _logging.Info("Custom profile selected — navigating to Custom tab for manual control");
                 SelectedProfile = "Custom";
                 CustomTabNavigationRequested?.Invoke(this, EventArgs.Empty);
+
+                // Re-apply the last custom preset so the fan state is restored to what the user
+                // last configured (avoids a "dead" click that only navigates without changing fans).
+                var lastPresetName = _configService.Config?.LastFanPresetName;
+                if (!string.IsNullOrEmpty(lastPresetName) &&
+                    FanModeNameResolver.ResolveGeneralProfileFromPresetName(lastPresetName) == "Custom")
+                {
+                    var preset = _fanControlViewModel?.FanPresets.FirstOrDefault(p =>
+                        string.Equals(p.Name, lastPresetName, StringComparison.OrdinalIgnoreCase));
+                    if (preset != null)
+                    {
+                        var fanApplied = _fanService.ApplyPreset(preset, immediate: true);
+                        if (fanApplied)
+                            _fanControlViewModel?.SelectPresetByNameNoApply(preset.Name);
+                        _logging.Info($"Custom profile: re-applied last preset '{preset.Name}' (success={fanApplied})");
+                    }
+                    else
+                    {
+                        _logging.Debug($"Custom profile: last preset '{lastPresetName}' not found in FanPresets — navigate only");
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -501,23 +522,22 @@ namespace OmenCore.ViewModels
                     return;
             }
             
+            var performanceMode = CurrentPerformanceMode?.Trim();
+            var fanMode = CurrentFanMode?.Trim();
+
             // Fallback: Match current state to a profile
-            if (CurrentPerformanceMode.Equals("Performance", StringComparison.OrdinalIgnoreCase) &&
-                (CurrentFanMode.Equals("Max", StringComparison.OrdinalIgnoreCase) ||
-                 CurrentFanMode.Equals("Gaming", StringComparison.OrdinalIgnoreCase) ||
-                 CurrentFanMode.Equals("Extreme", StringComparison.OrdinalIgnoreCase)))
+            if (PerformanceModeNameResolver.IsPerformanceAlias(performanceMode) &&
+                (FanModeNameResolver.IsPerformanceAlias(fanMode) || FanModeNameResolver.IsMaxAlias(fanMode)))
             {
                 SelectedProfile = "Performance";
             }
-            else if (CurrentPerformanceMode.Equals("Quiet", StringComparison.OrdinalIgnoreCase) &&
-                     CurrentFanMode.Equals("Quiet", StringComparison.OrdinalIgnoreCase))
+            else if (PerformanceModeNameResolver.IsQuietAlias(performanceMode) &&
+                     FanModeNameResolver.IsQuietAlias(fanMode))
             {
                 SelectedProfile = "Quiet";
             }
-            else if ((CurrentPerformanceMode.Equals("Default", StringComparison.OrdinalIgnoreCase) ||
-                      CurrentPerformanceMode.Equals("Balanced", StringComparison.OrdinalIgnoreCase)) &&
-                     (CurrentFanMode.Equals("Auto", StringComparison.OrdinalIgnoreCase) ||
-                      CurrentFanMode.Equals("Balanced", StringComparison.OrdinalIgnoreCase)))
+            else if (PerformanceModeNameResolver.IsBalancedAlias(performanceMode) &&
+                     FanModeNameResolver.IsAutoAlias(fanMode))
             {
                 SelectedProfile = "Balanced";
             }

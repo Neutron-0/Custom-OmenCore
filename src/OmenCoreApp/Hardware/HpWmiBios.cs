@@ -1653,7 +1653,6 @@ namespace OmenCore.Hardware
                         }
                         
                         LogThrottledError(errorMsg);
-                        TrackCommandResult(false);
                     }
                 }
             }
@@ -1670,13 +1669,11 @@ namespace OmenCore.Hardware
                     LogThrottledError(cimError);
                 }
                 _consecutiveFailures++;
-                TrackCommandResult(false);
             }
             catch (Exception ex)
             {
                 LogThrottledError($"BIOS command failed: {ex.Message}");
                 _consecutiveFailures++;
-                TrackCommandResult(false);
             }
             
             // Check if we should disable WMI commands

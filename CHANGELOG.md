@@ -14,19 +14,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rolling stabilization changelog: [docs/CHANGELOG_v3.7.0.md](docs/CHANGELOG_v3.7.0.md).
 - Active code audit: [docs/3.7.0-CODE-AUDIT.md](docs/3.7.0-CODE-AUDIT.md).
 - Version metadata corrected to `3.7.0` across the Windows app, hardware worker, Linux CLI, Avalonia GUI, installer, and `VERSION.txt`.
-- Pre-release artifacts were built for Windows installer, Windows portable ZIP, and Linux x64 ZIP, but those artifacts are superseded by the late GitHub #134 CPU-temperature authority fix and must be rebuilt before upload.
-- Final automated validation before the late #134 fix passed: `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore` reported 743 passed, 0 failed.
-- Current focus: rebuild/re-hash artifacts after GitHub #134, field validation for GitHub #133 UI responsiveness, `8BCD`, `8D2F`, `8D41`, Linux boards `8787`/`8C30`, focused-window runtime measurements, and prerelease feedback.
+- Pre-release artifacts were rebuilt on 2026-05-27 for Windows installer, Windows portable ZIP, and Linux x64 ZIP after the Pre-release 1 follow-up fixes.
+- Final automated validation after the follow-up fixes passed: `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --logger "console;verbosity=minimal" -m:1 /p:UseSharedCompilation=false` reported 764 passed, 0 failed.
+- Current focus: upload rebuilt prerelease assets, field validation for GitHub #133 UI responsiveness, `8BCD`, `8D2F`, `8D41`, Linux boards `8787`/`8C30`, focused-window runtime measurements, and prerelease feedback.
 
-### Superseded Pre-release Artifacts
+### Bug Fixes After Pre-release 1
 
-These hashes describe the earlier 3.7.0 candidate build and should not be uploaded as final prerelease assets after the late GitHub #134 patch.
+- GitHub #134 worker-backed CPU temperature fallback now keeps recent good worker readings through brief timeout/cooldown windows.
+- `8A43` now propagates the 60-level fan ceiling into runtime control and adds `OMEN 16-n0xxx` to worker-backed CPU temperature override.
+- `8D2F` General quick profiles now keep confirmed Performance state, block unsafe direct EC power-limit writes, and route through WMI thermal/performance-policy fallback.
+- `8E35` WMI reliability now scores final CIM-to-legacy fallback outcomes instead of counting a successful fallback as both failure and success.
+- `8E41` preset transitions skip slow no-op `SetFanMax(false)` when Max was never active, and Custom profile clicks re-apply the saved custom preset when available.
+- PawnIO setup is embedded, extracted to `{tmp}`, and run hidden with `-silent` by the Windows installer.
+- General/dashboard temperature display now projects latest accepted CPU/GPU readings without display-side averaging or step clamps.
+- HardwareWorker now reads top-level LibreHardwareMonitor fan sensors for better live RPM coverage.
+- Battery-mode expensive NVAPI GPU telemetry refreshes are throttled to reduce dGPU wake pressure.
+- Linux status/diagnose now identifies hp-omen-gaming-wmi-dkms-compatible hp-wmi/hwmon fan backends.
+- Corsair/Logitech RGB discovery now updates bound device collections through the WPF dispatcher.
+
+### Rebuilt Pre-release Artifacts
+
+These hashes describe the rebuilt 3.7.0 prerelease assets generated on 2026-05-27 after the Pre-release 1 follow-up fixes.
 
 | File | Size | SHA256 |
 | --- | ---: | --- |
-| `OmenCoreSetup-3.7.0.exe` | 101.72 MB | `AD47AEC9E4D0CD894672B822B5F01337030372F5F7EC42A5F6298B955EAA8101` |
-| `OmenCore-3.7.0-win-x64.zip` | 104.88 MB | `682D914A6234900B530A9E1B27B016883D1E0FAAD0BC9A3B34466AB3C0CD5090` |
-| `OmenCore-3.7.0-linux-x64.zip` | 43.56 MB | `6A66450F97AF3E1F678FA70D0B226613D72500BBC49BF9D6946159660D652697` |
+| `OmenCoreSetup-3.7.0.exe` | 101.73 MB | `9E75959BC432AC1E1EEFD557BDD402088F3013B78EA185595E2BF9C77186FF87` |
+| `OmenCore-3.7.0-win-x64.zip` | 104.89 MB | `570E1058D7EED9D0E2FA9D490BE1CFFC67169B12A3B987948D07D7DAFAC105AC` |
+| `OmenCore-3.7.0-linux-x64.zip` | 43.57 MB | `C2003ACDEC74AD0A45FAB5F07E42AFB5F8AF3EBD29F15F86E0E79CBAB58060DF` |
 
 ### Changed
 
@@ -38,16 +52,38 @@ These hashes describe the earlier 3.7.0 candidate build and should not be upload
 - `DeviceCapabilities` now distinguishes critical vs optional backend degradation through structured provider health projection, enabling diagnostics-first readiness checks without UI redesign.
 - Standalone dependency audit now carries explicit degradation classification (`Critical`, `Optional`, `None`) and summary text aligned to required-vs-optional dependency loss semantics.
 - Secure Boot driver guidance relevance tightened: warning projection now keys off structured PawnIO health so legacy-backend concern is suppressed when PawnIO is healthy.
+- Retired WinRing0 backend status no longer logs as a repeated warning when PawnIO is healthy; it is treated as an expected retired optional backend state.
+- General quick-profile confirmation now resolves from fresh runtime state after an apply instead of letting stale saved fan-preset state make confirmed `Performance` + `Performance` appear as `Custom`.
+- ProductId `8D2F` now blocks direct EC power-limit writes in General quick profiles when the model profile marks EC control unsafe, using the WMI thermal/performance-policy fallback even if global profile defaults contain non-zero CPU/GPU watt targets.
+- Windows installer PawnIO bundling now extracts the embedded `PawnIO_setup.exe` to `{tmp}` and runs it hidden with `-silent` when the default PawnIO task is selected, without relying on a fragile `{src}` sidecar-file check.
+- BIOS WMI reliability stats now score the final command result after CIM-to-legacy fallback instead of counting the failed CIM attempt and successful legacy retry as separate commands, reducing false "Poor" readings on BIOS F.15+ legacy fallback systems such as `8E35`.
+- Unsupported BIOS GPU mode switching now disables the selector and shows inline status instead of presenting a modal error for expected unsupported WMI GPU-switch paths.
+- UI temperature projection keeps transient-zero and invalid-state guards but no longer rate-limits valid CPU/GPU temperature jumps, so General, dashboard summaries, and Quiet safety state see the latest valid reading instead of a stepped display value.
+- HardwareWorker fan RPM collection now includes top-level LibreHardwareMonitor fan sensors as well as sub-hardware fan sensors, improving live fan readback coverage without requiring the standalone LibreHardwareMonitor app.
+- Linux status/diagnose now identifies hp-omen-gaming-wmi-dkms-compatible hp-wmi/hwmon fan backends when `hp_wmi` exposes standard `pwm*_enable`, `pwm*`, and `fan*_input` sysfs controls, without installing or managing DKMS modules.
 - ProductId `8A43` capability profile now uses a 60-level fan ceiling (instead of 55) based on field diagnostics showing effective high-end readback near level 60.
+- ProductId `8A43` model max fan level now propagates into the WMI fan controller instead of remaining a database-only value; runtime control/normalization should use the model ceiling unless a user override is set.
+- `8A43` notes now clarify that the CPU fan tops out slightly lower (`~58` / `5800 RPM`) while the GPU fan reaches near `60`; the shared ceiling is used for verification normalization, not identical fan mechanics.
+- Additional Hades follow-up (2026-05-25) confirms exact ProductId `8A43` identity resolution remains correct (`OMEN 16-n0xxx` / support number `6G103EA`), while capability/keyboard confidence warnings remain medium until broader post-fix field verification completes.
+- `OMEN 16-n0xxx` is now included in the worker-backed CPU temperature override list after logs showed the same low WMI skin/EC-temperature pattern tracked in GitHub #129.
+- OMEN MAX model-string matching for the same worker-backed CPU temperature override now covers `OMEN MAX Gaming Laptop 16t-ah000` as well as the shorter `OMEN MAX 16` / `ah0000` forms.
 - Guided fan verification now rejects weak level-only evidence for medium/high targets when RPM remains materially below expected response, reducing false-positive pass results.
+- `8A43` Apply & Verify behavior was confirmed against the 2026-05-25 Hades log: diagnostic mode suspends curves, writes explicit WMI levels, validates RPM/level evidence, and restores BIOS auto control without the risky V1 zero-level floor-clear path.
 - Thermal sensor timeout handling now reuses recent last-good CPU/GPU temperatures for a short grace window instead of dropping control input to `0C` on transient UI-thread read timeouts.
 - CPU temperature authority switching now requires consecutive healthy primary readings before reverting from fallback authority, reducing source flapping under intermittent read failures.
+- Expensive NVAPI GPU telemetry is now throttled to a 10-second cadence while on battery power to reduce dGPU wake pressure, while lightweight WMI/CPU monitoring continues.
+- `8E41` WMI fan reset now skips the slow no-op `SetFanMax(false)` call when OmenCore never enabled Max mode, while still clearing it when leaving a confirmed Max profile.
+- Corsair and Logitech RGB device discovery now marshals UI-bound collection updates through the WPF dispatcher, preventing cross-thread `CollectionView` errors during RGB page/provider initialization.
 
 ### Validation
 
 - Focused unit validation passed for telemetry adapter and capability/degradation projection updates.
 - App project build succeeded for `src/OmenCoreApp/OmenCoreApp.csproj --no-restore` after the above changes.
 - Additional focused fan/model hardening validation passed after the 8A43 fixes (`50` passed, `0` failed), and the app project build remained green.
+- Late focused hardware-monitor validation passed after the `8A43`, `16-n0xxx`, OMEN MAX, and battery GPU telemetry follow-ups (`60` passed, `0` failed).
+- Late `8D2F` follow-up validation passed (`52` passed, `0` failed) covering General profile-state sync, EC-unsafe direct-write blocking/WMI fallback, TDP override behavior, and backend degradation classification.
+- Late `8E41` WMI fan reset validation passed (`45` passed, `0` failed), and General/Fn+F12 profile regression validation passed (`11` passed, `0` failed).
+- RGB peripheral discovery dispatcher-safety validation passed (`8` passed, `0` failed) for Corsair/Logitech provider and service paths.
 
 ---
 

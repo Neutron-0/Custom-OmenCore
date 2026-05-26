@@ -332,16 +332,10 @@ namespace OmenCore.Controls
                     }
                 }
 
-                // CRITICAL FIX: Update temperatures with proper null checking and display
-                // Use a 3-sample rolling average for the displayed value to reduce single-poll
-                // spikes (e.g. game-launch CPU turbo burst). Fan curve control uses its own
-                // independent smoothing and is not affected by this display filter.
-                double cpuTemp = _cpuTempHistory.Count >= 3
-                    ? _cpuTempHistory.TakeLast(3).Average()
-                    : sample.CpuTemperatureC;
-                double gpuTemp = _gpuTempHistory.Count >= 3
-                    ? _gpuTempHistory.TakeLast(3).Average()
-                    : sample.GpuTemperatureC;
+                // Show the latest accepted sensor reading. Fan curve control owns any
+                // intentional smoothing separately so dashboard/General stay live.
+                double cpuTemp = sample.CpuTemperatureC;
+                double gpuTemp = sample.GpuTemperatureC;
 
                 if (CpuTempValue != null)
                 {

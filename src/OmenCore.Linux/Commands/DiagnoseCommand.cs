@@ -180,6 +180,10 @@ public static class DiagnoseCommand
         info.EcControllerAvailable = ec.IsAvailable;
         info.IsUnsafeEcModel = ec.IsUnsafeEcModel;
         info.HasHwmonFanAccess = ec.HasHwmonFanAccess;
+        info.HpWmiModuleSource = ec.HpWmiModuleSource;
+        info.HpWmiModuleLooksDkms = ec.HpWmiModuleLooksDkms;
+        info.HpWmiDkmsCompatibleFanBackend = ec.HasHpWmiDkmsCompatibleFanBackend;
+        info.HpWmiCompatibilityLabel = ec.HpWmiCompatibilityLabel;
         info.GpuTelemetrySource = gpuReading?.Source ?? "unavailable";
         info.GpuTelemetryPath = gpuReading?.Path ?? string.Empty;
 
@@ -250,6 +254,18 @@ public static class DiagnoseCommand
         if (info.HpWmiPwm1EnableExists && info.HpWmiPwm1Exists)
         {
             info.Notes.Add("hp-wmi hwmon manual PWM duty is available. OmenCore can use pwm_enable=1 plus pwm1 duty for --speed/custom-curve writes, pwm_enable=2 for auto, and pwm_enable=0 for max fan.");
+        }
+
+        if (info.HpWmiDkmsCompatibleFanBackend)
+        {
+            info.Notes.Add(info.HpWmiModuleLooksDkms
+                ? "hp-omen-gaming-wmi-dkms compatible backend detected: hp_wmi is exposing standard hwmon PWM/fan files, so OmenCore can use the same sysfs path without a separate branch."
+                : "Upstream hp-wmi/hwmon fan backend detected: this uses the same sysfs shape expected from hp-omen-gaming-wmi-dkms compatibility mode.");
+        }
+        else if (info.HpWmiModuleLooksDkms)
+        {
+            info.Notes.Add("A DKMS hp_wmi module appears to be installed/loaded, but writable hp-wmi hwmon fan files were not detected. This usually means the current board is not enabled by the DKMS module or the module did not bind to this firmware path.");
+            info.Recommendations.Add("Check DKMS support for this exact board ID and include `dkms status`, `modinfo hp_wmi`, and the hp-wmi/hwmon tree in Linux support reports.");
         }
 
         if (string.Equals(info.BoardId, "8E35", StringComparison.OrdinalIgnoreCase) ||
@@ -760,6 +776,8 @@ public static class DiagnoseCommand
         Console.WriteLine($"║  fan2_tgt:  {(info.HpWmiFan2TargetExists ? "✓ present" : "✗ missing"),-76}║");
         Console.WriteLine($"║  acpi_prof: {(info.AcpiPlatformProfileExists ? $"✓ ({info.AcpiPlatformProfile ?? "?"})" : "✗ missing"),-76}║");
         Console.WriteLine($"║  hwmon_fan: {(info.HasHwmonFanAccess ? "✓ present" : "✗ missing"),-76}║");
+        Console.WriteLine($"║  wmi_back:  {Truncate(info.HpWmiCompatibilityLabel, 76),-76}║");
+        Console.WriteLine($"║  wmi_mod:   {Truncate(info.HpWmiModuleSource, 76),-76}║");
         Console.WriteLine(midBorder);
         Console.WriteLine($"║  Capability:{Truncate(info.CapabilityClass, 76),-76}║");
         Console.WriteLine($"║  Config Sch:{info.ConfigSchemaVersion,-76}║");
@@ -863,6 +881,8 @@ public static class DiagnoseCommand
         WriteLine("fan2_tgt:", State(info.HpWmiFan2TargetExists));
         WriteLine("acpi_prof:", info.AcpiPlatformProfileExists ? $"OK ({info.AcpiPlatformProfile ?? "?"})" : "NO missing");
         WriteLine("hwmon_fan:", State(info.HasHwmonFanAccess));
+        WriteLine("wmi_back:", Shorten(info.HpWmiCompatibilityLabel, 75));
+        WriteLine("wmi_mod:", Shorten(info.HpWmiModuleSource, 75));
         Console.WriteLine(border);
         WriteLine("Capability:", Shorten(info.CapabilityClass, 75));
         WriteLine("Config Sch:", info.ConfigSchemaVersion.ToString());
@@ -994,6 +1014,9 @@ public static class DiagnoseCommand
         Console.WriteLine($"| HP-WMI pwm1 duty | {(info.HpWmiPwm1Exists ? $"Present ({info.HpWmiPwm1 ?? "?"})" : "Missing")} |");
         Console.WriteLine($"| HP-WMI fan inputs | {((info.HpWmiFan1InputExists || info.HpWmiFan2InputExists) ? "Present" : "Missing")} |");
         Console.WriteLine($"| hp_wmi.force_multiplex | {(string.IsNullOrWhiteSpace(info.HpWmiForceMultiplex) ? "N/A" : info.HpWmiForceMultiplex)} |");
+        Console.WriteLine($"| HP-WMI compatibility backend | {info.HpWmiCompatibilityLabel} |");
+        Console.WriteLine($"| HP-WMI module source | {info.HpWmiModuleSource} |");
+        Console.WriteLine($"| HP-WMI DKMS detected | {(info.HpWmiModuleLooksDkms ? "Yes" : "No")} |");
         Console.WriteLine();
         Console.WriteLine("## Service / Packaging Diagnostics");
         Console.WriteLine();
@@ -1130,6 +1153,10 @@ public class DiagnoseInfo
     public bool EcControllerAvailable { get; set; }
     public bool IsUnsafeEcModel { get; set; }
     public bool HasHwmonFanAccess { get; set; }
+    public bool HpWmiDkmsCompatibleFanBackend { get; set; }
+    public bool HpWmiModuleLooksDkms { get; set; }
+    public string HpWmiModuleSource { get; set; } = string.Empty;
+    public string HpWmiCompatibilityLabel { get; set; } = string.Empty;
     public Dictionary<string, object>? EcDiagnostics { get; set; }
     public string CapabilityClass { get; set; } = "unsupported-control";
     public string CapabilityReason { get; set; } = string.Empty;

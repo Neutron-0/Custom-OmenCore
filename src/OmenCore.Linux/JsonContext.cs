@@ -44,6 +44,10 @@ public class LinuxAccessInfo
     public bool EcIoPathExists { get; set; }
     public bool HpWmiPathExists { get; set; }
     public bool HasHwmonFanAccess { get; set; }
+    public bool HasHpWmiDkmsCompatibleFanBackend { get; set; }
+    public bool HpWmiModuleLooksDkms { get; set; }
+    public string HpWmiModuleSource { get; set; } = string.Empty;
+    public string HpWmiCompatibilityLabel { get; set; } = string.Empty;
     public bool HasThermalProfilePath { get; set; }
     public bool HasPlatformProfilePath { get; set; }
     public bool HasAcpiPlatformProfilePath { get; set; }

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Linq;
 using System.Threading.Tasks;
 using OmenCore.Logitech;
 using OmenCore.Services.Logitech;
@@ -91,19 +92,36 @@ namespace OmenCore.Services
 
             try
             {
-                _devices.Clear();
-                var discovered = await _sdk.DiscoverDevicesAsync();
-
-                foreach (var device in discovered)
-                {
-                    _devices.Add(device);
-                }
+                var discovered = (await _sdk.DiscoverDevicesAsync()).ToList();
+                await ReplaceDevicesAsync(discovered);
 
                 _logging.Info($"Discovered {_devices.Count} Logitech device(s)");
             }
             catch (Exception ex)
             {
                 _logging.Error("Logitech device discovery failed", ex);
+            }
+        }
+
+        private async Task ReplaceDevicesAsync(IReadOnlyCollection<LogitechDevice> discovered)
+        {
+            var dispatcher = System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher != null && !dispatcher.CheckAccess())
+            {
+                await dispatcher.InvokeAsync(() => ReplaceDevices(discovered));
+                return;
+            }
+
+            ReplaceDevices(discovered);
+        }
+
+        private void ReplaceDevices(IReadOnlyCollection<LogitechDevice> discovered)
+        {
+            _devices.Clear();
+
+            foreach (var device in discovered)
+            {
+                _devices.Add(device);
             }
         }
 

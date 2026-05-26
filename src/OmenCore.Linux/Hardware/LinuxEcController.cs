@@ -102,6 +102,14 @@ public class LinuxEcController
         "8e35",
         "8e41"
     };
+
+    private static readonly string[] KnownHpWmiDkmsPackageNames =
+    {
+        "hp-omen-gaming-wmi",
+        "hp-omen-wmi",
+        "hp-wmi-omen",
+        "hp-wmi"
+    };
     
     public bool IsAvailable { get; }
     public bool HasEcAccess { get; }
@@ -109,6 +117,10 @@ public class LinuxEcController
     public bool HasAcpiProfileAccess { get; }
     public bool HasHwmonFanAccess { get; }
     public bool HasHwmonPwmDutyAccess => _hwmonPwm1EnablePath != null && _hwmonPwm1Path != null;
+    public bool HasHpWmiDkmsCompatibleFanBackend { get; }
+    public bool HpWmiModuleLooksDkms { get; }
+    public string HpWmiModuleSource { get; }
+    public string HpWmiCompatibilityLabel { get; }
     public bool IsUnsafeEcModel { get; }
     public string AccessMethod { get; }
     public string? LastPerformanceModeBackend { get; private set; }
@@ -137,6 +149,11 @@ public class LinuxEcController
         // Discover hp-wmi hwmon interface (pwm control for 2025+ models)
         DiscoverHwmonFanControl();
         HasHwmonFanAccess = _hwmonPwm1EnablePath != null;
+        HasHpWmiDkmsCompatibleFanBackend = HasHwmonFanAccess &&
+            (_hwmonPwm1Path != null || _hwmonPwm2Path != null || _hwmonFan1InputPath != null || _hwmonFan2InputPath != null);
+        HpWmiModuleSource = DetectHpWmiModuleSource();
+        HpWmiModuleLooksDkms = DetectHpWmiDkmsInstall(HpWmiModuleSource);
+        HpWmiCompatibilityLabel = BuildHpWmiCompatibilityLabel();
         
         IsAvailable = HasEcAccess || HasHpWmiAccess || HasAcpiProfileAccess || HasHwmonFanAccess;
         
@@ -325,7 +342,11 @@ public class LinuxEcController
             ["hwmon_pwm2_path"] = _hwmonPwm2Path ?? "",
             ["hwmon_fan1_input_path"] = _hwmonFan1InputPath ?? "",
             ["hwmon_fan2_input_path"] = _hwmonFan2InputPath ?? "",
-            ["hwmon_pwm_duty_available"] = HasHwmonPwmDutyAccess
+            ["hwmon_pwm_duty_available"] = HasHwmonPwmDutyAccess,
+            ["hp_wmi_module_source"] = HpWmiModuleSource,
+            ["hp_wmi_module_looks_dkms"] = HpWmiModuleLooksDkms,
+            ["hp_wmi_dkms_compatible_fan_backend"] = HasHpWmiDkmsCompatibleFanBackend,
+            ["hp_wmi_compatibility_label"] = HpWmiCompatibilityLabel
         };
         
         // Check file permissions if paths exist
@@ -396,6 +417,121 @@ public class LinuxEcController
             // Ignore errors
         }
         return "unknown";
+    }
+
+    private string BuildHpWmiCompatibilityLabel()
+    {
+        if (!Directory.Exists(HP_WMI_PATH))
+        {
+            return "hp-wmi unavailable";
+        }
+
+        if (HasHpWmiDkmsCompatibleFanBackend)
+        {
+            return HpWmiModuleLooksDkms
+                ? "hp-omen-gaming-wmi-dkms compatible hp-wmi/hwmon fan backend"
+                : "upstream hp-wmi/hwmon fan backend";
+        }
+
+        if (HasHwmonFanAccess)
+        {
+            return "hp-wmi hwmon policy backend without writable PWM duty";
+        }
+
+        if (HasHpWmiAccess || HasAcpiProfileAccess)
+        {
+            return "hp-wmi/profile backend";
+        }
+
+        return "hp-wmi present without supported OMEN control files";
+    }
+
+    private static string DetectHpWmiModuleSource()
+    {
+        if (!Directory.Exists("/sys/module/hp_wmi"))
+        {
+            return "not-loaded";
+        }
+
+        var modinfoPath = TryRunCommand("modinfo", "-F filename hp_wmi");
+        if (!string.IsNullOrWhiteSpace(modinfoPath))
+        {
+            return modinfoPath.Trim();
+        }
+
+        return "loaded";
+    }
+
+    private static bool DetectHpWmiDkmsInstall(string moduleSource)
+    {
+        if (moduleSource.Contains("dkms", StringComparison.OrdinalIgnoreCase) ||
+            moduleSource.Contains("updates", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        const string dkmsRoot = "/var/lib/dkms";
+        if (!Directory.Exists(dkmsRoot))
+        {
+            return false;
+        }
+
+        try
+        {
+            return Directory.GetDirectories(dkmsRoot)
+                .Select(Path.GetFileName)
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Any(name => KnownHpWmiDkmsPackageNames.Any(
+                    known => name!.Contains(known, StringComparison.OrdinalIgnoreCase)));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static string? TryRunCommand(string fileName, string arguments)
+    {
+        try
+        {
+            using var process = new System.Diagnostics.Process
+            {
+                StartInfo = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = fileName,
+                    Arguments = arguments,
+                    RedirectStandardOutput = true,
+                    RedirectStandardError = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                }
+            };
+
+            if (!process.Start())
+            {
+                return null;
+            }
+
+            var output = process.StandardOutput.ReadToEnd();
+            if (!process.WaitForExit(750))
+            {
+                try
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+                catch
+                {
+                    // Best effort only; detection must not break controller setup.
+                }
+                return null;
+            }
+
+            return process.ExitCode == 0 ? output.Trim() : null;
+        }
+        catch
+        {
+            return null;
+        }
     }
     
     private bool CanReadFile(string path)

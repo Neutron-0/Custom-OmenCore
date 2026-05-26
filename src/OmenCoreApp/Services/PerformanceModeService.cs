@@ -42,6 +42,10 @@ namespace OmenCore.Services
 
         private bool FanPolicyAvailable => _fanController.IsAvailable && !FanPolicyWritesBlocked;
 
+        private bool DirectEcPowerLimitWritesBlocked =>
+            _modelCapabilities != null &&
+            !_modelCapabilities.SupportsFanControlEc;
+
         /// <summary>
         /// Event raised when a performance mode is applied (for UI synchronization).
         /// </summary>
@@ -76,6 +80,7 @@ namespace OmenCore.Services
                 var hasValidCpuLimit = effectiveMode.CpuPowerLimitWatts > 0;
                 var hasValidGpuLimit = effectiveMode.GpuPowerLimitWatts > 0;
                 var hasAnyValidEcLimit = hasValidCpuLimit || hasValidGpuLimit;
+                var directEcPowerLimitWritesBlocked = DirectEcPowerLimitWritesBlocked;
                 var modeInfo = $"⚡ Applying performance mode: '{effectiveMode.Name}'";
                 if (!string.IsNullOrEmpty(effectiveMode.LinkedPowerPlanGuid))
                 {
@@ -87,7 +92,7 @@ namespace OmenCore.Services
                 _powerPlanService.Apply(effectiveMode);
                 
                 // Step 2: Apply EC-level power limits (CPU PL1/PL2, GPU TGP)
-                if (_powerLimitController != null && _powerLimitController.IsAvailable)
+                if (_powerLimitController != null && _powerLimitController.IsAvailable && !directEcPowerLimitWritesBlocked)
                 {
                     try
                     {
@@ -147,6 +152,11 @@ namespace OmenCore.Services
                 }
                 else
                 {
+                    if (directEcPowerLimitWritesBlocked)
+                    {
+                        _logging.Info($"Direct EC power-limit writes skipped for '{effectiveMode.Name}' on model '{_modelCapabilities?.ModelName}' - using WMI thermal policy fallback when available");
+                    }
+
                     _logging.Info("ℹ️ EC power limit control not available - using Windows power plan only");
                 }
                 
@@ -185,13 +195,12 @@ namespace OmenCore.Services
                     // When EC limits are unavailable/non-positive, the WMI Performance/Cool policy
                     // keepalive is the only path that holds the requested TDP/boost behavior.
                     // Preserve the user's decoupled fan preset model by using this only as a narrow
-                    // fallback for non-auto modes when no valid EC limits exist.
+                    // fallback when no valid EC limits exist.
                     var shouldUseWmiThermalPolicyFallback =
                         AllowDecoupledWmiThermalPolicyFallback &&
                         FanPolicyAvailable &&
                         string.Equals(_fanController.Backend, "WMI BIOS", StringComparison.OrdinalIgnoreCase) &&
-                        !hasAnyValidEcLimit &&
-                        !FanModeNameResolver.IsAutoAlias(effectiveMode.Name);
+                        (!hasAnyValidEcLimit || directEcPowerLimitWritesBlocked);
 
                     if (shouldUseWmiThermalPolicyFallback)
                     {
@@ -421,7 +430,7 @@ namespace OmenCore.Services
         /// Whether EC-level power limit control is available.
         /// When false, performance modes only change Windows power plan and fan policy.
         /// </summary>
-        public bool EcPowerControlAvailable => _powerLimitController != null && _powerLimitController.IsAvailable;
+        public bool EcPowerControlAvailable => _powerLimitController != null && _powerLimitController.IsAvailable && !DirectEcPowerLimitWritesBlocked;
         
         /// <summary>
         /// Get a human-readable description of what controls are available.
@@ -439,7 +448,7 @@ namespace OmenCore.Services
                 if (AllowDecoupledWmiThermalPolicyFallback && FanPolicyAvailable)
                     capabilities.Add("WMI Performance Policy Fallback");
                     
-                if (_powerLimitController != null && _powerLimitController.IsAvailable)
+                if (_powerLimitController != null && _powerLimitController.IsAvailable && !DirectEcPowerLimitWritesBlocked)
                     capabilities.Add("CPU/GPU Power Limits");
                     
                 return string.Join(", ", capabilities);

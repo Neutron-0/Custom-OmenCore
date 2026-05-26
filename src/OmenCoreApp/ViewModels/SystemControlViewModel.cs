@@ -645,6 +645,14 @@ namespace OmenCore.ViewModels
             }
         }
 
+        public bool GpuModeSwitchingSupported => _gpuSwitchService.IsSupported;
+
+        public bool GpuModeSwitchingUnsupported => !GpuModeSwitchingSupported;
+
+        public string GpuModeSwitchingStatusText => GpuModeSwitchingSupported
+            ? "BIOS WMI GPU switching is available."
+            : $"GPU mode switching is unavailable through OmenCore: {_gpuSwitchService.UnsupportedReason}";
+
         private double _latestGpuPowerWatts;
         private string _gpuFullPowerText = "Full power • waiting for telemetry";
 
@@ -4883,22 +4891,7 @@ namespace OmenCore.ViewModels
             if (!_gpuSwitchService.IsSupported)
             {
                 var reason = _gpuSwitchService.UnsupportedReason;
-                _logging.Warn($"GPU mode switching not available: {reason}");
-                System.Windows.MessageBox.Show(
-                    $"GPU mode switching is not available on this system.\n\n" +
-                    $"Reason: {reason}\n\n" +
-                    "This feature requires:\n" +
-                    "• HP OMEN laptop with BIOS GPU mode support\n" +
-                    "• HP WMI BIOS interface for GPU settings\n\n" +
-                    "Note: HP Transcend, Victus, and some other HP models\n" +
-                    "do not support this feature through OmenCore.\n\n" +
-                    "To change GPU modes on unsupported systems:\n" +
-                    "• Use NVIDIA Control Panel (for Optimus)\n" +
-                    "• Check BIOS settings directly\n" +
-                    "• Use manufacturer's control software",
-                    "GPU Mode Switching Not Supported - OmenCore",
-                    System.Windows.MessageBoxButton.OK,
-                    System.Windows.MessageBoxImage.Information);
+                _logging.Info($"GPU mode switching not available: {reason}");
                 return;
             }
 

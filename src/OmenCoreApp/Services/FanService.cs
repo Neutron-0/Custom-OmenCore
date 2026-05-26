@@ -2328,6 +2328,10 @@ namespace OmenCore.Services
 
                 try
                 {
+                    if (cpuTemp <= 0 && gpuTemp <= 0)
+                    {
+                        TryReuseLatestThermalSample(ref cpuTemp, ref gpuTemp);
+                    }
                     var (controlCpuTemp, controlGpuTemp) = SmoothCurveTemperatures(cpuTemp, gpuTemp);
                     // Use smoothed control temps for curve interpolation, but keep raw
                     // temperatures for safety clamps and hysteresis state.
@@ -2832,6 +2836,32 @@ namespace OmenCore.Services
             }
             
             return result;
+        }
+
+        private void TryReuseLatestThermalSample(ref double cpuTemp, ref double gpuTemp)
+        {
+            try
+            {
+                if (_thermalSamples.Count == 0)
+                {
+                    return;
+                }
+
+                var latest = _thermalSamples[^1];
+                if (cpuTemp <= 0 && latest.CpuCelsius > 0)
+                {
+                    cpuTemp = latest.CpuCelsius;
+                }
+
+                if (gpuTemp <= 0 && latest.GpuCelsius > 0)
+                {
+                    gpuTemp = latest.GpuCelsius;
+                }
+            }
+            catch
+            {
+                // Best-effort fallback only.
+            }
         }
 
         /// <summary>

@@ -624,6 +624,7 @@ class Program
                     
                     // Process the hardware data (CPU, GPU, RAM, etc.)
                     ProcessHardware(hardware, sample);
+                    ProcessFanSensors(hardware.Sensors, sample);
                     
                     // Update sub-hardware (fans, sensors)
                     foreach (var subHardware in hardware.SubHardware)
@@ -1081,7 +1082,12 @@ class Program
     private static void ProcessSubHardware(IHardware subHardware, HardwareSample sample)
     {
         // Fan RPM from EC/motherboard
-        foreach (var sensor in subHardware.Sensors.Where(s => s.SensorType == SensorType.Fan))
+        ProcessFanSensors(subHardware.Sensors, sample);
+    }
+
+    private static void ProcessFanSensors(IEnumerable<ISensor> sensors, HardwareSample sample)
+    {
+        foreach (var sensor in sensors.Where(s => s.SensorType == SensorType.Fan))
         {
             if (sensor.Value.HasValue && sensor.Value.Value > 0)
             {

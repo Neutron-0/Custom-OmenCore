@@ -108,7 +108,7 @@ namespace OmenCoreApp.Tests.ViewModels
         }
 
         [Fact]
-        public void NormalizeMonitoringSample_ClampsLargeSingleStepCpuSpike()
+        public void NormalizeMonitoringSample_AllowsLargeValidCpuStep()
         {
             var previous = new MonitoringSample
             {
@@ -125,11 +125,11 @@ namespace OmenCoreApp.Tests.ViewModels
             var normalized = InvokeNormalize(current, previous);
 
             Assert.NotNull(normalized);
-            Assert.Equal(68, normalized!.CpuTemperatureC);
+            Assert.Equal(72, normalized!.CpuTemperatureC);
         }
 
         [Fact]
-        public void NormalizeMonitoringSample_ClampsLargeSingleStepGpuSpike_WhenGpuActive()
+        public void NormalizeMonitoringSample_AllowsLargeValidGpuStep_WhenGpuActive()
         {
             var previous = new MonitoringSample
             {
@@ -146,11 +146,11 @@ namespace OmenCoreApp.Tests.ViewModels
             var normalized = InvokeNormalize(current, previous);
 
             Assert.NotNull(normalized);
-            Assert.Equal(66, normalized!.GpuTemperatureC);
+            Assert.Equal(70, normalized!.GpuTemperatureC);
         }
 
         [Fact]
-        public void NormalizeMonitoringSample_AllowsNormalCpuStepUnderSpikeThreshold()
+        public void NormalizeMonitoringSample_AllowsNormalCpuStep()
         {
             var previous = new MonitoringSample
             {

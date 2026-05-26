@@ -50,5 +50,22 @@ namespace OmenCoreApp.Tests.Hardware
 
             usable.Should().Be(expected);
         }
+
+        [Theory]
+        [InlineData("OMEN by HP Gaming Laptop 16-n0xxx", true)]
+        [InlineData("OMEN by HP Laptop 17-ck1xxx", true)]
+        [InlineData("OMEN MAX Gaming Laptop 16t-ah000", true)]
+        [InlineData("OMEN by HP Gaming Laptop 16-wf0xxx", false)]
+        public void ShouldPreferWorkerCpuTemp_UsesModelScopedOverrideList(string model, bool expected)
+        {
+            var method = typeof(WmiBiosMonitor).GetMethod(
+                "ShouldPreferWorkerCpuTemp",
+                BindingFlags.NonPublic | BindingFlags.Static);
+
+            method.Should().NotBeNull();
+            var shouldPrefer = (bool)method!.Invoke(null, new object[] { model })!;
+
+            shouldPrefer.Should().Be(expected);
+        }
     }
 }

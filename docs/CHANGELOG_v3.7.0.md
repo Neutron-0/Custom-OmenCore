@@ -15,6 +15,27 @@ This changelog is intentionally split into field bug fixes and OmenCore-authored
 
 ---
 
+## Bug Fixes After Pre-release 1
+
+These fixes landed after the first 3.7.0 prerelease installer/ZIPs were built on 2026-05-25. If you tested that first package, these are the important changes in the rebuilt prerelease assets:
+
+- **GitHub #134 / OMEN 17-ck1xxx CPU temperature authority:** worker-backed CPU temperature now keeps a recent good worker reading through brief worker timeout/cooldown windows instead of falling back to low/coarse WMI or ACPI readings.
+- **8A43 / OMEN 16-n0xxx fan and CPU telemetry:** ProductId `8A43` now uses the model database 60-level fan ceiling at runtime, keeps stricter fan verification evidence, and adds `OMEN 16-n0xxx` to the worker-backed CPU temperature override path for the Ryzen skin/EC-temperature pattern.
+- **8D2F / OMEN 16-am0xxx General profile recovery:** confirmed `Performance` + `Performance` no longer displays as `Custom`; EC-unsafe direct power-limit writes are blocked and routed through the safer WMI thermal/performance-policy fallback.
+- **8D41 / OMEN MAX 16 follow-up:** expanded OMEN MAX model-string matching for worker-backed CPU temperature override and retained the safe WMI policy path for Quick Profile GPU-power behavior.
+- **8E35 / ap0xxx WMI reliability:** BIOS WMI reliability now scores the final CIM-to-legacy fallback result, avoiding false `6/8`-style "Poor" readings when the legacy fallback succeeds.
+- **8E41 / Transcend 14 preset lag:** non-Max preset transitions now skip the slow no-op `SetFanMax(false)` call unless OmenCore actually enabled Max mode, while still clearing Max when leaving a confirmed Max profile.
+- **8E41 / Custom profile click:** clicking Custom re-applies the last saved custom fan preset when one exists instead of only navigating to the Custom tab.
+- **PawnIO installer bundling:** Windows setup now extracts the embedded `PawnIO_setup.exe` to `{tmp}` and runs it hidden with `-silent`, removing the fragile sidecar-file requirement from first-package builds.
+- **Temperature display truthfulness:** General/dashboard temperature projection now shows the latest accepted CPU/GPU readings without display-side step clamps or 3-sample averaging; invalid/zero handoff guards remain.
+- **HardwareWorker fan readback:** top-level LibreHardwareMonitor fan sensors are now collected in addition to sub-hardware fan sensors, improving live RPM coverage on boards that expose fans directly on the main hardware node.
+- **Battery dGPU wake reduction:** expensive NVAPI GPU telemetry refreshes are throttled to a 10-second cadence while unplugged, while lightweight WMI/CPU sampling continues.
+- **Unsupported GPU switching UX:** systems without BIOS WMI GPU-switch support now show an inline disabled state instead of a modal popup.
+- **Linux hp-omen-gaming-wmi-dkms compatibility identity:** Linux status/diagnose now reports whether `hp_wmi` appears DKMS-provided and whether it exposes the standard hp-wmi/hwmon fan backend OmenCore can safely use.
+- **RGB peripheral discovery cleanup:** Corsair/Logitech RGB device discovery now updates bound collections on the WPF dispatcher, removing cross-thread `CollectionView` errors seen during RGB page initialization.
+
+---
+
 ## Field Bug Fixes
 
 ### OMEN 16-xd0xxx / ProductId 8BCD Fan Curve and Profile Recovery
@@ -52,7 +73,11 @@ This changelog is intentionally split into field bug fixes and OmenCore-authored
 - Renamed the displayed capability and keyboard profile from the temporary shared AMD/Intel label to `OMEN 16-am0xxx (8D2F)`.
 - Kept direct EC fan writes, independent fan curves, and undervolt disabled for this board because the ProductId has appeared across AMD and Intel Core Ultra variants.
 - Enabled the opt-in WMI thermal/performance-policy fallback for `8D2F` and the ProductId-missing `16-am0xxx` Intel fallback so Performance mode can still use the OEM policy path when direct EC/MSR power-limit writes are unavailable.
+- Late 2026-05-25 field logs confirmed the General Performance profile could apply fan policy but display as `Custom`; fresh post-apply runtime confirmation now wins over saved preset state so confirmed `Performance` + `Performance` remains `Performance`.
+- General quick profiles on `8D2F` now skip direct EC power-limit writes when the model profile marks EC control unsafe, then use the WMI thermal/performance-policy fallback even when global profile defaults contain non-zero watt targets.
 - Left direct CPU PL1/PL2 controls runtime-gated: if firmware reports `0W/0W` or locks package limits, OmenCore should report that state as firmware-controlled/unavailable instead of exposing broken sliders.
+- Retired WinRing0 backend status no longer logs as a repeated warning when PawnIO is healthy; `8D2F` reports should now show the retired legacy backend as no-action noise rather than an active fault.
+- BIOS WMI reliability can still report degraded command success on this board/BIOS path; the 3.7.0 mitigation is conservative fallback behavior, not a claim that every WMI probe succeeds.
 - Promoted the exact `8D2F` keyboard entry to high-confidence so Model Identity no longer emits the "not user-verified yet" warning for keyboard support.
 
 ### OMEN MAX 16-ah0xxx / ProductId 8D41 Power Policy and RGB Identity
@@ -62,6 +87,17 @@ This changelog is intentionally split into field bug fixes and OmenCore-authored
 - Kept legacy EC writes disabled for `8D41`; this board still uses the MAX-series safe path because legacy EC registers can corrupt EC state.
 - Added an exact ProductId `8D41` keyboard profile so Model Identity no longer reports `Keyboard model: Unknown` for OMEN MAX 16t-ah000 reports.
 - Marked the `8D41` keyboard as per-key-capable MAX hardware with WMI ColorTable fallback while HID per-key behavior remains field-unverified; the RGB page should now distinguish "per-key backend not available yet" from "this laptop is unsupported."
+
+### OMEN Transcend 14-fb1xxx / ProductId 8E41 Preset Transition and Custom Profile
+
+- Fixed a ~5-second UI hang when switching fan presets (e.g., manual curve → Balanced or Performance) on firmware whose `SetFanMax(false)` BIOS WMI call stalls for several seconds even as a no-op.
+  - `WmiFanController.ResetFromMaxMode` previously issued `SetFanMax(false)` unconditionally at the start of every non-max preset transition, even when max mode had never been activated.
+  - On some WMI V1 firmware revisions (confirmed on `8E41` BIOS F.05), this no-op disable call takes 4–5 seconds instead of the expected <50 ms, blocking every Balanced/Quiet/Performance profile switch that followed a manual-curve preset.
+  - Fix: `SetFanMax(false)` is now guarded by `if (_isMaxModeActive)`, skipping the call entirely when OmenCore did not previously enable max fan speed. Steps 2 and 3 of the reset sequence (SetFanMode, SetFanLevel) still execute for clean EC state transitions.
+  - This fix applies to all WMI V1 models, not just `8E41`; it eliminates the stall whenever the user switches away from a manual curve preset without having first entered max mode.
+- Fixed the General **Custom** profile card doing nothing when clicked after the initial profile selection: re-clicking Custom now re-applies the last user-configured custom fan preset in addition to navigating to the Custom tab.
+  - Root cause: `ApplyCustomProfile()` only fired `CustomTabNavigationRequested` and set `SelectedProfile = "Custom"` without touching the fan service, so the fan hardware state remained at whatever the previous profile had applied.
+  - Fix: `ApplyCustomProfile()` now looks up `LastFanPresetName` from config, resolves it through `FanModeNameResolver.ResolveGeneralProfileFromPresetName`, and calls `_fanService.ApplyPreset()` when a user-defined (non-built-in) preset is found. If no custom preset is saved yet, the method falls back to navigate-only as before.
 
 ### OMEN 17-ck1xxx CPU Temperature Authority (GitHub #134)
 
@@ -126,9 +162,17 @@ This changelog is intentionally split into field bug fixes and OmenCore-authored
 ### OMEN 16-n0xxx / ProductId 8A43 Fan and Telemetry Reliability Hardening
 
 - Updated the exact ProductId `8A43` capability profile to use `MaxFanLevel = 60` so diagnostics and verification mapping reflect observed field behavior instead of a stale 55-level ceiling assumption.
+- Passed the model-database max fan level into the WMI fan controller path, fixing the gap where the `8A43` profile said `60` but runtime still logged/used auto-detected classic `55`.
+- Kept the `8A43` ceiling at `60` after follow-up evidence that the CPU fan tops out slightly lower (`~58` / `5800 RPM`) while the GPU fan reaches near `60`; the shared model ceiling remains a normalization/verification ceiling, not a claim that both fans have identical mechanical maximums.
+- Captured follow-up Hades identity evidence (2026-05-25): Model Identity Summary still resolves exact ProductId `8A43` (`OMEN 16-n0xxx`, support number `6G103EA`) with medium confidence and explicit "not user-verified yet" warnings, which remains expected until wider post-fix confirmations are collected.
+- Added `OMEN 16-n0xxx` to the model-scoped worker-backed CPU temperature override list after the 2026-05-25 log showed WMI reporting a low `42C` CPU value while the worker-backed Ryzen die/package reading was `~68-77C`, matching the GitHub #129 skin/EC-temperature pattern.
 - Hardened guided fan verification evidence policy: medium/high target checks no longer pass on level-only readback when RPM response remains materially below expected, reducing false-positive "applied" outcomes in diagnostics.
+- Confirmed from the 2026-05-25 Hades log that **Apply & Verify** is using the intended safe path again on `8A43`: diagnostic mode suspends the curve engine, applies explicit WMI fan levels, validates RPM/level evidence, then restores BIOS auto control without sending the risky V1 `SetFanLevel(0,0)` floor-clear command.
 - Added short-window last-good CPU/GPU temperature reuse in thermal sampling so transient read timeouts do not collapse fan-control inputs to `0C` and trigger misleading low-demand fan decisions.
 - Added CPU temperature authority return hysteresis in monitor arbitration: primary WMI authority is restored only after consecutive healthy primary readings, reducing fallback/primary flapping in unstable telemetry windows.
+- ProductId `8E35` / ap0xxx follow-up: BIOS WMI reliability stats now count the final command outcome after CIM-to-legacy fallback, so a successful legacy fallback is no longer shown as one failed command plus one successful command. This should prevent false `6/8`-style "Poor" readability on BIOS F.15+ fallback systems.
+- Added battery-aware GPU telemetry throttling: while unplugged, expensive NVAPI GPU telemetry refreshes are limited to a 10-second cadence while lightweight WMI/CPU sampling continues, reducing dGPU wake pressure reported by battery users.
+- Expanded OMEN MAX model-string matching for worker-backed CPU temperature override so `OMEN MAX Gaming Laptop 16t-ah000` is covered in addition to the shorter `OMEN MAX 16` / `ah0000` forms.
 
 ### Runtime UI and Monitoring Direction
 
@@ -141,12 +185,15 @@ This changelog is intentionally split into field bug fixes and OmenCore-authored
 - Connected the dashboard Refresh button to a lightweight dashboard refresh command and clarified its tooltip.
 - Replaced several dashboard/sidebar emoji and encoded metric glyphs with existing vector icons and added direct temperature display properties for CPU, GPU, and SSD chips.
 - Dashboard temperature chips now distinguish inactive GPU state from unavailable telemetry while keeping stale readings visibly marked.
+- Main UI and hardware-dashboard temperature projection now show the latest accepted CPU/GPU sensor reading instead of step-clamping or averaging valid changes; transient zeros and invalid states are still guarded.
 - Dashboard telemetry projection now has a headless/test fallback when no WPF dispatcher exists, preventing queued samples from leaving the UI coalescing gate stuck closed in diagnostic or no-application contexts.
 - Fan telemetry updates now preserve stable `FanTelemetry` objects when the fan count is unchanged, reducing `ObservableCollection` reset/add/remove churn on the dashboard and fan-control surfaces.
 - `FanTelemetry.Name` now raises `PropertyChanged`, matching the dashboard's live fan-label subscription path.
 - Runtime performance diagnostics now export fan telemetry sync counters, collection resize counts, item update counts, property-only sync counts, and resize/property-only ratios so field bundles can verify that fan readback is not rebuilding UI collections every poll.
 - Bounded runtime performance snapshots now include fan telemetry resize/property-only ratios and window deltas for fan telemetry sync, resize, item-update, and property-only counts.
 - General profile selection borders now use a cached brush instead of allocating a `BrushConverter` result from every getter call.
+- Unsupported BIOS GPU mode switching now appears as an inline disabled state in System Control instead of opening a modal error when the BIOS does not expose WMI GPU-switch commands.
+- HardwareWorker now reads top-level LibreHardwareMonitor fan sensors in addition to sub-hardware fan sensors, improving live fan RPM coverage on boards that expose fans directly on the main hardware node.
 - Corrected the Fan page Extreme preset label from `@88C` to `@75C` so the visible card matches the restored 3.7.0 fan curve endpoint.
 
 ### Telemetry Truthfulness and Backend Health Scaffolding
@@ -168,12 +215,12 @@ This changelog is intentionally split into field bug fixes and OmenCore-authored
 - Replaced the Intel fallback path from `tempSensors.Max()` (hottest single core) to a package-hint-weighted fallback: any sensor whose name contains `"Package"`, `"Core Max"`, or `"IA Cores"` is preferred over raw per-core maximums before falling back to `Max()` as a last resort.
 - The old `Max()` fallback was the cause of transient 90–105 °C single-poll display spikes on Intel Core Ultra laptops at workload launch, where one core turbos briefly before the package settles.
 
-### Dashboard Temperature Display Smoothing
+### Temperature Display Truthfulness
 
-- CPU and GPU temperature values displayed in the hardware monitoring dashboard are now computed as a 3-sample trailing average of the last three polling samples (`_cpuTempHistory.TakeLast(3).Average()` / `_gpuTempHistory.TakeLast(3).Average()`).
-- Smoothing applies only to the displayed number — the existing history queues were already populated each poll cycle. Alert animations (`AnimateMetricIfCritical`), status colors (`GetTemperatureBrush`), and status labels (`GetTemperatureStatus`) continue to use the raw current value so real thermal warnings are not delayed.
-- Fan curve control uses its own independent smoothing in `FanCurveEngine` and is unaffected.
-- Addresses the field pattern of displayed CPU temps spiking to 85–90 °C at game launch and recovering within 5 seconds — the spike is real but the display lag misled users into thinking OmenCore was reading incorrectly.
+- Removed the final display-side CPU/GPU temperature step clamp from `MainViewModel.NormalizeMonitoringSample`; valid readings now project directly while transient zeros, invalid states, and impossible ranges remain guarded.
+- Removed the legacy hardware-dashboard 3-sample displayed-temperature average and the in-process LibreHardwareMonitor CPU temperature average so dashboard/General temperature readouts stay live.
+- Fan curve control still uses its own independent smoothing below safety territory, and high-temperature safety decisions remain latest-sample driven.
+- This preserves recovery guards for bad sensor handoffs without hiding real workload-launch temperature jumps.
 
 ### Legacy WinRing0 Removal
 
@@ -183,6 +230,7 @@ This changelog is intentionally split into field bug fixes and OmenCore-authored
 - Removed stale WinRing0 setup/stub documentation and refreshed antivirus guidance to explain that WinRing0 alerts now point to leftover files or other tools, not the current OmenCore EC backend.
 - Updated Settings, diagnostics, fan-cleaning, fan-controller, and cross-platform settings text so supported low-level access points users at PawnIO.
 - Final sweep removed the orphaned legacy dependency-audit helper from `SystemInfoService`, updated README driver priority/troubleshooting/licensing text to the PawnIO-only direction, and cleaned the single-curve fan application guard for clearer control flow.
+- Windows installer PawnIO bundling now extracts the embedded `PawnIO_setup.exe` to `{tmp}` and runs it hidden with `-silent` when the default PawnIO task is selected; the old runtime `{src}` sidecar-file check was removed because single-file setup builds may not have a sidecar `PawnIO_setup.exe` beside the installer.
 
 ### Linux Fan Curve Safety and Accuracy
 
@@ -197,6 +245,7 @@ This changelog is intentionally split into field bug fixes and OmenCore-authored
 - Linux diagnose human-readable output now defaults to ASCII-safe table rendering to avoid corrupted box-drawing/status glyphs in terminals and copied Discord logs.
 - Linux diagnose now emits a dedicated kernel-issue hint when boot logs include hp-wmi `WQ00` missing-method firmware warnings, and recommends attaching full kernel logs plus ACPI tables for upstream triage.
 - Added board-specific Linux diagnose guidance for OMEN 16-wf1xxx board `8C77` (Insyde BIOS reports), including explicit evidence capture commands and conservative messaging that board-list membership does not guarantee effective profile-power control.
+- Added an experimental hp-omen-gaming-wmi-dkms compatibility identity layer: Linux status/diagnose now reports whether `hp_wmi` appears to come from DKMS and whether it exposes the standard hp-wmi/hwmon fan backend OmenCore can safely use.
 
 ---
 
@@ -257,6 +306,7 @@ When the Quiet profile is active, a background `QuietSafetyMonitor` service watc
 - Toggling a card off now hides that card's inner controls in-place while keeping the card header visible for quick re-enable.
 - Card toggle state is persisted across restarts.
 - Corsair/Logitech/Razer/Keyboard card toggles are wired to the existing feature preference state so RGB-tab control and Settings stay consistent.
+- Corsair and Logitech RGB device discovery now marshals bound collection updates through the WPF dispatcher, preventing cross-thread `CollectionView` errors during RGB page initialization when discovery runs from a background provider task.
 
 - Added a dedicated General profile-cycle hotkey path (`Ctrl+Shift+E`) separate from performance-mode cycling.
 - Added profile-cycle resolver coverage for Custom-present and Custom-absent cases.
@@ -279,7 +329,7 @@ When the Quiet profile is active, a background `QuietSafetyMonitor` service watc
 - Corrected **Extended** GPU Power Boost description to remove RTX 5080-exclusive wording; RTX 50-series users are now prompted to try Extended if Maximum doesn't reach rated TGP.
 - Added `"IA Cores"` to the Intel CPU temperature preferred-sensor list (covers Intel Core Ultra P-core cluster in LibreHardwareMonitor).
 - Improved Intel CPU temperature fallback to prefer package-hinting sensors over raw per-core `Max()`, reducing transient display spikes on Meteor Lake / Arrow Lake platforms.
-- Added 3-sample trailing-average smoothing for displayed CPU and GPU temperatures in the hardware monitoring dashboard.
+- Removed display-side temperature smoothing/clamping so accepted CPU and GPU readings remain live while sensor validity guards handle bad handoffs.
 
 ---
 
@@ -322,24 +372,29 @@ Current validation matrix:
 | Profile-cycle extraction | `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --filter "ProfileCycleServiceTests|MainViewModelTests"` | Passed, 29 passed, 0 failed, 0 skipped after allowing WPF generated-file writes; rerun passed after final case-insensitive fan-mode hardening. |
 | Telemetry/backend scaffolding | `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --filter "MonitoringTelemetryAdapterTests|MonitoringSampleCopyConstructorTests|DeviceCapabilitiesTests|DependencyAuditTests"` | Passed, focused suites green after telemetry envelope and backend-health scaffolding changes. |
 | 8A43 fan/telemetry hardening | Focused `ModelCapabilityDatabaseTests`, `FanVerificationServiceTests`, and `WmiBiosMonitorTests` | Passed, 50 passed, 0 failed after applying stricter verification evidence policy and authority recovery hysteresis. |
-| Full Windows test project | `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --logger "console;verbosity=normal"` | Passed before the late GitHub #134 patch, 743 passed, 0 failed. Full rerun required before upload. |
+| Late 8A43 / #129 / battery GPU telemetry pass | `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --filter "WmiBiosMonitorFallbackTests|WmiV2VerificationTests|ModelCapabilityDatabaseTests.GetPreferredCapabilities_8A43_WithN0xxModel_PrefersExactProductIdOverSiblingPattern" --logger "console;verbosity=minimal" -m:1 /p:UseSharedCompilation=false` | Passed, 60 passed, 0 failed after model max-fan override propagation, `16-n0xxx` CPU-temp worker override, OMEN MAX model-string expansion, and battery NVAPI telemetry throttling. |
+| Late 8D2F follow-up | `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --filter "GeneralViewModelTests|PerformanceModeServiceTdpOverrideTests|DeviceCapabilitiesTests" --logger "console;verbosity=minimal" -m:1 /p:UseSharedCompilation=false` | Passed, 52 passed, 0 failed after post-apply General profile confirmation, EC-unsafe direct power-limit write blocking, 8D2F WMI fallback, and retired WinRing0 warning demotion. |
+| 8E41 WMI fan reset regression | `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --filter "FullyQualifiedName~WmiV2VerificationTests" --logger "console;verbosity=minimal" -m:1 /p:UseSharedCompilation=false` | Passed, 45 passed, 0 failed after adding coverage that manual/custom-to-profile handoff skips no-op `SetFanMax(false)` while confirmed Max-to-profile still clears it. |
+| 8E41 General profile / OMEN key regression | `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --filter "FullyQualifiedName~GeneralViewModelTests|FullyQualifiedName~OmenKeyServiceTests" --logger "console;verbosity=minimal" -m:1 /p:UseSharedCompilation=false` | Passed, 11 passed, 0 failed after General Performance profile confirmation, Custom profile selection coverage, and Fn+F12 OMEN scan-code handling. |
+| RGB peripheral discovery dispatcher safety | `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --filter "FullyQualifiedName~CorsairDeviceServiceTests|FullyQualifiedName~LogitechRgbProviderTests|FullyQualifiedName~CorsairRgbProviderTests" --logger "console;verbosity=minimal" -m:1 /p:UseSharedCompilation=false` | Passed, 8 passed, 0 failed after dispatcher-marshal cleanup for Corsair/Logitech bound device collections. |
+| Full Windows test project | `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --logger "console;verbosity=minimal" -m:1 /p:UseSharedCompilation=false` | Passed after the Pre-release 1 follow-up fixes, 764 passed, 0 failed, 0 skipped. |
 | GitHub #134 CPU temperature fallback | `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --filter "WmiBiosMonitorFallbackTests|ModelIdentityResolutionSummaryTests.Build_8D41ExactProductId_ResolvesKeyboardProfile"` | Passed after the worker last-good CPU temperature fix, 13 passed, 0 failed. |
-| Windows prerelease package | `powershell -NoProfile -ExecutionPolicy Bypass -File .\build-installer.ps1` | Passed before the late GitHub #134 patch. Produced superseded `OmenCoreSetup-3.7.0.exe` and `OmenCore-3.7.0-win-x64.zip`; rebuild required before upload. |
-| Linux prerelease package | `powershell -NoProfile -ExecutionPolicy Bypass -File .\build-linux-package.ps1 -SkipBinaryVersionCheck` | Passed before the late GitHub #134 patch after excluding Avalonia `artifacts\**` from source compilation and adding publish exit-code checks. Produced superseded `OmenCore-3.7.0-linux-x64.zip`; rebuild required before upload. |
+| Windows prerelease package | `powershell -NoProfile -ExecutionPolicy Bypass -File .\build-installer.ps1` | Passed on 2026-05-27. Produced rebuilt `OmenCoreSetup-3.7.0.exe` and `OmenCore-3.7.0-win-x64.zip`; Inno compile embedded `PawnIO_setup.exe`. |
+| Linux prerelease package | `powershell -NoProfile -ExecutionPolicy Bypass -File .\build-linux-package.ps1 -SkipBinaryVersionCheck` | Passed on 2026-05-27. Produced rebuilt `OmenCore-3.7.0-linux-x64.zip`; verifier passed, binary execution skipped on Windows host, one `Tomlyn` trim warning. |
 | Release hygiene | `rg -n "catch\s*\{\s*\}" ...` over the files reported by the release-gate failure | Passed after patching: no bare `catch {}` remains in the reported files. |
 | Release hygiene | `rg -n "3\.6\.3|3\.6\.3\.0|OmenCoreSetup-3\.6\.3|OmenCore-3\.6\.3" ...` over active version/package surfaces | Passed for release-facing metadata; remaining `3.6.3` matches are intentional historical changelog/base-version references. |
 | Final Linux rebuild | `dotnet build src\OmenCore.Linux\OmenCore.Linux.csproj --no-restore -p:IntermediateOutputPath=artifacts\obj\OmenCoreLinux\Debug\ -p:OutputPath=artifacts\bin\OmenCoreLinux\Debug\` | Passed, 0 warnings, 0 errors. |
 | Release hygiene | `git diff --check` | Line-ending warnings only. |
 
-Superseded prerelease artifacts:
+Rebuilt prerelease artifacts:
 
-These hashes describe the earlier 3.7.0 candidate build and must be regenerated after the GitHub #134 CPU-temperature authority fix.
+These hashes describe the rebuilt 3.7.0 prerelease assets generated on 2026-05-27 after the Pre-release 1 follow-up fixes.
 
 | File | Size | SHA256 |
 | --- | ---: | --- |
-| `OmenCoreSetup-3.7.0.exe` | 101.72 MB | `AD47AEC9E4D0CD894672B822B5F01337030372F5F7EC42A5F6298B955EAA8101` |
-| `OmenCore-3.7.0-win-x64.zip` | 104.88 MB | `682D914A6234900B530A9E1B27B016883D1E0FAAD0BC9A3B34466AB3C0CD5090` |
-| `OmenCore-3.7.0-linux-x64.zip` | 43.56 MB | `6A66450F97AF3E1F678FA70D0B226613D72500BBC49BF9D6946159660D652697` |
+| `OmenCoreSetup-3.7.0.exe` | 101.73 MB | `9E75959BC432AC1E1EEFD557BDD402088F3013B78EA185595E2BF9C77186FF87` |
+| `OmenCore-3.7.0-win-x64.zip` | 104.89 MB | `570E1058D7EED9D0E2FA9D490BE1CFFC67169B12A3B987948D07D7DAFAC105AC` |
+| `OmenCore-3.7.0-linux-x64.zip` | 43.57 MB | `C2003ACDEC74AD0A45FAB5F07E42AFB5F8AF3EBD29F15F86E0E79CBAB58060DF` |
 
 Known validation limits:
 
@@ -350,7 +405,7 @@ Known validation limits:
 Pending validation before release sign-off:
 
 - Physical OMEN 16-xd0xxx / ProductId `8BCD` fan RPM behavior under sustained load.
-- Physical OMEN 16-am0xxx / ProductId `8D2F` confirmation that Performance mode applies through the WMI policy path when direct CPU PL1/PL2 limits are unavailable.
+- Physical OMEN 16-am0xxx / ProductId `8D2F` confirmation that Performance mode applies through the WMI policy path when direct CPU PL1/PL2 limits are unavailable, and that General no longer falls back to `Custom` after a confirmed Performance apply.
 - Physical OMEN MAX 16-ah0xxx / ProductId `8D41` confirmation that Quick Profiles now hold >100W GPU behavior through the WMI thermal-policy fallback without requiring a manual Max fan toggle.
 - Physical OMEN MAX 16-ah0xxx / ProductId `8D41` confirmation of HID per-key RGB behavior; WMI ColorTable remains the fallback until verified.
 - Physical Victus 16-s0xxx / RTX 3050 confirmation that the NVIDIA Tuning page now shows Power Limit as locked when NVAPI/firmware rejects power-policy writes, while core/memory OC still applies.

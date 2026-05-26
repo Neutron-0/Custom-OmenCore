@@ -256,6 +256,8 @@ hp_wmi.force_multiplex=1
 
 Arch-family users may also try `hp-omen-gaming-wmi-dkms` from AUR. On many OMEN systems it effectively automates the hp-wmi profile setup that otherwise requires manual multiplex/path tuning. It is still not guaranteed to resolve profile control on every board.
 
+OmenCore 3.7.0 has an experimental compatibility layer for this path. It does not install or manage DKMS packages, but when a DKMS or patched upstream `hp_wmi` module exposes standard `hp-wmi`/`hwmon` files (`pwm*_enable`, `pwm*`, `fan*_input`, profile files), OmenCore detects the backend in `status` and `diagnose --report` and uses the same safe sysfs controls it uses for upstream hp-wmi.
+
 If profile control still fails after these steps, collect a report:
 
 ```bash

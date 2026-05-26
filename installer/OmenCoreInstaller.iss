@@ -49,7 +49,7 @@ Name: "autostart"; Description: "Start OmenCore with Windows"; GroupDescription:
 ; Self-contained app with embedded .NET runtime - no separate .NET installation needed
 Source: "{#MyPublishDir}\\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; PawnIO installer (optional)
-Source: "PawnIO_setup.exe"; DestDir: "{tmp}"; Flags: ignoreversion deleteafterinstall; Tasks: installpawnio; Check: PawnIOInstallerExists
+Source: "PawnIO_setup.exe"; DestDir: "{tmp}"; Flags: ignoreversion deleteafterinstall; Tasks: installpawnio
 ; Default config
 Source: "..\\config\\default_config.json"; DestDir: "{app}\\config"; Flags: ignoreversion onlyifdoesntexist
 
@@ -61,7 +61,7 @@ Name: "{autodesktop}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"; Tasks: 
 
 [Run]
 ; Install PawnIO driver if bundled (note: PawnIO uses -silent not /SILENT)
-Filename: "{tmp}\PawnIO_setup.exe"; Parameters: "-silent"; StatusMsg: "Installing PawnIO driver (Secure Boot compatible)..."; Flags: waituntilterminated; Tasks: installpawnio; Check: PawnIOInstallerExists and not IsPawnIOInstalled
+Filename: "{tmp}\PawnIO_setup.exe"; Parameters: "-silent"; StatusMsg: "Installing PawnIO driver (Secure Boot compatible)..."; Flags: waituntilterminated runhidden; Tasks: installpawnio; Check: not IsPawnIOInstalled
 ; Create scheduled task for autostart if user selected it (runs with elevated privileges)
 Filename: "schtasks"; Parameters: "/create /tn ""OmenCore"" /tr ""\""{app}\\{#MyAppExeName}\"" --minimized"" /sc onlogon /rl highest /f"; Flags: runhidden; Tasks: autostart
 ; Launch OmenCore with elevation (shellexec verb=runas)
@@ -78,11 +78,6 @@ Filename: "schtasks"; Parameters: "/delete /tn ""OmenCore"" /f"; Flags: runhidde
 Type: dirifempty; Name: "{app}"
 
 [Code]
-function PawnIOInstallerExists: Boolean;
-begin
-  Result := FileExists(ExpandConstant('{src}\\PawnIO_setup.exe'));
-end;
-
 function IsPawnIOInstalled: Boolean;
 var
   InstallPath: String;

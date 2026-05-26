@@ -1365,6 +1365,22 @@
                             </StackPanel>
                         </Border>
 
+                        <Border Background="#2D2D1F"
+                                BorderBrush="#FF9800"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="10,8"
+                                Margin="0,0,0,16"
+                                Visibility="{Binding GpuModeSwitchingUnsupported, Converter={StaticResource BoolToVisibility}}">
+                            <StackPanel>
+                                <TextBlock Text="GPU Mode Switching Unavailable" FontSize="11" FontWeight="SemiBold" Foreground="#FF9800" Margin="0,0,0,4"/>
+                                <TextBlock Text="{Binding GpuModeSwitchingStatusText}"
+                                           FontSize="10"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
                         <!-- Current GPU Mode -->
                         <Grid Margin="0,0,0,16">
                             <Grid.ColumnDefinitions>
@@ -1400,12 +1416,14 @@
                                       Style="{StaticResource ModernComboBox}"
                                       ItemsSource="{Binding GpuSwitchModes}"
                                       SelectedItem="{Binding SelectedGpuMode}"
+                                      IsEnabled="{Binding GpuModeSwitchingSupported}"
                                       Margin="0,0,12,0"/>
                             
                             <Button Grid.Column="2" 
                                     Content="Apply (Requires Restart)" 
                                     Style="{StaticResource ModernButton}"
                                     Command="{Binding SwitchGpuModeCommand}"
+                                    IsEnabled="{Binding GpuModeSwitchingSupported}"
                                     Padding="16,8"/>
                         </Grid>
 

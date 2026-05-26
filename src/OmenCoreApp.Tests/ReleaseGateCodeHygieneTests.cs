@@ -57,10 +57,10 @@ namespace OmenCoreApp.Tests
             "FanControllerFactory.cs:1200", // shifted from :1197 after WMI wrapper external-reset status properties
             "FanControllerFactory.cs:1218", // shifted from :1215 after WMI wrapper external-reset status properties
             "HardwareWorkerClient.cs:468",
-            "LibreHardwareMonitorImpl.cs:2106", // shifted from :2101 after timeout-path cleanup edits
-            "LibreHardwareMonitorImpl.cs:2235", // shifted from :2230 after timeout-path cleanup edits
-            "LibreHardwareMonitorImpl.cs:2261", // shifted from :2256 after timeout-path cleanup edits
-            "LibreHardwareMonitorImpl.cs:2267", // shifted from :2262 after timeout-path cleanup edits
+            "LibreHardwareMonitorImpl.cs:2090", // shifted from :2106 after 3.7.0 live temperature projection cleanup
+            "LibreHardwareMonitorImpl.cs:2219", // shifted from :2235 after 3.7.0 live temperature projection cleanup
+            "LibreHardwareMonitorImpl.cs:2245", // shifted from :2261 after 3.7.0 live temperature projection cleanup
+            "LibreHardwareMonitorImpl.cs:2251", // shifted from :2267 after 3.7.0 live temperature projection cleanup
             "MsrAccessFactory.cs:76",
             "NvapiService.cs:1282",
             "NvapiService.cs:1299",
@@ -77,8 +77,8 @@ namespace OmenCoreApp.Tests
             "PawnIOEcAccess.cs:236",
             "PawnIOMsrAccess.cs:112",
             "RyzenSmu.cs:143",
-            "ThermalSensorProvider.cs:82", // shifted from :78 after timeout-path cleanup edits
-            "ThermalSensorProvider.cs:96", // shifted from :92 after timeout-path cleanup edits
+            "ThermalSensorProvider.cs:86", // shifted from :82 after 3.7.0 live temperature projection cleanup
+            "ThermalSensorProvider.cs:101", // shifted from :96 after 3.7.0 live temperature projection cleanup
             "WmiBiosMonitor.cs:332",
             "WmiBiosMonitor.cs:563",
             "WmiBiosMonitor.cs:1007",
@@ -174,6 +174,23 @@ namespace OmenCoreApp.Tests
             return Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories)
                 .Where(f => !f.Contains(Path.DirectorySeparatorChar + "obj" + Path.DirectorySeparatorChar)
                          && !f.Contains(Path.DirectorySeparatorChar + "bin" + Path.DirectorySeparatorChar));
+        }
+
+        private static string? FindRepoRoot()
+        {
+            var dir = new DirectoryInfo(AppContext.BaseDirectory);
+            for (var i = 0; i < 12 && dir != null; i++)
+            {
+                if (File.Exists(Path.Combine(dir.FullName, "OmenCore.sln")) &&
+                    Directory.Exists(Path.Combine(dir.FullName, "installer")))
+                {
+                    return dir.FullName;
+                }
+
+                dir = dir.Parent;
+            }
+
+            return null;
         }
 
         // ─── Bare catch {} — helper ───────────────────────────────────────────
@@ -410,6 +427,28 @@ namespace OmenCoreApp.Tests
                 "tray refresh should avoid repeating identical menu header mutations on every timer tick");
             content.Should().Contain("_lastRenderedBadgeTemperature",
                 "tray icon badge regeneration should be bounded by visible temperature changes instead of every refresh tick");
+        }
+
+        [Fact]
+        public void Installer_PawnIoBundledInstallerRunsSilentlyFromEmbeddedTempFile()
+        {
+            var repoRoot = FindRepoRoot();
+            if (repoRoot == null)
+                return;
+
+            var path = Path.Combine(repoRoot, "installer", "OmenCoreInstaller.iss");
+            var content = File.ReadAllText(path);
+
+            content.Should().Contain("Source: \"PawnIO_setup.exe\"; DestDir: \"{tmp}\"",
+                "the release installer must embed the PawnIO setup and extract it to the installer temp folder");
+            content.Should().Contain("Filename: \"{tmp}\\PawnIO_setup.exe\"; Parameters: \"-silent\"",
+                "PawnIO should be installed silently from the bundled temp copy when the task is selected");
+            content.Should().Contain("Flags: waituntilterminated runhidden",
+                "the PawnIO sub-installer should run without surfacing a separate installer window");
+            content.Should().Contain("Check: not IsPawnIOInstalled",
+                "the sub-installer should still be skipped on machines where PawnIO is already present");
+            content.Should().NotContain("PawnIOInstallerExists",
+                "runtime checks against {src} can fail for a single bundled setup EXE and silently skip PawnIO extraction/install");
         }
 
         [Fact]

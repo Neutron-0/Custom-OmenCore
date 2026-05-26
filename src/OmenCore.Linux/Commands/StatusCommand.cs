@@ -114,6 +114,10 @@ public static class StatusCommand
                     EcIoPathExists = ecIoPathExists,
                     HpWmiPathExists = hpWmiPathExists,
                     HasHwmonFanAccess = ec.HasHwmonFanAccess,
+                    HasHpWmiDkmsCompatibleFanBackend = ec.HasHpWmiDkmsCompatibleFanBackend,
+                    HpWmiModuleLooksDkms = ec.HpWmiModuleLooksDkms,
+                    HpWmiModuleSource = ec.HpWmiModuleSource,
+                    HpWmiCompatibilityLabel = ec.HpWmiCompatibilityLabel,
                     HasThermalProfilePath = hasThermalProfilePath,
                     HasPlatformProfilePath = hasPlatformProfilePath,
                     HasAcpiPlatformProfilePath = hasAcpiPlatformProfilePath,
@@ -180,6 +184,7 @@ public static class StatusCommand
         Console.WriteLine($"║    EC io path: {(ecIoPathExists ? "present" : "missing"),-42} ║");
         Console.WriteLine($"║    hp-wmi path: {(hpWmiPathExists ? "present" : "missing"),-41} ║");
         Console.WriteLine($"║    hwmon fan control: {(ec.HasHwmonFanAccess ? "present" : "missing"),-35} ║");
+        Console.WriteLine($"║    hp-wmi backend: {Truncate(ec.HpWmiCompatibilityLabel, 38),-38} ║");
         Console.WriteLine($"║    thermal/platform profile path: {Truncate($"{(hasThermalProfilePath ? "thermal" : "-")}/{(hasPlatformProfilePath ? "platform" : "-")}/{(hasAcpiPlatformProfilePath ? "acpi" : "-")}", 25),-25} ║");
         Console.WriteLine("╠═══════════════════════════════════════════════════════════╣");
         Console.WriteLine("║  TEMPERATURES                                             ║");

@@ -70,6 +70,12 @@ class Program
     private static int _consecutiveZeroBatteryReads = 0;
     private const int MaxZeroBatteryReadsBeforeDisable = 3;
 
+    // AMD ADL crash containment: if LHM triggers access violations in the AMD GPU path,
+    // quarantine AMD GPU telemetry and keep CPU/fan/memory reporting alive.
+    private static bool _amdGpuTelemetryQuarantined = false;
+    private static string _amdGpuTelemetryQuarantineReason = string.Empty;
+    private static int _amdGpuTelemetryAccessViolationCount = 0;
+
     // Buffered file logging to avoid high-frequency synchronous disk writes.
     private static readonly ConcurrentQueue<string> _pendingLogLines = new();
     private static readonly AutoResetEvent _logSignal = new(false);
@@ -523,8 +529,9 @@ class Program
             }
             catch (AccessViolationException ex)
             {
-                // NVML crash - log and continue (may crash process anyway)
-                LogToFile($"[{DateTime.Now:O}] NVML ACCESS VIOLATION: {ex.Message}\n");
+                _amdGpuTelemetryAccessViolationCount++;
+                LogToFile($"[{DateTime.Now:O}] ACCESS VIOLATION in worker loop (count={_amdGpuTelemetryAccessViolationCount}): {ex}\n");
+                ActivateAmdGpuTelemetryQuarantine($"Access violation in hardware update loop: {ex.Message}");
             }
             catch (Exception ex)
             {
@@ -572,6 +579,8 @@ class Program
                 CpuLoad = _lastSample.CpuLoad,
                 CpuPower = _lastSample.CpuPower,
                 GpuName = _lastSample.GpuName,
+                IsAmdGpuTelemetryQuarantined = _amdGpuTelemetryQuarantined,
+                AmdGpuTelemetryQuarantineReason = _amdGpuTelemetryQuarantineReason,
                 GpuTemperature = _lastSample.GpuTemperature,
                 GpuHotspot = _lastSample.GpuHotspot,
                 GpuLoad = _lastSample.GpuLoad,
@@ -600,6 +609,12 @@ class Program
             {
                 try
                 {
+                    if (_amdGpuTelemetryQuarantined && hardware.HardwareType == HardwareType.GpuAmd)
+                    {
+                        // Skip unstable AMD ADL-backed updates after quarantine is activated.
+                        continue;
+                    }
+
                     // CRITICAL: Isolate each hardware device update in its own try-catch
                     // If storage drives go to sleep, their SafeFileHandle gets disposed,
                     // but we must not let that crash CPU/GPU monitoring
@@ -931,6 +946,15 @@ class Program
                 
             case HardwareType.GpuNvidia:
             case HardwareType.GpuAmd:
+                if (_amdGpuTelemetryQuarantined && hardware.HardwareType == HardwareType.GpuAmd)
+                {
+                    if (string.IsNullOrWhiteSpace(sample.GpuName))
+                    {
+                        sample.GpuName = "AMD GPU telemetry disabled (ADL quarantine)";
+                    }
+                    break;
+                }
+
                 // GPU Temperature - prefer Core over Hotspot (more stable)
                 var gpuTemp = GetSensorValueMulti(hardware, SensorType.Temperature, 
                     "GPU Core", "Core");
@@ -1077,6 +1101,36 @@ class Program
                 }
                 break;
         }
+    }
+
+    private static void ActivateAmdGpuTelemetryQuarantine(string reason)
+    {
+        if (_amdGpuTelemetryQuarantined)
+        {
+            return;
+        }
+
+        bool hasAmdGpu = false;
+        try
+        {
+            hasAmdGpu = _computer?.Hardware?.Any(h => h.HardwareType == HardwareType.GpuAmd) == true;
+        }
+        catch
+        {
+            hasAmdGpu = false;
+        }
+
+        if (!hasAmdGpu)
+        {
+            return;
+        }
+
+        _amdGpuTelemetryQuarantined = true;
+        _amdGpuTelemetryQuarantineReason = reason;
+        var message = $"[{DateTime.Now:O}] AMD GPU telemetry quarantined after instability: {reason}. " +
+                      "CPU/fan/memory telemetry continues; AMD GPU metrics are skipped until worker restart.";
+        Console.WriteLine(message);
+        LogToFile(message + "\n");
     }
 
     private static void ProcessSubHardware(IHardware subHardware, HardwareSample sample)
@@ -1430,6 +1484,8 @@ public class HardwareSample
     
     // GPU
     public string GpuName { get; set; } = "";
+    public bool IsAmdGpuTelemetryQuarantined { get; set; }
+    public string AmdGpuTelemetryQuarantineReason { get; set; } = "";
     public double GpuTemperature { get; set; }
     public double GpuHotspot { get; set; }
     public double GpuLoad { get; set; }

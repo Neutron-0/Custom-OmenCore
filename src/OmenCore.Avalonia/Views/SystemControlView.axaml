@@ -71,6 +71,20 @@
                                          IsVisible="{Binding IsPerformanceModeChanging}" />
                         </StackPanel>
                     </Border>
+
+                    <Button Classes="secondary"
+                            Content="Re-detect Linux Controls"
+                            Command="{Binding RefreshCapabilitiesCommand}"
+                            IsVisible="{Binding !CanSetPerformanceMode}"
+                            Margin="0,10,0,0"
+                            HorizontalAlignment="Left" />
+
+                        <Button Classes="ghost"
+                            Content="Show Linux Diagnostic Commands"
+                            Command="{Binding ShowLinuxDiagnosticsHelpCommand}"
+                            IsVisible="{Binding !CanSetPerformanceMode}"
+                            Margin="0,8,0,0"
+                            HorizontalAlignment="Left" />
                 </StackPanel>
             </Border>
             
@@ -199,9 +213,18 @@
             <!-- Status Message -->
             <Border Classes="infoBanner" 
                     IsVisible="{Binding StatusMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-                <StackPanel Orientation="Horizontal" Spacing="8">
-                    <TextBlock Text="ℹ️" FontSize="14" />
-                    <TextBlock Text="{Binding StatusMessage}" />
+                <StackPanel Spacing="8">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="ℹ️" FontSize="14" />
+                        <TextBlock Text="{Binding StatusMessage}" TextWrapping="Wrap" />
+                    </StackPanel>
+
+                    <Expander Header="Details"
+                              IsVisible="{Binding StatusDetails, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                        <TextBlock Text="{Binding StatusDetails}"
+                                   TextWrapping="Wrap"
+                                   Margin="0,6,0,0" />
+                    </Expander>
                 </StackPanel>
             </Border>
             

@@ -2,9 +2,11 @@
 
 ## Current Status
 
-OmenCore v3.7.0 no longer ships or supports the legacy WinRing0 EC backend. Direct EC/MSR access is PawnIO-only.
+The rebuilt OmenCore v3.7.0 packages no longer ship or support the legacy WinRing0 EC backend. Direct EC/MSR access is PawnIO-only, and the hardware worker now uses the PawnIO-backed LibreHardwareMonitor package.
 
-If Defender still shows a WinRing0 alert, it is probably detecting a leftover driver file or another hardware utility rather than the current OmenCore EC backend.
+If Defender shows `VulnerableDriver:WinNT/Winring0` on `C:\Program Files\OmenCore\OmenCore.HardwareWorker.sys`, the installed build is older than the rebuilt v3.7.0 packages or the file was left behind during upgrade. Remove the old install folder, reinstall the rebuilt package, and reboot.
+
+If Defender still shows a WinRing0 alert after reinstalling, it is probably detecting a leftover driver file or another hardware utility rather than the current OmenCore EC backend or hardware worker.
 
 ## Common Sources Of WinRing0 Alerts
 
@@ -12,6 +14,7 @@ If Defender still shows a WinRing0 alert, it is probably detecting a leftover dr
 - Temporary extracted driver files under `%TEMP%`
 - Intel XTU, ThrottleStop, OmenMon, OpenHardwareMonitor, or LibreHardwareMonitor
 - Older OmenCore folders that were not removed before upgrading
+- Older OmenCore prerelease packages that extracted `OmenCore.HardwareWorker.sys`
 
 ## Recommended Action
 
@@ -23,4 +26,4 @@ If Defender still shows a WinRing0 alert, it is probably detecting a leftover dr
 
 ## Supported Driver Direction
 
-PawnIO is the supported direct hardware backend because it is compatible with Secure Boot-oriented systems and avoids the legacy WinRing0 backend path that caused repeated Defender confusion.
+PawnIO is the supported direct hardware backend because it is compatible with Secure Boot-oriented systems and avoids the legacy WinRing0 backend path that caused repeated Defender confusion. Rebuilt v3.7.0 packages also avoid the older LibreHardwareMonitor worker path that could create `OmenCore.HardwareWorker.sys`.

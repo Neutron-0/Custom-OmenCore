@@ -3751,36 +3751,7 @@ namespace OmenCore.ViewModels
                 {
                     await dispatcher.InvokeAsync(() =>
                     {
-                        if (FanModeNameResolver.IsCustomAlias(mode))
-                        {
-                            targetPreset = ResolveQuickAccessCurvePreset();
-                        }
-                        else if (FanModeNameResolver.IsMaxAlias(mode))
-                        {
-                            targetPreset = FanPresets.FirstOrDefault(p => p.Name.Equals("Max", StringComparison.OrdinalIgnoreCase))
-                                ?? FanPresets.FirstOrDefault(p => p.Name.Contains("Max", StringComparison.OrdinalIgnoreCase));
-                        }
-                        else if (FanModeNameResolver.IsQuietAlias(mode))
-                        {
-                            targetPreset = FanPresets.FirstOrDefault(p =>
-                                p.Name.Contains("Quiet", StringComparison.OrdinalIgnoreCase) ||
-                                p.Name.Contains("Silent", StringComparison.OrdinalIgnoreCase));
-                        }
-                        else if (FanModeNameResolver.IsPerformanceAlias(mode))
-                        {
-                            targetPreset = FanPresets.FirstOrDefault(p => p.Name.Contains("Extreme", StringComparison.OrdinalIgnoreCase))
-                                ?? FanPresets.FirstOrDefault(p => p.Name.Contains("Gaming", StringComparison.OrdinalIgnoreCase))
-                                ?? FanPresets.FirstOrDefault(p => p.Name.Contains("Performance", StringComparison.OrdinalIgnoreCase))
-                                ?? FanPresets.FirstOrDefault(p => p.Name.Contains("Turbo", StringComparison.OrdinalIgnoreCase))
-                                ?? FanPresets.FirstOrDefault(p => p.Mode == FanMode.Performance)
-                                ?? FanPresets.FirstOrDefault(p => p.Name.Equals("Max", StringComparison.OrdinalIgnoreCase));
-                        }
-                        else
-                        {
-                            targetPreset = FanPresets.FirstOrDefault(p =>
-                                p.Name.Contains("Auto", StringComparison.OrdinalIgnoreCase) ||
-                                p.Name.Contains("Balanced", StringComparison.OrdinalIgnoreCase));
-                        }
+                        targetPreset = ResolveTrayFanPreset(mode);
                     });
                 }
 
@@ -3810,9 +3781,11 @@ namespace OmenCore.ViewModels
                         }
                         return;
                     }
-                    var confirmedModeName = _fanService.GetCurrentFanMode()
-                        ?? _fanService.ActivePresetName
-                        ?? targetPreset.Name;
+                    var confirmedModeName = ResolveQuickAccessConfirmedMode(
+                        mode,
+                        targetPreset,
+                        _fanService.GetCurrentFanMode(),
+                        _fanService.ActivePresetName);
                     if (dispatcher != null)
                     {
                         await dispatcher.InvokeAsync(() =>
@@ -3836,6 +3809,76 @@ namespace OmenCore.ViewModels
                     }
                 }
             });
+        }
+
+        private FanPreset? ResolveTrayFanPreset(string mode)
+        {
+            if (FanModeNameResolver.IsCustomAlias(mode))
+            {
+                return ResolveQuickAccessCurvePreset();
+            }
+
+            if (FanModeNameResolver.IsMaxAlias(mode))
+            {
+                return FanPresets.FirstOrDefault(p => p.Name.Equals("Max", StringComparison.OrdinalIgnoreCase))
+                    ?? FanPresets.FirstOrDefault(p => FanModeNameResolver.IsMaxAlias(p.Name))
+                    ?? FanPresets.FirstOrDefault(p => p.Mode == FanMode.Max);
+            }
+
+            if (FanModeNameResolver.IsQuietAlias(mode))
+            {
+                return FanPresets.FirstOrDefault(p => p.Name.Equals("Quiet", StringComparison.OrdinalIgnoreCase))
+                    ?? FanPresets.FirstOrDefault(p => p.Mode == FanMode.Quiet && !FanModeNameResolver.IsAutoAlias(p.Name))
+                    ?? FanPresets.FirstOrDefault(p =>
+                        FanModeNameResolver.IsQuietAlias(p.Name) &&
+                        !FanModeNameResolver.IsAutoAlias(p.Name));
+            }
+
+            if (FanModeNameResolver.IsPerformanceAlias(mode))
+            {
+                return FanPresets.FirstOrDefault(p => p.Name.Contains("Extreme", StringComparison.OrdinalIgnoreCase))
+                    ?? FanPresets.FirstOrDefault(p => p.Name.Contains("Gaming", StringComparison.OrdinalIgnoreCase))
+                    ?? FanPresets.FirstOrDefault(p => p.Name.Contains("Performance", StringComparison.OrdinalIgnoreCase))
+                    ?? FanPresets.FirstOrDefault(p => p.Name.Contains("Turbo", StringComparison.OrdinalIgnoreCase))
+                    ?? FanPresets.FirstOrDefault(p => p.Mode == FanMode.Performance)
+                    ?? FanPresets.FirstOrDefault(p => FanModeNameResolver.IsPerformanceAlias(p.Name));
+            }
+
+            return FanPresets.FirstOrDefault(p => p.Name.Equals("Auto", StringComparison.OrdinalIgnoreCase))
+                ?? FanPresets.FirstOrDefault(p => p.Mode == FanMode.Auto)
+                ?? FanPresets.FirstOrDefault(p =>
+                    FanModeNameResolver.IsAutoAlias(p.Name) &&
+                    !FanModeNameResolver.IsQuietAlias(p.Name));
+        }
+
+        private static string ResolveQuickAccessConfirmedMode(
+            string requestedMode,
+            FanPreset targetPreset,
+            string? runtimeFanMode,
+            string? activePresetName)
+        {
+            var confirmed = runtimeFanMode;
+            if (string.IsNullOrWhiteSpace(confirmed))
+            {
+                confirmed = activePresetName;
+            }
+
+            if (string.IsNullOrWhiteSpace(confirmed))
+            {
+                confirmed = targetPreset.Name;
+            }
+
+            // On some decoupled WMI paths, the immediate runtime fan-mode readback can still
+            // report Auto even though the requested non-Auto preset was accepted and is active.
+            // Prefer the requested preset identity for Quick Access confirmation in this case.
+            if (!FanModeNameResolver.IsAutoAlias(requestedMode) &&
+                FanModeNameResolver.IsAutoAlias(confirmed) &&
+                !FanModeNameResolver.IsAutoAlias(targetPreset.Name))
+            {
+                return targetPreset.Name;
+            }
+
+            return confirmed;
         }
 
         private FanPreset? ResolveQuickAccessCurvePreset()
@@ -4165,8 +4208,17 @@ namespace OmenCore.ViewModels
                 try
                 {
                     FanControl.ApplyFanMode(targetMode);
-                    ShowHotkeyOsd("Fan Mode", nextMode, "Ctrl+Shift+F");
-                    PushEvent($"🌀 Fan: {nextMode} (hotkey)");
+
+                    var confirmedFanMode = _fanService.GetCurrentFanMode()
+                        ?? _fanService.ActivePresetName
+                        ?? nextMode;
+
+                    CurrentFanMode = confirmedFanMode;
+                    General?.SyncRuntimeState(CurrentPerformanceMode, confirmedFanMode);
+
+                    // Show what actually got applied, not only what we requested.
+                    ShowHotkeyOsd("Fan Mode", confirmedFanMode, "Ctrl+Shift+F");
+                    PushEvent($"🌀 Fan: {confirmedFanMode} (hotkey)");
                 }
                 catch (Exception ex)
                 {
@@ -4502,6 +4554,22 @@ namespace OmenCore.ViewModels
         {
             _hotkeyCoordinator.EnqueueUiAction("ShowWindow", () =>
             {
+                var mainWindow = Application.Current.MainWindow;
+                if (mainWindow == null)
+                {
+                    _logging.Warn("Show/toggle window: MainWindow is null");
+                    return;
+                }
+
+                bool isWindowShown = mainWindow.IsVisible && mainWindow.WindowState != WindowState.Minimized;
+                if (isWindowShown)
+                {
+                    mainWindow.Hide();
+                    mainWindow.ShowInTaskbar = false;
+                    _logging.Info("Window hidden from ShowWindow hotkey");
+                    return;
+                }
+
                 ShowMainWindowFromHotkey(navigateToMonitoring: false);
             });
         }

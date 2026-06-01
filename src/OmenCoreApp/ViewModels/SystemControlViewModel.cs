@@ -3045,6 +3045,8 @@ namespace OmenCore.ViewModels
 
         private void InitializeCpuPowerLimits()
         {
+            bool is8d2fIntelCoreUltra = IsIntelCoreUltraOn8d2f();
+
             if (_msrAccess == null || !_msrAccess.IsAvailable)
             {
                 CpuPowerLimitsAvailable = false;
@@ -3069,16 +3071,24 @@ namespace OmenCore.ViewModels
                     CpuPowerLimitsLocked = true;
                     CpuPl1Watts = Math.Max(CpuPl1Watts, 15);
                     CpuPl2Watts = Math.Max(CpuPl2Watts, 25);
-                    CpuPowerLimitsStatus = "MSR package limits unavailable - HP firmware may require OMEN performance modes/Unleashed mode";
-                    _logging.Warn("CPU power limit MSR readback returned 0W/0W; treating direct PL1/PL2 sliders as unavailable instead of projecting writable limits");
+                    CpuPowerLimitsStatus = is8d2fIntelCoreUltra
+                        ? "MSR package limits unavailable on 8D2F Intel path - use OMEN/OGH mode policy control"
+                        : "MSR package limits unavailable - HP firmware may require OMEN performance modes/Unleashed mode";
+                    _logging.Warn(is8d2fIntelCoreUltra
+                        ? "CPU power limit MSR readback returned 0W/0W on 8D2F Intel Core Ultra path; treating direct PL1/PL2 sliders as firmware-managed while allowing OMEN/OGH mode policy control"
+                        : "CPU power limit MSR readback returned 0W/0W; treating direct PL1/PL2 sliders as unavailable instead of projecting writable limits");
                     return;
                 }
 
                 if (isLocked)
                 {
                     CpuPowerLimitsAvailable = true;
-                    CpuPowerLimitsStatus = $"⚠️ BIOS Locked - Read-only (PL1: {pl1:F0}W, PL2: {pl2:F0}W)";
-                    _logging.Warn("CPU power limits are locked by BIOS - cannot modify until next reboot");
+                    CpuPowerLimitsStatus = is8d2fIntelCoreUltra
+                        ? $"⚠️ BIOS Locked - Read-only (PL1: {pl1:F0}W, PL2: {pl2:F0}W). Mode policy still applies via OMEN/OGH"
+                        : $"⚠️ BIOS Locked - Read-only (PL1: {pl1:F0}W, PL2: {pl2:F0}W)";
+                    _logging.Warn(is8d2fIntelCoreUltra
+                        ? "CPU power limits are BIOS-locked on 8D2F Intel Core Ultra path; direct PL1/PL2 writes disabled while OMEN/OGH mode policy remains available"
+                        : "CPU power limits are locked by BIOS - cannot modify until next reboot");
                 }
                 else
                 {
@@ -3128,7 +3138,8 @@ namespace OmenCore.ViewModels
                 System.Windows.MessageBox.Show(
                     "CPU power limits are locked by BIOS and cannot be modified.\n\n" +
                     "This lock is set during boot and persists until the next restart.\n" +
-                    "Some laptops may require specific BIOS settings or Unleashed Mode to unlock.",
+                    "Some laptops may require specific BIOS settings or Unleashed Mode to unlock.\n\n" +
+                    "If you are on OMEN 16-am0xxx (8D2F) Intel Core Ultra, direct PL1/PL2 sliders may stay locked while OMEN/OGH performance mode policy still works.",
                     "Power Limits Locked",
                     System.Windows.MessageBoxButton.OK,
                     System.Windows.MessageBoxImage.Warning);
@@ -3178,6 +3189,24 @@ namespace OmenCore.ViewModels
                     System.Windows.MessageBoxButton.OK,
                     System.Windows.MessageBoxImage.Error);
             }
+        }
+
+        private bool IsIntelCoreUltraOn8d2f()
+        {
+            var sysInfo = _systemInfoService?.GetSystemInfo();
+            if (sysInfo == null)
+            {
+                return false;
+            }
+
+            var productId = (sysInfo.ProductName ?? string.Empty).Trim();
+            var cpuName = sysInfo.CpuName ?? string.Empty;
+            var cpuVendor = sysInfo.CpuVendor ?? string.Empty;
+            var isIntel = cpuVendor.Contains("Intel", StringComparison.OrdinalIgnoreCase) ||
+                          cpuName.Contains("Intel", StringComparison.OrdinalIgnoreCase);
+            var isCoreUltra = cpuName.Contains("Core Ultra", StringComparison.OrdinalIgnoreCase);
+
+            return string.Equals(productId, "8D2F", StringComparison.OrdinalIgnoreCase) && isIntel && isCoreUltra;
         }
 
         private void ResetCpuPowerLimits()

@@ -517,7 +517,8 @@ namespace OmenCore.Hardware
             
             // OMEN 16 (2024) - xd series (AMD)
             // Community report: Product ID 8BCD, RTX 4050 + AMD Radeon iGPU
-            // V1 ThermalPolicy, MaxFanLevel=55, 2 fans, WMI fan control works
+            // V1 ThermalPolicy, 2 fans, WMI fan control works.
+            // Field validation indicates fan-level ceiling reaches 63 (~6300 RPM).
             AddModel(new ModelCapabilities
             {
                 ProductId = "8BCD",
@@ -530,13 +531,13 @@ namespace OmenCore.Hardware
                 SupportsFanCurves = true,
                 SupportsIndependentFanCurves = false,
                 FanZoneCount = 2,
-                MaxFanLevel = 55,
+                MaxFanLevel = 63,
                 SupportsPerformanceModes = true,
                 HasMuxSwitch = true,
                 SupportsGpuPowerBoost = true,
                 HasFourZoneRgb = true,
                 UserVerified = false,
-                Notes = "Discord 2026-05-20 - OMEN 16-xd0xxx / ProductId 8BCD (Ryzen + RTX 4050). V1 WMI fan control, MaxFanLevel=55; direct EC and independent curves disabled pending register-layout validation. WMI auto-handoff keeps the 8BCD manual-floor clear exception."
+                Notes = "Discord 2026-05-20 + field follow-up 2026-05-29 - OMEN 16-xd0xxx / ProductId 8BCD (Ryzen + RTX 4050). V1 WMI fan control with practical fan-level ceiling near 63 (~6300 RPM); direct EC and independent curves disabled pending register-layout validation."
             });
             
             // OMEN 16 (2025) - ap0xxx series (AMD Ryzen AI + RTX 50-series)
@@ -1037,6 +1038,56 @@ namespace OmenCore.Hardware
                 HasKeyboardBacklight = true,
                 UserVerified = false,
                 Notes = "GitHub #105 — Victus 15-fb0xxx. Conservative Victus profile (single-zone backlight)."
+            });
+
+            AddModel(new ModelCapabilities
+            {
+                ProductId = "8C30",
+                ModelName = "HP Victus 15 (2023) fb1xxx",
+                ModelNamePattern = "15-fb1",
+                ModelYear = 2023,
+                Family = OmenModelFamily.Victus,
+                SupportsFanControlWmi = true,
+                SupportsFanControlEc = false,
+                SupportsFanCurves = true,
+                SupportsIndependentFanCurves = false,
+                FanZoneCount = 1,
+                HasMuxSwitch = false,
+                SupportsGpuPowerBoost = false,
+                SupportsUndervolt = false,
+                AllowDecoupledWmiThermalPolicyFallback = true,
+                HasFourZoneRgb = false,
+                HasKeyboardBacklight = true,
+                UserVerified = false,
+                Notes = "GitHub #135 diagnostics — Victus 15-fb1xxx exact ProductId 8C30. Conservative Victus profile: WMI fan/profile control retained, direct EC writes disabled, single-zone backlight assumed pending broader field verification."
+            });
+
+            // Victus 15 (2023) - fb1xxx series
+            // GitHub Issue #135: Victus 15-fb1xxx was unresolved by model identity and
+            // performance mode changes could fall into the wrong backend path. Keep this
+            // profile conservative: no direct EC writes, retain WMI fan/profile control,
+            // and allow OEM WMI thermal-policy fallback when EC/MSR power-limit writes are
+            // unavailable.
+            AddModel(new ModelCapabilities
+            {
+                ProductId = "fb1xxx_victus15_unverified",
+                ModelName = "HP Victus 15 (2023) fb1xxx",
+                ModelNamePattern = "15-fb1",
+                ModelYear = 2023,
+                Family = OmenModelFamily.Victus,
+                SupportsFanControlWmi = true,
+                SupportsFanControlEc = false,
+                SupportsFanCurves = true,
+                SupportsIndependentFanCurves = false,
+                FanZoneCount = 1,
+                HasMuxSwitch = false,
+                SupportsGpuPowerBoost = false,
+                SupportsUndervolt = false,
+                AllowDecoupledWmiThermalPolicyFallback = true,
+                HasFourZoneRgb = false,
+                HasKeyboardBacklight = true,
+                UserVerified = false,
+                Notes = "GitHub #135 — Victus 15-fb1xxx. Conservative Victus profile: WMI fan/profile control retained, direct EC writes disabled, single-zone backlight assumed pending field verification."
             });
 
             // Victus 16 (2023/2024) - d1xxx series

@@ -663,8 +663,22 @@
                     </TabItem.Header>
                 </TabItem>
                 
-                <!-- Custom Tab: Fan curves, power modes, and advanced settings unlocked by Custom profile -->
-                <TabItem x:Name="OmenTabItem" Visibility="{Binding ShowAdvancedControls, Converter={StaticResource BoolToVisibility}}">
+                <!-- Custom Tab: visible only when Custom profile is active -->
+                <TabItem x:Name="OmenTabItem">
+                    <TabItem.Style>
+                        <Style TargetType="TabItem">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                            <Style.Triggers>
+                                <MultiDataTrigger>
+                                    <MultiDataTrigger.Conditions>
+                                        <Condition Binding="{Binding ShowAdvancedControls}" Value="True"/>
+                                        <Condition Binding="{Binding General.IsCustomSelected}" Value="True"/>
+                                    </MultiDataTrigger.Conditions>
+                                    <Setter Property="Visibility" Value="Visible"/>
+                                </MultiDataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TabItem.Style>
                     <TabItem.Header>
                         <StackPanel Orientation="Horizontal">
                             <Path Data="{StaticResource IconCpu}" Style="{StaticResource Omen.TabHeaderIcon}"/>

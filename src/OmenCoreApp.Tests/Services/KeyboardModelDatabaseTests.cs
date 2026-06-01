@@ -61,6 +61,18 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public void GetConfig_ReturnsConfig_For_ProductId_8C30()
+        {
+            var cfg = KeyboardModelDatabase.GetConfig("8C30");
+            cfg.Should().NotBeNull();
+            cfg!.ModelName.Should().Contain("15-fb1xxx");
+            cfg.PreferredMethod.Should().Be(KeyboardMethod.BacklightOnly);
+            cfg.KeyboardType.Should().Be(KeyboardType.BacklightOnly);
+            cfg.UserVerified.Should().BeFalse();
+            cfg.Notes.Should().Contain("GitHub #135 diagnostics");
+        }
+
+        [Fact]
         public void GetConfig_ReturnsConfig_For_ProductId_8E41()
         {
             var cfg = KeyboardModelDatabase.GetConfig("8E41");
@@ -153,6 +165,19 @@ namespace OmenCoreApp.Tests.Services
             cfg.KeyboardType.Should().Be(KeyboardType.FourZone);
             cfg.PreferredMethod.Should().Be(KeyboardMethod.ColorTable2020);
             cfg.Notes.Should().Contain("GitHub #124");
+        }
+
+        [Fact]
+        public void GetConfigByModelName_ReturnsVictus15Fb1Exact8C30_ForIssue135()
+        {
+            var cfg = KeyboardModelDatabase.GetConfigByModelName("Victus by HP Gaming Laptop 15-fb1xxx");
+
+            cfg.Should().NotBeNull();
+            cfg!.ProductId.Should().Be("8C30");
+            cfg.ModelName.Should().Contain("15-fb1xxx");
+            cfg.KeyboardType.Should().Be(KeyboardType.BacklightOnly);
+            cfg.PreferredMethod.Should().Be(KeyboardMethod.BacklightOnly);
+            cfg.Notes.Should().Contain("GitHub #135 diagnostics");
         }
 
         [Fact]

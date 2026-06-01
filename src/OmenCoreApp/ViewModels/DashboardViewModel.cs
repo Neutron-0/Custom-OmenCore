@@ -218,6 +218,8 @@ namespace OmenCore.ViewModels
                 OnPropertyChanged(nameof(FanVisualState));
                 OnPropertyChanged(nameof(PowerVisualState));
                 OnPropertyChanged(nameof(PowerTotalDisplay));
+                OnPropertyChanged(nameof(HasAmdGpuTelemetryQuarantineWarning));
+                OnPropertyChanged(nameof(AmdGpuTelemetryQuarantineWarningText));
             }
         }
 
@@ -905,6 +907,28 @@ namespace OmenCore.ViewModels
         public bool IsTelemetryStale => _monitoringService.HealthStatus == MonitoringHealthStatus.Stale ||
                         _monitoringService.HealthStatus == MonitoringHealthStatus.Degraded;
 
+        public bool HasAmdGpuTelemetryQuarantineWarning =>
+            LatestMonitoringSample?.IsAmdGpuTelemetryQuarantined == true;
+
+        public string AmdGpuTelemetryQuarantineWarningText
+        {
+            get
+            {
+                var sample = LatestMonitoringSample;
+                if (sample?.IsAmdGpuTelemetryQuarantined != true)
+                {
+                    return string.Empty;
+                }
+
+                var reason = string.IsNullOrWhiteSpace(sample.AmdGpuTelemetryQuarantineReason)
+                    ? string.Empty
+                    : $" Reason: {sample.AmdGpuTelemetryQuarantineReason}";
+
+                return "AMD GPU telemetry is temporarily quarantined after a driver/library fault. " +
+                       "CPU, fan, memory, and system telemetry continue normally." + reason;
+            }
+        }
+
         public string TelemetryStateBannerText => _monitoringService.HealthStatus switch
         {
             MonitoringHealthStatus.Stale => "Telemetry stale: sensor data is delayed or frozen. OmenCore is attempting automatic recovery.",
@@ -929,8 +953,18 @@ namespace OmenCore.ViewModels
         
         private void OnHealthStatusChanged(object? sender, MonitoringHealthStatus status)
         {
+            if (!_telemetryProjectionEnabled)
+            {
+                return;
+            }
+
             System.Windows.Application.Current?.Dispatcher?.BeginInvoke(() =>
             {
+                if (!_telemetryProjectionEnabled)
+                {
+                    return;
+                }
+
                 OnPropertyChanged(nameof(MonitoringHealthStatus));
                 OnPropertyChanged(nameof(MonitoringHealthStatusText));
                 OnPropertyChanged(nameof(MonitoringVisualState));
@@ -1097,6 +1131,9 @@ namespace OmenCore.ViewModels
             var gpuPowerChange = Math.Abs(sample.GpuPowerWatts - previous.GpuPowerWatts);
             var fan1RpmChange = Math.Abs(sample.Fan1Rpm - previous.Fan1Rpm);
             var fan2RpmChange = Math.Abs(sample.Fan2Rpm - previous.Fan2Rpm);
+            var amdGpuQuarantineStateChanged =
+                sample.IsAmdGpuTelemetryQuarantined != previous.IsAmdGpuTelemetryQuarantined ||
+                !string.Equals(sample.AmdGpuTelemetryQuarantineReason, previous.AmdGpuTelemetryQuarantineReason, StringComparison.Ordinal);
 
             return cpuTempChange >= UiProjectionTempDelta
                    || gpuTempChange >= UiProjectionTempDelta
@@ -1105,7 +1142,8 @@ namespace OmenCore.ViewModels
                    || cpuPowerChange >= UiProjectionPowerDelta
                    || gpuPowerChange >= UiProjectionPowerDelta
                    || fan1RpmChange >= UiProjectionFanRpmDelta
-                   || fan2RpmChange >= UiProjectionFanRpmDelta;
+                   || fan2RpmChange >= UiProjectionFanRpmDelta
+                   || amdGpuQuarantineStateChanged;
         }
         
         private void UpdateFanCurvePoints(MonitoringSample sample)

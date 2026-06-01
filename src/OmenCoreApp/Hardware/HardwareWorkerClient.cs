@@ -674,6 +674,8 @@ namespace OmenCore.Hardware
         
         // GPU
         public string GpuName { get; set; } = "";
+        public bool IsAmdGpuTelemetryQuarantined { get; set; }
+        public string AmdGpuTelemetryQuarantineReason { get; set; } = "";
         public double GpuTemperature { get; set; }
         public double GpuHotspot { get; set; }
         public double GpuLoad { get; set; }

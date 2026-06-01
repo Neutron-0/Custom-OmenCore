@@ -1,5 +1,5 @@
 {
-  "ecDevicePath": "\\\\.\\WinRing0_1_2",
+  "ecDevicePath": "",
   "monitoringIntervalMs": 750,
   "ecFanRegisterMap": {
     "CPU": 47,

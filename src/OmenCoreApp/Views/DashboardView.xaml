@@ -104,20 +104,35 @@
             </WrapPanel>
         </Grid>
 
-        <!-- Telemetry stale/degraded banner -->
-        <Border Grid.Row="1"
-            Background="#1AE67E22"
-            BorderBrush="#66E67E22"
-            BorderThickness="1"
-            CornerRadius="6"
-            Padding="10,6"
-            Margin="0,0,0,12"
-            Visibility="{Binding IsTelemetryStale, Converter={StaticResource BooleanToVisibilityConverter}}">
-            <TextBlock Text="{Binding TelemetryStateBannerText}"
-                   Foreground="{StaticResource WarningBrush}"
-                   FontSize="11"
-                   TextWrapping="Wrap"/>
-        </Border>
+        <!-- Telemetry state banners -->
+        <StackPanel Grid.Row="1" Margin="0,0,0,12">
+            <Border
+                Background="#1AE67E22"
+                BorderBrush="#66E67E22"
+                BorderThickness="1"
+                CornerRadius="6"
+                Padding="10,6"
+                Margin="0,0,0,8"
+                Visibility="{Binding IsTelemetryStale, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <TextBlock Text="{Binding TelemetryStateBannerText}"
+                       Foreground="{StaticResource WarningBrush}"
+                       FontSize="11"
+                       TextWrapping="Wrap"/>
+            </Border>
+
+            <Border
+                Background="#1A52B788"
+                BorderBrush="#6652B788"
+                BorderThickness="1"
+                CornerRadius="6"
+                Padding="10,6"
+                Visibility="{Binding HasAmdGpuTelemetryQuarantineWarning, Converter={StaticResource BooleanToVisibilityConverter}}">
+                <TextBlock Text="{Binding AmdGpuTelemetryQuarantineWarningText}"
+                       Foreground="#FF52B788"
+                       FontSize="11"
+                       TextWrapping="Wrap"/>
+            </Border>
+        </StackPanel>
 
         <!-- Quick Status Bar (v2.2) -->
         <Border Grid.Row="2" Style="{StaticResource PremiumPanelCardAnimated}" Padding="16,12" Margin="0,0,0,12">

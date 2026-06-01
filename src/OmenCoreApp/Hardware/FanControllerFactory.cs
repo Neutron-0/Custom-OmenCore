@@ -373,9 +373,7 @@ namespace OmenCore.Hardware
             {
                 var conservativeWmiProfile = _capabilities?.ModelConfig != null &&
                     (!_capabilities.ModelConfig.SupportsFanControlEc || !_capabilities.ModelConfig.UserVerified);
-                var allowV1AutoModeFloorClear = !conservativeWmiProfile ||
-                    string.Equals(_capabilities?.ModelConfig?.ProductId, "8BCD", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(_capabilities?.ProductId, "8BCD", StringComparison.OrdinalIgnoreCase);
+                var allowV1AutoModeFloorClear = !conservativeWmiProfile;
                 var controller = new WmiFanController(
                     _libreHwMonitor!,
                     _logging,
@@ -389,7 +387,7 @@ namespace OmenCore.Hardware
                     if (conservativeWmiProfile)
                     {
                         _logging?.Info(allowV1AutoModeFloorClear
-                            ? "WMI fan controller using partial conservative handoff policy (non-strict EC readback, V1 manual-zero floor clear enabled for verified 8BCD handoff)"
+                            ? "WMI fan controller using partial conservative handoff policy (non-strict EC readback, V1 manual-zero floor clear enabled)"
                             : "WMI fan controller using conservative handoff policy (non-strict EC readback, no V1 manual-zero floor clear)");
                     }
 

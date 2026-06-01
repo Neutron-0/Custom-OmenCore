@@ -22,17 +22,31 @@ These fixes landed after the first 3.7.0 prerelease installer/ZIPs were built on
 - **GitHub #134 / OMEN 17-ck1xxx CPU temperature authority:** worker-backed CPU temperature now keeps a recent good worker reading through brief worker timeout/cooldown windows instead of falling back to low/coarse WMI or ACPI readings.
 - **8A43 / OMEN 16-n0xxx fan and CPU telemetry:** ProductId `8A43` now uses the model database 60-level fan ceiling at runtime, keeps stricter fan verification evidence, and adds `OMEN 16-n0xxx` to the worker-backed CPU temperature override path for the Ryzen skin/EC-temperature pattern.
 - **8D2F / OMEN 16-am0xxx General profile recovery:** confirmed `Performance` + `Performance` no longer displays as `Custom`; EC-unsafe direct power-limit writes are blocked and routed through the safer WMI thermal/performance-policy fallback.
+- **Victus 15-fb1xxx / ProductId 8C30 exact support (GitHub #135):** promoted this board from provisional model-name fallback to explicit ProductId `8C30` capability + keyboard mappings using attached diagnostics evidence, so Model Identity resolves directly and performance mode uses the conservative WMI-policy path instead of assuming direct EC control.
+- **Victus/OMEN custom fan ownership drift hardening:** WMI manual keepalive now extends the BIOS fan-ownership countdown even on throttled manual-level ticks, reducing long-session firmware reversion where custom fan plans could silently lose control and drift into BIOS-managed behavior.
+- **HardwareWorker AMD ADL crash containment:** after worker-loop `AccessViolationException` events on AMD ADL paths, the worker now quarantines AMD GPU telemetry updates and keeps CPU/fan/memory monitoring alive instead of repeatedly re-entering the unstable path.
+- **AMD telemetry quarantine visibility:** dashboard health banners now explicitly show when AMD GPU telemetry is quarantined, including the quarantine reason, while confirming that CPU/fan/memory/system telemetry remains active.
 - **8D41 / OMEN MAX 16 follow-up:** expanded OMEN MAX model-string matching for worker-backed CPU temperature override and retained the safe WMI policy path for Quick Profile GPU-power behavior.
 - **8E35 / ap0xxx WMI reliability:** BIOS WMI reliability now scores the final CIM-to-legacy fallback result, avoiding false `6/8`-style "Poor" readings when the legacy fallback succeeds.
 - **8E41 / Transcend 14 preset lag:** non-Max preset transitions now skip the slow no-op `SetFanMax(false)` call unless OmenCore actually enabled Max mode, while still clearing Max when leaving a confirmed Max profile.
 - **8E41 / Custom profile click:** clicking Custom re-applies the last saved custom fan preset when one exists instead of only navigating to the Custom tab.
+- **8BCD / xd0xxx fan-cap correction + auto-handoff safety:** updated the model fan-level ceiling from `55` to `63` (matching ~6300 RPM field behavior) and removed the V1 `SetFanLevel(0,0)` auto-handoff exception on this board to reduce profile-switch RPM drop-to-zero spikes.
+- **8BCD / xd0xxx max-hold drift regression guard:** max-mode maintenance now treats sustained fan-level drops (for example `55/63` while hold is active) as degraded hold telemetry and reasserts max mode after the sustained-drop window instead of treating high RPM alone as healthy.
+- **Hotkey UX hardening (fan/window):** fan cycle OSD now reports the confirmed runtime fan mode after apply (not only the requested target), and `Win+F12` now toggles OmenCore window visibility (show/hide) instead of show-only.
 - **PawnIO installer bundling:** Windows setup now extracts the embedded `PawnIO_setup.exe` to `{tmp}` and runs it hidden with `-silent`, removing the fragile sidecar-file requirement from first-package builds.
 - **Temperature display truthfulness:** General/dashboard temperature projection now shows the latest accepted CPU/GPU readings without display-side step clamps or 3-sample averaging; invalid/zero handoff guards remain.
 - **HardwareWorker fan readback:** top-level LibreHardwareMonitor fan sensors are now collected in addition to sub-hardware fan sensors, improving live RPM coverage on boards that expose fans directly on the main hardware node.
 - **Battery dGPU wake reduction:** expensive NVAPI GPU telemetry refreshes are throttled to a 10-second cadence while unplugged, while lightweight WMI/CPU sampling continues.
 - **Unsupported GPU switching UX:** systems without BIOS WMI GPU-switch support now show an inline disabled state instead of a modal popup.
 - **Linux hp-omen-gaming-wmi-dkms compatibility identity:** Linux status/diagnose now reports whether `hp_wmi` appears DKMS-provided and whether it exposes the standard hp-wmi/hwmon fan backend OmenCore can safely use.
+- **Linux System Control capability refresh (runtime module changes):** Avalonia Linux capability probing now re-runs when profile controls are unavailable and no longer relies on startup-only state, so loading `hp_wmi`/`ec_sys` after launch can recover Performance profile controls without a full app restart.
+- **Linux System Control re-detect action:** added an in-UI "Re-detect Linux Controls" action when Performance profiles are disabled, so users can refresh backend capability wiring after module or sysfs state changes without restarting.
+- **Linux status UX clarity:** System Control now separates short status text from expandable technical details, and adds a one-click "Show Linux Diagnostic Commands" helper so users can capture backend evidence without leaving the UI flow.
+- **Linux board 8787 guidance clarity:** diagnose output now explicitly notes that absence from third-party board lists does not automatically mean unsupported in OmenCore; if ACPI `platform_profile` is exposed, profile switching can still work even when hp-wmi hwmon fan files are missing.
 - **RGB peripheral discovery cleanup:** Corsair/Logitech RGB device discovery now updates bound collections on the WPF dispatcher, removing cross-thread `CollectionView` errors seen during RGB page initialization.
+- **UI command requery coalescing:** `RelayCommand` and `AsyncRelayCommand` now coalesce queued `CanExecuteChanged` dispatcher posts, reducing redundant UI-thread wakeups under bursty state changes and improving responsiveness on heavily-updating screens.
+- **Dashboard hidden-surface health projection suppression:** dashboard health-status `PropertyChanged` fanout now skips dispatcher updates while telemetry projection is disabled, trimming background UI churn for hidden/minimized dashboard surfaces.
+- **Windows Defender WinRing0 worker alert fix:** upgraded the LibreHardwareMonitor dependency used by the WPF app and `OmenCore.HardwareWorker` from the WinRing0-backed `0.9.4` package to the PawnIO-backed `0.9.6` package, preventing new `OmenCore.HardwareWorker.sys` WinRing0 driver extractions in rebuilt 3.7.0 packages.
 
 ---
 
@@ -53,6 +67,7 @@ These fixes landed after the first 3.7.0 prerelease installer/ZIPs were built on
 - Fixed Quiet General profile sync so it reports Quiet fan/profile state instead of drifting through Auto.
 - Added `Ctrl+Shift+E` as a General profile-cycle hotkey.
 - Improved keyboard RGB diagnostics on `8BCD`/xd0xxx-class systems by switching the diagnostics test pattern to full 4-zone ColorTable writes instead of per-zone-only writes that can be ignored by some 2024 BIOS revisions.
+- Hardened the WMI BIOS ColorTable verification path with an extra delayed readback retry before restoring original colors, reducing false-negative RGB applies on slower 2024 BIOS revisions.
 - Keyboard lighting telemetry now records V2 backend apply attempts/results, and diagnostics now refreshes telemetry display after test/clear runs so counters no longer remain stuck at `Attempts: 0` during active testing.
 
 ### Fan Preset Behavior at High Temperatures
@@ -79,6 +94,10 @@ These fixes landed after the first 3.7.0 prerelease installer/ZIPs were built on
 - Retired WinRing0 backend status no longer logs as a repeated warning when PawnIO is healthy; `8D2F` reports should now show the retired legacy backend as no-action noise rather than an active fault.
 - BIOS WMI reliability can still report degraded command success on this board/BIOS path; the 3.7.0 mitigation is conservative fallback behavior, not a claim that every WMI probe succeeds.
 - Promoted the exact `8D2F` keyboard entry to high-confidence so Model Identity no longer emits the "not user-verified yet" warning for keyboard support.
+- Fixed Quick Access fan-mode resolution on `8D2F` reports where selecting **Quiet** could resolve to an Auto-aliased preset and immediately appear to revert to `Auto` in tray/popup status.
+- Hardened Quick Access fan confirmation: when a non-Auto tray request is accepted but immediate runtime readback still reports transient `Auto` on decoupled WMI paths, OmenCore now confirms using the requested preset identity instead of showing a misleading `Auto` notification.
+- Clarified CPU tuning status text for `8D2F` Intel Core Ultra reports: when direct MSR PL1/PL2 is firmware-locked or reads `0W/0W`, UI/log messaging now explicitly calls out that direct sliders are unavailable while OMEN/OGH performance-mode policy can still apply.
+- Added RC2 field-parity tracking for `8D2F`: users reported workload-dependent OmenCore vs OGH performance deltas (~5-20% CPU- vs GPU-skewed). This remains under investigation while direct PL1/PL2 lock constraints and OEM policy-path behavior are being profiled side-by-side.
 
 ### OMEN MAX 16-ah0xxx / ProductId 8D41 Power Policy and RGB Identity
 
@@ -231,6 +250,8 @@ These fixes landed after the first 3.7.0 prerelease installer/ZIPs were built on
 - Updated Settings, diagnostics, fan-cleaning, fan-controller, and cross-platform settings text so supported low-level access points users at PawnIO.
 - Final sweep removed the orphaned legacy dependency-audit helper from `SystemInfoService`, updated README driver priority/troubleshooting/licensing text to the PawnIO-only direction, and cleaned the single-curve fan application guard for clearer control flow.
 - Windows installer PawnIO bundling now extracts the embedded `PawnIO_setup.exe` to `{tmp}` and runs it hidden with `-silent` when the default PawnIO task is selected; the old runtime `{src}` sidecar-file check was removed because single-file setup builds may not have a sidecar `PawnIO_setup.exe` beside the installer.
+- Upgraded `LibreHardwareMonitorLib` from `0.9.4` to `0.9.6` for both the main app and hardware worker. The previous package could extract a WinRing0-family driver under the host process name (`OmenCore.HardwareWorker.sys`); the new package uses PawnIO modules instead.
+- Cleared the shipped `ecDevicePath` default so fresh installs no longer carry a stale `\\.\WinRing0_1_2` config value.
 
 ### Linux Fan Curve Safety and Accuracy
 
@@ -360,7 +381,8 @@ Current validation matrix:
 
 | Area | Command | Result |
 | --- | --- | --- |
-| Windows WPF app | `dotnet build src\OmenCoreApp\OmenCoreApp.csproj --no-restore` | Passed, 0 warnings, 0 errors after allowing WPF generated-file writes; rerun passed after final profile-cycle hardening. |
+| Windows WPF app | `dotnet build src\OmenCoreApp\OmenCoreApp.csproj --no-restore` | Passed on 2026-06-01 after the LibreHardwareMonitor/PawnIO dependency upgrade, 0 warnings, 0 errors. |
+| Windows HardwareWorker | `dotnet build src\OmenCore.HardwareWorker\OmenCore.HardwareWorker.csproj --no-restore` | Passed on 2026-06-01 after the LibreHardwareMonitor/PawnIO dependency upgrade, 0 warnings, 0 errors. |
 | Linux CLI | `dotnet build src\OmenCore.Linux\OmenCore.Linux.csproj --no-restore -p:IntermediateOutputPath=artifacts\obj\OmenCoreLinux\Debug\ -p:OutputPath=artifacts\bin\OmenCoreLinux\Debug\` | Passed, 0 warnings, 0 errors. |
 | Avalonia GUI | `dotnet build src\OmenCore.Avalonia\OmenCore.Avalonia.csproj --no-restore -p:IntermediateOutputPath=artifacts\obj\OmenCoreAvalonia\Debug\ -p:OutputPath=artifacts\bin\OmenCoreAvalonia\Debug\` | Passed, 0 warnings, 0 errors. |
 | Dashboard projection | `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --filter "DashboardViewModelTests"` | Passed, 4 passed, 0 failed, 0 skipped. |
@@ -377,24 +399,25 @@ Current validation matrix:
 | 8E41 WMI fan reset regression | `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --filter "FullyQualifiedName~WmiV2VerificationTests" --logger "console;verbosity=minimal" -m:1 /p:UseSharedCompilation=false` | Passed, 45 passed, 0 failed after adding coverage that manual/custom-to-profile handoff skips no-op `SetFanMax(false)` while confirmed Max-to-profile still clears it. |
 | 8E41 General profile / OMEN key regression | `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --filter "FullyQualifiedName~GeneralViewModelTests|FullyQualifiedName~OmenKeyServiceTests" --logger "console;verbosity=minimal" -m:1 /p:UseSharedCompilation=false` | Passed, 11 passed, 0 failed after General Performance profile confirmation, Custom profile selection coverage, and Fn+F12 OMEN scan-code handling. |
 | RGB peripheral discovery dispatcher safety | `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --filter "FullyQualifiedName~CorsairDeviceServiceTests|FullyQualifiedName~LogitechRgbProviderTests|FullyQualifiedName~CorsairRgbProviderTests" --logger "console;verbosity=minimal" -m:1 /p:UseSharedCompilation=false` | Passed, 8 passed, 0 failed after dispatcher-marshal cleanup for Corsair/Logitech bound device collections. |
-| Full Windows test project | `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --logger "console;verbosity=minimal" -m:1 /p:UseSharedCompilation=false` | Passed after the Pre-release 1 follow-up fixes, 764 passed, 0 failed, 0 skipped. |
+| Defender worker-driver fix | Manifest resource check on built `LibreHardwareMonitorLib.dll` | Passed on 2026-06-01: built worker dependency contains `LibreHardwareMonitor.Resources.PawnIo.*` resources and no `Resources.WinRing0*` manifest resources. |
+| Full Windows test project | `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --logger "console;verbosity=minimal" -m:1 /p:UseSharedCompilation=false` | Passed on 2026-06-01 after release-gate catch cleanup and dependency upgrade, 774 passed, 0 failed, 0 skipped. |
 | GitHub #134 CPU temperature fallback | `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --filter "WmiBiosMonitorFallbackTests|ModelIdentityResolutionSummaryTests.Build_8D41ExactProductId_ResolvesKeyboardProfile"` | Passed after the worker last-good CPU temperature fix, 13 passed, 0 failed. |
-| Windows prerelease package | `powershell -NoProfile -ExecutionPolicy Bypass -File .\build-installer.ps1` | Passed on 2026-05-27. Produced rebuilt `OmenCoreSetup-3.7.0.exe` and `OmenCore-3.7.0-win-x64.zip`; Inno compile embedded `PawnIO_setup.exe`. |
-| Linux prerelease package | `powershell -NoProfile -ExecutionPolicy Bypass -File .\build-linux-package.ps1 -SkipBinaryVersionCheck` | Passed on 2026-05-27. Produced rebuilt `OmenCore-3.7.0-linux-x64.zip`; verifier passed, binary execution skipped on Windows host, one `Tomlyn` trim warning. |
-| Release hygiene | `rg -n "catch\s*\{\s*\}" ...` over the files reported by the release-gate failure | Passed after patching: no bare `catch {}` remains in the reported files. |
+| Windows prerelease package | `powershell -NoProfile -ExecutionPolicy Bypass -File .\build-installer.ps1` | Passed on 2026-06-01. Produced rebuilt `OmenCoreSetup-3.7.0.exe` and `OmenCore-3.7.0-win-x64.zip`; Inno compile embedded `PawnIO_setup.exe`. |
+| Linux prerelease package | `powershell -NoProfile -ExecutionPolicy Bypass -File .\build-linux-package.ps1 -SkipBinaryVersionCheck` | Passed on 2026-06-01. Produced rebuilt `OmenCore-3.7.0-linux-x64.zip`; verifier passed, one `Tomlyn` trim warning. |
+| Release hygiene | `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --filter "ReleaseGateCodeHygieneTests"` | Passed on 2026-06-01 after patching the reported bare `catch {}` blocks, 12 passed, 0 failed. |
 | Release hygiene | `rg -n "3\.6\.3|3\.6\.3\.0|OmenCoreSetup-3\.6\.3|OmenCore-3\.6\.3" ...` over active version/package surfaces | Passed for release-facing metadata; remaining `3.6.3` matches are intentional historical changelog/base-version references. |
 | Final Linux rebuild | `dotnet build src\OmenCore.Linux\OmenCore.Linux.csproj --no-restore -p:IntermediateOutputPath=artifacts\obj\OmenCoreLinux\Debug\ -p:OutputPath=artifacts\bin\OmenCoreLinux\Debug\` | Passed, 0 warnings, 0 errors. |
 | Release hygiene | `git diff --check` | Line-ending warnings only. |
 
 Rebuilt prerelease artifacts:
 
-These hashes describe the rebuilt 3.7.0 prerelease assets generated on 2026-05-27 after the Pre-release 1 follow-up fixes.
+These hashes describe the rebuilt 3.7.0 prerelease assets generated on 2026-06-01 after the Defender worker-driver fix and final release-gate sweep.
 
 | File | Size | SHA256 |
 | --- | ---: | --- |
-| `OmenCoreSetup-3.7.0.exe` | 101.73 MB | `9E75959BC432AC1E1EEFD557BDD402088F3013B78EA185595E2BF9C77186FF87` |
-| `OmenCore-3.7.0-win-x64.zip` | 104.89 MB | `570E1058D7EED9D0E2FA9D490BE1CFFC67169B12A3B987948D07D7DAFAC105AC` |
-| `OmenCore-3.7.0-linux-x64.zip` | 43.57 MB | `C2003ACDEC74AD0A45FAB5F07E42AFB5F8AF3EBD29F15F86E0E79CBAB58060DF` |
+| `OmenCoreSetup-3.7.0.exe` | 103.21 MB | `867136AF7FA98088F9619E3A0A08110A3D36CBB7D7A49D959A88737CBE66E359` |
+| `OmenCore-3.7.0-win-x64.zip` | 106.46 MB | `C9A939427B18C8156579C355FF8D681A0AA68FF5869A92257EEB90E9A6FC3E92` |
+| `OmenCore-3.7.0-linux-x64.zip` | 43.57 MB | `3764F49004102BF9C592D57280EE8256B3239F0DC86B95837B77C21C9CE6D345` |
 
 Known validation limits:
 

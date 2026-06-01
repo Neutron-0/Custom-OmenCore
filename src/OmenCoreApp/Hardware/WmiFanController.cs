@@ -77,7 +77,10 @@ namespace OmenCore.Hardware
         private const int PresetModeReapplyIntervalMs = 30000;
         private const int CountdownExtendMinIntervalMs = 15000;
         private const int MaxModeHealthyRpmFloor = 2000;
-        private const double MaxModeHealthyLevelRatio = 0.40;
+        // Max mode should stay near board ceiling while the hold is active.
+        // A lax floor lets "stuck-at-mid" states (for example level 55 on a level-63 board)
+        // look healthy, so we keep this threshold intentionally high.
+        private const double MaxModeHealthyLevelRatio = 0.90;
         private const ushort EcFanModeRegister = 0x95; // OmenMon HPCM register
         private const int FanModeReadbackAttempts = 3;
         private const int FanModeReadbackDelayMs = 40;
@@ -1701,6 +1704,9 @@ namespace OmenCore.Hardware
                             : ManualModeReapplyIntervalMs;
                         if ((nowUtc - _lastManualModeReapplyUtc).TotalMilliseconds < reapplyIntervalMs)
                         {
+                            // Even when a manual-level write is throttled, keep the BIOS ownership
+                            // countdown alive so firmware does not reclaim fan policy between writes.
+                            TryExtendFanCountdown(nowUtc);
                             return;
                         }
 
@@ -1709,6 +1715,7 @@ namespace OmenCore.Hardware
                         if (_wmiBios.SetFanLevel(fanLevel, fanLevel))
                         {
                             _lastManualModeReapplyUtc = nowUtc;
+                            TryExtendFanCountdown(nowUtc);
                             var count = Interlocked.Increment(ref _keepaliveWriteCount);
                             if (count % KeepaliveLogSummaryInterval == 1)
                                 _logging?.Info($"[FanKeepalive] Fan level keepalive active: {_lastManualFanPercent}% (write #{count})");
@@ -1835,6 +1842,10 @@ namespace OmenCore.Hardware
         {
             bool hasTelemetry = false;
             bool healthy = false;
+            bool hasLevelTelemetry = false;
+            bool hasRpmTelemetry = false;
+            bool levelHealthy = false;
+            bool rpmHealthy = false;
             string levelInfo = "levels=n/a";
             string rpmInfo = "rpm=n/a";
 
@@ -1842,9 +1853,10 @@ namespace OmenCore.Hardware
             if (fanLevels.HasValue)
             {
                 hasTelemetry = true;
+                hasLevelTelemetry = true;
                 int levelFloor = Math.Max(1, (int)Math.Round(_maxFanLevel * MaxModeHealthyLevelRatio));
                 int levelMax = Math.Max(fanLevels.Value.fan1, fanLevels.Value.fan2);
-                healthy |= levelMax >= levelFloor;
+                levelHealthy = levelMax >= levelFloor;
                 levelInfo = $"levels={fanLevels.Value.fan1}/{fanLevels.Value.fan2} floor={levelFloor}";
             }
 
@@ -1852,8 +1864,9 @@ namespace OmenCore.Hardware
             if (rpms.HasValue)
             {
                 hasTelemetry = true;
+                hasRpmTelemetry = true;
                 int rpmMax = Math.Max(rpms.Value.fan1Rpm, rpms.Value.fan2Rpm);
-                healthy |= rpmMax >= MaxModeHealthyRpmFloor;
+                rpmHealthy = rpmMax >= MaxModeHealthyRpmFloor;
                 rpmInfo = $"rpm={rpms.Value.fan1Rpm}/{rpms.Value.fan2Rpm} floor={MaxModeHealthyRpmFloor}";
             }
 
@@ -1862,6 +1875,17 @@ namespace OmenCore.Hardware
             {
                 details = "telemetry unavailable";
                 return true;
+            }
+
+            // Prefer fan-level telemetry when available: it maps directly to firmware hold state.
+            // RPM is used as fallback when level telemetry is missing.
+            if (hasLevelTelemetry)
+            {
+                healthy = levelHealthy;
+            }
+            else if (hasRpmTelemetry)
+            {
+                healthy = rpmHealthy;
             }
 
             details = $"{levelInfo}, {rpmInfo}";

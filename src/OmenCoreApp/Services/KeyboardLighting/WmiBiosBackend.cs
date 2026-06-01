@@ -135,14 +135,12 @@ namespace OmenCore.Services.KeyboardLighting
                 var readBack = await ReadZoneColorsAsync();
                 if (readBack != null)
                 {
-                    var colorsMatch = ColorsMatch(readBack, zoneColors);
-
-                    if (!colorsMatch)
-                    {
-                        await Task.Delay(150);
-                        readBack = await ReadZoneColorsAsync();
-                        colorsMatch = readBack != null && ColorsMatch(readBack, zoneColors);
-                    }
+                    var verifyResult = await VerifyColorReadbackWithRetriesAsync(
+                        zoneColors,
+                        readBack,
+                        ReadZoneColorsAsync);
+                    var colorsMatch = verifyResult.ColorsMatch;
+                    readBack = verifyResult.LastReadBack;
                     
                     result.VerificationPassed = colorsMatch;
                     if (!colorsMatch)
@@ -206,6 +204,36 @@ namespace OmenCore.Services.KeyboardLighting
             {
                 _logging.Warn($"[WmiBiosBackend] Failed to restore previous keyboard colors: {restoreEx.Message}");
             }
+        }
+
+        internal static async Task<(bool ColorsMatch, Color[]? LastReadBack)> VerifyColorReadbackWithRetriesAsync(
+            Color[] expected,
+            Color[] firstReadBack,
+            Func<Task<Color[]?>> readZoneColorsAsync,
+            Func<int, Task>? delayAsync = null)
+        {
+            delayAsync ??= Task.Delay;
+
+            var readBack = firstReadBack;
+            var colorsMatch = ColorsMatch(readBack, expected);
+
+            if (!colorsMatch)
+            {
+                await delayAsync(150);
+                readBack = await readZoneColorsAsync();
+                colorsMatch = readBack != null && ColorsMatch(readBack, expected);
+            }
+
+            if (!colorsMatch)
+            {
+                // Some 2024 BIOS revisions take longer to expose the updated ColorTable
+                // after accepting the write. Give them one more chance before restoring.
+                await delayAsync(500);
+                readBack = await readZoneColorsAsync();
+                colorsMatch = readBack != null && ColorsMatch(readBack, expected);
+            }
+
+            return (colorsMatch, readBack);
         }
 
         private static bool ColorsMatch(Color[] readBack, Color[] expected)

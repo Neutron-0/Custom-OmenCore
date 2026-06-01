@@ -528,6 +528,32 @@ namespace OmenCore.Services.KeyboardLighting
                 UserVerified = false,
                 Notes = "GitHub #105 — Victus 15-fb0xxx; conservative single-zone backlight profile"
             });
+
+            AddModel(new KeyboardModelConfig
+            {
+                ProductId = "8C30",
+                ModelName = "HP Victus 15-fb1xxx (2023)",
+                ModelNamePattern = "15-fb1",
+                KeyboardType = KeyboardType.BacklightOnly,
+                PreferredMethod = KeyboardMethod.BacklightOnly,
+                FallbackMethods = Array.Empty<KeyboardMethod>(),
+                ModelYear = 2023,
+                UserVerified = false,
+                Notes = "GitHub #135 diagnostics — Victus 15-fb1xxx exact ProductId 8C30; conservative backlight-only keyboard mapping pending field verification"
+            });
+
+            AddModel(new KeyboardModelConfig
+            {
+                ProductId = "fb1xxx_victus15_unverified",
+                ModelName = "HP Victus 15-fb1xxx (2023)",
+                ModelNamePattern = "15-fb1",
+                KeyboardType = KeyboardType.BacklightOnly,
+                PreferredMethod = KeyboardMethod.BacklightOnly,
+                FallbackMethods = Array.Empty<KeyboardMethod>(),
+                ModelYear = 2023,
+                UserVerified = false,
+                Notes = "GitHub #135 — Victus 15-fb1xxx; conservative backlight-only keyboard mapping pending field verification"
+            });
             
             AddModel(new KeyboardModelConfig
             {

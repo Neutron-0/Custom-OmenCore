@@ -258,7 +258,63 @@ namespace OmenCoreApp.Tests.ViewModels
                 await Task.Delay(50);
             }
 
-            perfService.GetCurrentMode().Should().Be("Balanced", "explicit final tray intent should converge as authoritative final mode");
+            perfService.GetCurrentMode().Should().Be("Balanced");
+        }
+
+        [Fact]
+        public void ResolveTrayFanPreset_QuietRequest_PrefersQuietPresetOverAutoAliasPreset()
+        {
+            using var vm = new MainViewModel();
+
+            vm.FanPresets.Clear();
+            vm.FanPresets.Add(new FanPreset
+            {
+                Name = "Auto Quiet Hybrid",
+                Mode = FanMode.Auto,
+                IsBuiltIn = false,
+                Curve = new List<FanCurvePoint>
+                {
+                    new FanCurvePoint { TemperatureC = 40, FanPercent = 30 }
+                }
+            });
+            vm.FanPresets.Add(new FanPreset
+            {
+                Name = "Quiet",
+                Mode = FanMode.Quiet,
+                IsBuiltIn = true,
+                Curve = new List<FanCurvePoint>
+                {
+                    new FanCurvePoint { TemperatureC = 40, FanPercent = 25 }
+                }
+            });
+
+            var resolver = typeof(MainViewModel).GetMethod("ResolveTrayFanPreset", BindingFlags.Instance | BindingFlags.NonPublic);
+            resolver.Should().NotBeNull();
+
+            var resolved = resolver!.Invoke(vm, new object[] { "Quiet" }).Should().BeOfType<FanPreset>().Subject;
+            resolved.Name.Should().Be("Quiet");
+            resolved.Mode.Should().Be(FanMode.Quiet);
+        }
+
+        [Fact]
+        public void ResolveQuickAccessConfirmedMode_NonAutoRequest_WithAutoReadback_UsesRequestedPresetName()
+        {
+            var targetPreset = new FanPreset
+            {
+                Name = "Quiet",
+                Mode = FanMode.Quiet,
+                IsBuiltIn = true,
+                Curve = new List<FanCurvePoint>
+                {
+                    new FanCurvePoint { TemperatureC = 40, FanPercent = 25 }
+                }
+            };
+
+            var resolver = typeof(MainViewModel).GetMethod("ResolveQuickAccessConfirmedMode", BindingFlags.Static | BindingFlags.NonPublic);
+            resolver.Should().NotBeNull();
+
+            var resolved = resolver!.Invoke(null, new object?[] { "Quiet", targetPreset, "Auto", "Auto" }) as string;
+            resolved.Should().Be("Quiet");
         }
 
         [Fact]

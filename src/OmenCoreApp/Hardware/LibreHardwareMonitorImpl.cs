@@ -71,6 +71,8 @@ namespace OmenCore.Hardware
         private double _cachedVramTotal = 0;
         private double _cachedGpuFan = 0;
         private double _cachedGpuHotspot = 0;
+        private bool _cachedAmdGpuTelemetryQuarantined = false;
+        private string _cachedAmdGpuTelemetryQuarantineReason = string.Empty;
         
         // Throttling detection (v1.2)
         private bool _cachedCpuThermalThrottling = false;
@@ -568,6 +570,8 @@ namespace OmenCore.Hardware
                 _cachedGpuVoltage = workerSample.GpuVoltage;
                 _cachedGpuCurrent = workerSample.GpuCurrent;
                 _cachedGpuHotspot = workerSample.GpuHotspot;
+                _cachedAmdGpuTelemetryQuarantined = workerSample.IsAmdGpuTelemetryQuarantined;
+                _cachedAmdGpuTelemetryQuarantineReason = workerSample.AmdGpuTelemetryQuarantineReason ?? string.Empty;
                 
                 _cachedVramUsage = workerSample.VramUsage;
                 _cachedVramTotal = workerSample.VramTotal;
@@ -809,6 +813,10 @@ namespace OmenCore.Hardware
             lock (_lock)
             {
                 if (_disposed) return; // Double-check after acquiring lock
+
+                // Worker-only quarantine signal should not persist when running in-process.
+                _cachedAmdGpuTelemetryQuarantined = false;
+                _cachedAmdGpuTelemetryQuarantineReason = string.Empty;
                 
                 _computer?.Accept(new UpdateVisitor());
 
@@ -1526,6 +1534,8 @@ namespace OmenCore.Hardware
                 GpuFanPercent = Math.Round(Math.Clamp(_cachedGpuFan, 0, 100), 0),  // Clamp to valid range
                 GpuHotspotTemperatureC = Math.Round(_cachedGpuHotspot, 1),
                 GpuName = _lastGpuName,
+                IsAmdGpuTelemetryQuarantined = _cachedAmdGpuTelemetryQuarantined,
+                AmdGpuTelemetryQuarantineReason = _cachedAmdGpuTelemetryQuarantineReason,
                 // Throttling status (v1.2)
                 IsCpuThermalThrottling = _cachedCpuThermalThrottling,
                 IsCpuPowerThrottling = _cachedCpuPowerThrottling,
@@ -2087,7 +2097,10 @@ namespace OmenCore.Hardware
                     }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"PawnIO install registry lookup failed: {ex.Message}");
+            }
             
             string defaultPath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "PawnIO");
             if (Directory.Exists(defaultPath)) return defaultPath;
@@ -2216,7 +2229,10 @@ namespace OmenCore.Hardware
                 int tjMax = (int)((value >> 16) & 0xFF);
                 if (tjMax > 50 && tjMax < 150) return tjMax;
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"PawnIO TjMax read failed: {ex.Message}");
+            }
             
             return 100; // Default for most Intel CPUs
         }
@@ -2242,13 +2258,21 @@ namespace OmenCore.Hardware
             
             if (_handle != IntPtr.Zero && _pawnioClose != null)
             {
-                try { _pawnioClose(_handle); } catch { }
+                try { _pawnioClose(_handle); }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"PawnIO close failed during dispose: {ex.Message}");
+                }
                 _handle = IntPtr.Zero;
             }
             
             if (_pawnIOLib != IntPtr.Zero)
             {
-                try { NativeMethods.FreeLibrary(_pawnIOLib); } catch { }
+                try { NativeMethods.FreeLibrary(_pawnIOLib); }
+                catch (Exception ex)
+                {
+                    Debug.WriteLine($"PawnIO library unload failed during dispose: {ex.Message}");
+                }
                 _pawnIOLib = IntPtr.Zero;
             }
         }

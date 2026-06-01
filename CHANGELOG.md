@@ -14,8 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Rolling stabilization changelog: [docs/CHANGELOG_v3.7.0.md](docs/CHANGELOG_v3.7.0.md).
 - Active code audit: [docs/3.7.0-CODE-AUDIT.md](docs/3.7.0-CODE-AUDIT.md).
 - Version metadata corrected to `3.7.0` across the Windows app, hardware worker, Linux CLI, Avalonia GUI, installer, and `VERSION.txt`.
-- Pre-release artifacts were rebuilt on 2026-05-27 for Windows installer, Windows portable ZIP, and Linux x64 ZIP after the Pre-release 1 follow-up fixes.
-- Final automated validation after the follow-up fixes passed: `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --logger "console;verbosity=minimal" -m:1 /p:UseSharedCompilation=false` reported 764 passed, 0 failed.
+- Pre-release artifacts were rebuilt on 2026-06-01 for Windows installer, Windows portable ZIP, and Linux x64 ZIP after the Defender worker-driver fix and final release-gate sweep.
+- Final automated validation after the follow-up fixes passed: `dotnet test src\OmenCoreApp.Tests\OmenCoreApp.Tests.csproj --no-restore --logger "console;verbosity=minimal" -m:1 /p:UseSharedCompilation=false` reported 774 passed, 0 failed.
 - Current focus: upload rebuilt prerelease assets, field validation for GitHub #133 UI responsiveness, `8BCD`, `8D2F`, `8D41`, Linux boards `8787`/`8C30`, focused-window runtime measurements, and prerelease feedback.
 
 ### Bug Fixes After Pre-release 1
@@ -31,16 +31,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Battery-mode expensive NVAPI GPU telemetry refreshes are throttled to reduce dGPU wake pressure.
 - Linux status/diagnose now identifies hp-omen-gaming-wmi-dkms-compatible hp-wmi/hwmon fan backends.
 - Corsair/Logitech RGB discovery now updates bound device collections through the WPF dispatcher.
+- Windows Defender `VulnerableDriver:WinNT/Winring0` alerts on `OmenCore.HardwareWorker.sys` are addressed by upgrading the app and hardware worker to the PawnIO-backed LibreHardwareMonitor 0.9.6 package; rebuilt packages no longer contain or extract WinRing0 worker resources.
 
 ### Rebuilt Pre-release Artifacts
 
-These hashes describe the rebuilt 3.7.0 prerelease assets generated on 2026-05-27 after the Pre-release 1 follow-up fixes.
+These hashes describe the rebuilt 3.7.0 prerelease assets generated on 2026-06-01 after the Defender worker-driver fix and final release-gate sweep.
 
 | File | Size | SHA256 |
 | --- | ---: | --- |
-| `OmenCoreSetup-3.7.0.exe` | 101.73 MB | `9E75959BC432AC1E1EEFD557BDD402088F3013B78EA185595E2BF9C77186FF87` |
-| `OmenCore-3.7.0-win-x64.zip` | 104.89 MB | `570E1058D7EED9D0E2FA9D490BE1CFFC67169B12A3B987948D07D7DAFAC105AC` |
-| `OmenCore-3.7.0-linux-x64.zip` | 43.57 MB | `C2003ACDEC74AD0A45FAB5F07E42AFB5F8AF3EBD29F15F86E0E79CBAB58060DF` |
+| `OmenCoreSetup-3.7.0.exe` | 103.21 MB | `867136AF7FA98088F9619E3A0A08110A3D36CBB7D7A49D959A88737CBE66E359` |
+| `OmenCore-3.7.0-win-x64.zip` | 106.46 MB | `C9A939427B18C8156579C355FF8D681A0AA68FF5869A92257EEB90E9A6FC3E92` |
+| `OmenCore-3.7.0-linux-x64.zip` | 43.57 MB | `3764F49004102BF9C592D57280EE8256B3239F0DC86B95837B77C21C9CE6D345` |
 
 ### Changed
 

@@ -55,6 +55,8 @@ namespace OmenCore.Models
         public double GpuFanPercent { get; set; }
         public double GpuHotspotTemperatureC { get; set; }
         public string GpuName { get; set; } = string.Empty;
+        public bool IsAmdGpuTelemetryQuarantined { get; set; }
+        public string AmdGpuTelemetryQuarantineReason { get; set; } = string.Empty;
         
         // GPU Voltage/Current monitoring (v2.0)
         public double GpuVoltageV { get; set; }
@@ -165,6 +167,8 @@ namespace OmenCore.Models
             GpuFanPercent             = source.GpuFanPercent;
             GpuHotspotTemperatureC    = source.GpuHotspotTemperatureC;
             GpuName                   = source.GpuName;
+            IsAmdGpuTelemetryQuarantined = source.IsAmdGpuTelemetryQuarantined;
+            AmdGpuTelemetryQuarantineReason = source.AmdGpuTelemetryQuarantineReason;
             GpuVoltageV               = source.GpuVoltageV;
             GpuCurrentA               = source.GpuCurrentA;
             BatteryChargePercent      = source.BatteryChargePercent;

@@ -337,6 +337,5 @@ rm -rf ~/OmenCore-linux-x64
 - [docs/LINUX_INSTALL_GUIDE.md](docs/LINUX_INSTALL_GUIDE.md) — Extended Linux guide with distro-specific notes
 - [docs/ANTIVIRUS_FAQ.md](docs/ANTIVIRUS_FAQ.md) — Antivirus false positive handling
 - [docs/DEFENDER_FALSE_POSITIVE.md](docs/DEFENDER_FALSE_POSITIVE.md) — Windows Defender exclusion steps
-- [docs/WINRING0_SETUP.md](docs/WINRING0_SETUP.md) — WinRing0 driver setup and troubleshooting
 - [Discord Server](https://discord.gg/9WhJdabGk8) — Community support
 - [GitHub Issues](https://github.com/theantipopau/omencore/issues) — Bug reports and feature requests

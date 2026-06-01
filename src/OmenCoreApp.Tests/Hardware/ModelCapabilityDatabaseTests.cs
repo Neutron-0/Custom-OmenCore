@@ -24,6 +24,7 @@ namespace OmenCoreApp.Tests.Hardware
         [InlineData("8A44", OmenModelFamily.OMEN16)]
         [InlineData("8C76", OmenModelFamily.OMEN16)]
         [InlineData("8A3E", OmenModelFamily.Victus)]
+        [InlineData("8C30", OmenModelFamily.Victus)]
         [InlineData("8A26", OmenModelFamily.Victus)]
         [InlineData("8C58", OmenModelFamily.Transcend)]
         [InlineData("8E41", OmenModelFamily.Transcend)]
@@ -218,6 +219,36 @@ namespace OmenCoreApp.Tests.Hardware
         }
 
         [Fact]
+        public void GetCapabilitiesByModelName_Victus15Fb1_PrefersExact8C30Profile()
+        {
+            var caps = ModelCapabilityDatabase.GetCapabilitiesByModelName("Victus by HP Gaming Laptop 15-fb1xxx");
+
+            caps.Should().NotBeNull();
+            caps!.ProductId.Should().Be("8C30");
+            caps.Family.Should().Be(OmenModelFamily.Victus);
+            caps.SupportsFanControlWmi.Should().BeTrue();
+            caps.SupportsFanControlEc.Should().BeFalse();
+            caps.SupportsFanCurves.Should().BeTrue();
+            caps.AllowDecoupledWmiThermalPolicyFallback.Should().BeTrue();
+            caps.Notes.Should().Contain("GitHub #135 diagnostics");
+        }
+
+        [Fact]
+        public void GetPreferredCapabilities_8C30_Victus15Fb1_UsesExactProductProfile()
+        {
+            var caps = ModelCapabilityDatabase.GetPreferredCapabilities("8C30", "Victus by HP Gaming Laptop 15-fb1xxx");
+
+            caps.Should().NotBeNull();
+            caps!.ProductId.Should().Be("8C30");
+            caps.Family.Should().Be(OmenModelFamily.Victus);
+            caps.SupportsFanControlWmi.Should().BeTrue();
+            caps.SupportsFanControlEc.Should().BeFalse();
+            caps.SupportsFanCurves.Should().BeTrue();
+            caps.AllowDecoupledWmiThermalPolicyFallback.Should().BeTrue();
+            caps.Notes.Should().Contain("GitHub #135 diagnostics");
+        }
+
+        [Fact]
         public void GetPreferredCapabilities_8D2F_UsesConfirmedConservativeAm0Profile()
         {
             var caps = ModelCapabilityDatabase.GetPreferredCapabilities("8D2F", "OMEN Gaming Laptop 16-am0xxx");
@@ -303,9 +334,9 @@ namespace OmenCoreApp.Tests.Hardware
             caps.SupportsFanControlWmi.Should().BeTrue();
             caps.SupportsFanControlEc.Should().BeFalse("8BCD field evidence points at V1 WMI fan control, not validated direct EC fan writes");
             caps.SupportsIndependentFanCurves.Should().BeFalse("independent curve UI requires validated independent fan ownership");
-            caps.MaxFanLevel.Should().Be(55);
+            caps.MaxFanLevel.Should().Be(63, "latest field evidence shows this board reaches the 63-level ceiling (~6300 RPM)");
             caps.UserVerified.Should().BeFalse("2026-05-20 Discord report still needs physical follow-up after the 3.7.0 fixes");
-            caps.Notes.Should().Contain("2026-05-20");
+            caps.Notes.Should().Contain("2026-05-29");
         }
     }
 }

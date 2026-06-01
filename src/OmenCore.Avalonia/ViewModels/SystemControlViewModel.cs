@@ -61,6 +61,9 @@ public partial class SystemControlViewModel : ObservableObject
     [ObservableProperty]
     private string _statusMessage = string.Empty;
 
+    [ObservableProperty]
+    private string _statusDetails = string.Empty;
+
     public string[] PerformanceModes { get; } = { "Quiet", "Balanced", "Performance" };
     public string[] GpuModes { get; } = { "Hybrid", "Discrete", "Integrated" };
 
@@ -75,22 +78,11 @@ public partial class SystemControlViewModel : ObservableObject
         try
         {
             var capabilities = await _hardwareService.GetCapabilitiesAsync();
-            HasKeyboardBacklight = capabilities.HasKeyboardBacklight;
-            HasFourZoneRgb = capabilities.HasFourZoneRgb;
-            HasGpuMuxSwitch = capabilities.HasGpuMuxSwitch;
-            CanSetPerformanceMode = capabilities.SupportsPerformanceProfiles;
-            _performanceProfileReason = string.IsNullOrWhiteSpace(capabilities.PerformanceProfileReason)
-                ? "Performance mode control is unavailable on this Linux board/kernel path."
-                : capabilities.PerformanceProfileReason;
-
-            _canSetKeyboardBrightness = capabilities.SupportsKeyboardBrightness;
-            _keyboardBrightnessReason = string.IsNullOrWhiteSpace(capabilities.KeyboardBrightnessReason)
-                ? "Keyboard brightness control is unavailable on this Linux board/kernel path."
-                : capabilities.KeyboardBrightnessReason;
+            ApplyCapabilities(capabilities);
 
             if (!CanSetPerformanceMode)
             {
-                StatusMessage = _performanceProfileReason;
+                SetStatus("Performance profile control is unavailable.", BuildLinuxCapabilityHelpDetails());
             }
 
             var mode = await _hardwareService.GetPerformanceModeAsync();
@@ -114,7 +106,7 @@ public partial class SystemControlViewModel : ObservableObject
 
         if (!TryGetPerformanceModeFromIndex(value, out var mode))
         {
-            StatusMessage = $"Unknown performance mode index: {value}";
+            SetStatus($"Unknown performance mode index: {value}");
             return;
         }
 
@@ -129,7 +121,7 @@ public partial class SystemControlViewModel : ObservableObject
 
         if (!TryParsePerformanceModeName(modeName, out var mode))
         {
-            StatusMessage = $"Unsupported performance mode: {modeName}";
+            SetStatus($"Unsupported performance mode: {modeName}");
             return;
         }
 
@@ -143,27 +135,100 @@ public partial class SystemControlViewModel : ObservableObject
 
         if (!CanSetPerformanceMode)
         {
-            StatusMessage = _performanceProfileReason;
+            await RefreshCapabilitiesIfNeededAsync();
+            if (!CanSetPerformanceMode)
+            {
+                SetStatus("Performance profile control is still unavailable.", BuildLinuxCapabilityHelpDetails());
             return;
+            }
         }
 
         try
         {
             IsPerformanceModeChanging = true;
-            StatusMessage = $"Setting performance mode to {mode}...";
+            SetStatus($"Setting performance mode to {mode}...");
             await _hardwareService.SetPerformanceModeAsync(mode);
             CurrentPerformanceMode = GetPerformanceModeName(mode);
             SetSelectedPerformanceModeIndex(mode);
-            StatusMessage = $"Performance mode set to {mode}";
+            SetStatus($"Performance mode set to {mode}");
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Failed: {ex.Message}";
+            SetStatus("Failed to set performance mode.", ex.Message);
         }
         finally
         {
             IsPerformanceModeChanging = false;
         }
+    }
+
+    [RelayCommand]
+    private async Task RefreshCapabilities()
+    {
+        await RefreshCapabilitiesIfNeededAsync();
+
+        if (CanSetPerformanceMode)
+        {
+            SetStatus("Linux control capabilities refreshed. Performance profiles are available.");
+        }
+        else
+        {
+            SetStatus("Performance profile control is still unavailable.", BuildLinuxCapabilityHelpDetails());
+        }
+    }
+
+    [RelayCommand]
+    private void ShowLinuxDiagnosticsHelp()
+    {
+        SetStatus("Collect Linux diagnostics for support.",
+            "Run these commands:\n" +
+            "sudo omencore-cli diagnose --report\n" +
+            "sudo dmidecode -t system -t baseboard -t bios\n" +
+            "find /sys/devices/platform/hp-wmi -maxdepth 4 -type f -print 2>/dev/null\n" +
+            "find /sys/class/hwmon -maxdepth 3 -type f -name 'fan*' -o -name 'pwm*' -o -name 'temp*_input' 2>/dev/null");
+    }
+
+    private async Task RefreshCapabilitiesIfNeededAsync()
+    {
+        try
+        {
+            var capabilities = await _hardwareService.GetCapabilitiesAsync();
+            ApplyCapabilities(capabilities);
+            if (CanSetPerformanceMode)
+            {
+                StatusDetails = string.Empty;
+            }
+        }
+        catch
+        {
+            // Keep prior capability state; caller will surface existing status reason.
+        }
+    }
+
+    private void ApplyCapabilities(SystemCapabilities capabilities)
+    {
+        HasKeyboardBacklight = capabilities.HasKeyboardBacklight;
+        HasFourZoneRgb = capabilities.HasFourZoneRgb;
+        HasGpuMuxSwitch = capabilities.HasGpuMuxSwitch;
+        CanSetPerformanceMode = capabilities.SupportsPerformanceProfiles;
+        _performanceProfileReason = string.IsNullOrWhiteSpace(capabilities.PerformanceProfileReason)
+            ? "Performance mode control is unavailable on this Linux board/kernel path."
+            : capabilities.PerformanceProfileReason;
+
+        _canSetKeyboardBrightness = capabilities.SupportsKeyboardBrightness;
+        _keyboardBrightnessReason = string.IsNullOrWhiteSpace(capabilities.KeyboardBrightnessReason)
+            ? "Keyboard brightness control is unavailable on this Linux board/kernel path."
+            : capabilities.KeyboardBrightnessReason;
+    }
+
+    private string BuildLinuxCapabilityHelpDetails()
+    {
+        return _performanceProfileReason + "\n\n" +
+               "Try:\n" +
+               "- sudo modprobe hp-wmi\n" +
+               "- (legacy boards) sudo modprobe ec_sys write_support=1\n" +
+               "- Click 'Re-detect Linux Controls' in this page\n" +
+               "- If still unavailable, click 'Show Linux Diagnostic Commands'";
     }
 
     [RelayCommand]
@@ -175,14 +240,14 @@ public partial class SystemControlViewModel : ObservableObject
         try
         {
             IsGpuModeChanging = true;
-            StatusMessage = $"Switching GPU to {mode} mode...";
+            SetStatus($"Switching GPU to {mode} mode...");
             await _hardwareService.SetGpuModeAsync(mode);
             CurrentGpuMode = mode;
-            StatusMessage = $"GPU mode changed to {mode}. A reboot may be required.";
+            SetStatus($"GPU mode changed to {mode}. A reboot may be required.");
         }
         catch (Exception ex)
         {
-            StatusMessage = $"GPU switch failed: {ex.Message}";
+            SetStatus("GPU switch failed.", ex.Message);
         }
         finally
         {
@@ -199,7 +264,7 @@ public partial class SystemControlViewModel : ObservableObject
     {
         if (!_canSetKeyboardBrightness)
         {
-            StatusMessage = _keyboardBrightnessReason;
+            SetStatus("Keyboard brightness control is unavailable.", _keyboardBrightnessReason);
             return;
         }
 
@@ -209,7 +274,7 @@ public partial class SystemControlViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Brightness error: {ex.Message}";
+            SetStatus("Keyboard brightness update failed.", ex.Message);
         }
     }
 
@@ -219,12 +284,18 @@ public partial class SystemControlViewModel : ObservableObject
         try
         {
             await _hardwareService.SetKeyboardColorAsync(KeyboardRed, KeyboardGreen, KeyboardBlue);
-            StatusMessage = $"Keyboard color set to RGB({KeyboardRed}, {KeyboardGreen}, {KeyboardBlue})";
+            SetStatus($"Keyboard color set to RGB({KeyboardRed}, {KeyboardGreen}, {KeyboardBlue})");
         }
         catch (Exception ex)
         {
-            StatusMessage = $"Color error: {ex.Message}";
+            SetStatus("Keyboard color update failed.", ex.Message);
         }
+    }
+
+    private void SetStatus(string message, string? details = null)
+    {
+        StatusMessage = message;
+        StatusDetails = details ?? string.Empty;
     }
 
     [RelayCommand]

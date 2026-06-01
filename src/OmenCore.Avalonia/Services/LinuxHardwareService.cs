@@ -152,9 +152,8 @@ public class LinuxHardwareService : IHardwareService, IDisposable
 
     public async Task<SystemCapabilities> GetCapabilitiesAsync()
     {
-        if (_capabilities != null)
-            return _capabilities;
-
+        // Recompute each call so runtime kernel/module changes (e.g., hp-wmi/ec_sys load)
+        // are reflected without forcing an app restart.
         _capabilities = new SystemCapabilities();
 
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))

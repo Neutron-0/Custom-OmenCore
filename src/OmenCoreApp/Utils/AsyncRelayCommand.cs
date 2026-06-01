@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using System.Windows.Threading;
@@ -10,6 +11,7 @@ namespace OmenCore.Utils
         private readonly Func<object?, Task> _executeAsync;
         private readonly Func<object?, bool>? _canExecute;
         private bool _isExecuting;
+        private int _raiseCanExecuteQueued;
 
         public AsyncRelayCommand(Func<object?, Task> executeAsync, Func<object?, bool>? canExecute = null)
         {
@@ -60,14 +62,22 @@ namespace OmenCore.Utils
 
         public void RaiseCanExecuteChanged()
         {
-            if (System.Windows.Application.Current?.Dispatcher.CheckAccess() == true)
+            var dispatcher = System.Windows.Application.Current?.Dispatcher;
+            if (dispatcher == null || dispatcher.CheckAccess())
             {
                 CanExecuteChanged?.Invoke(this, EventArgs.Empty);
+                Interlocked.Exchange(ref _raiseCanExecuteQueued, 0);
             }
             else
             {
-                System.Windows.Application.Current?.Dispatcher.BeginInvoke(() =>
+                if (Interlocked.CompareExchange(ref _raiseCanExecuteQueued, 1, 0) != 0)
                 {
+                    return;
+                }
+
+                dispatcher.BeginInvoke(() =>
+                {
+                    Interlocked.Exchange(ref _raiseCanExecuteQueued, 0);
                     CanExecuteChanged?.Invoke(this, EventArgs.Empty);
                 });
             }

@@ -414,6 +414,29 @@ namespace OmenCoreApp.Tests.Hardware
         }
 
         [Fact]
+        public void CountdownExtensionCallback_MaxMode_ReappliesWhen63ScaleBoardDropsTo55()
+        {
+            var fake = new Board63MaintenanceFakeWmiBios();
+            var controller = new WmiFanController(null, null, 0, injectedWmiBios: fake);
+
+            controller.ApplyPreset(new FanPreset { Name = "Max" }).Should().BeTrue();
+            controller.StopCountdownExtension();
+
+            var maxCallsBefore = fake.SetFanMaxTrueCalls;
+            fake.ForceReducedHoldTelemetry = true;
+
+            InvokeCountdownExtensionCallback(controller);
+            fake.SetFanMaxTrueCalls.Should().Be(maxCallsBefore,
+                "one low sample should not immediately reassert max");
+
+            InvokeCountdownExtensionCallback(controller);
+            fake.SetFanMaxTrueCalls.Should().Be(maxCallsBefore + 1,
+                "sustained 55-level hold on a 63-level board should trigger max reassertion");
+
+            controller.LastMaxModeExternalResetDetails.Should().Contain("levels=55/55");
+        }
+
+        [Fact]
         public void CountdownExtensionCallback_MaxMode_TelemetryUnavailable_PeriodicallyReassertsMax()
         {
             var fake = new TelemetryUnavailableMaintenanceFakeWmiBios();
@@ -457,8 +480,8 @@ namespace OmenCoreApp.Tests.Hardware
             InvokeCountdownExtensionCallback(controller);
             fake.SetFanLevelCalls.Should().Be(1,
                 "rapid keepalive ticks should not keep re-writing the same manual level every interval");
-            fake.ExtendCountdownCalls.Should().Be(0,
-                "skipped manual keepalive ticks should avoid hidden WMI writes through ExtendFanCountdown");
+            fake.ExtendCountdownCalls.Should().BeGreaterThan(0,
+                "manual keepalive should continue extending BIOS countdown ownership even when fan-level writes are throttled");
         }
 
         [Fact]
@@ -976,6 +999,60 @@ namespace OmenCoreApp.Tests.Hardware
             public bool SetFanMode(HpWmiBios.FanMode mode) => true;
             public double? GetTemperature() => 45.0;
             public double? GetGpuTemperature() => 45.0;
+            public void ExtendFanCountdown() { }
+            public (bool customTgp, bool ppab, int dState)? GetGpuPower() => null;
+            public bool SetGpuPower(HpWmiBios.GpuPowerLevel level) => true;
+            public HpWmiBios.GpuMode? GetGpuMode() => null;
+            public void Dispose() { }
+        }
+
+        private class Board63MaintenanceFakeWmiBios : IHpWmiBios
+        {
+            private bool _maxEnabled;
+            public bool ForceReducedHoldTelemetry { get; set; }
+            public int SetFanMaxTrueCalls { get; private set; }
+
+            public bool IsAvailable => true;
+            public string Status => "Board63MaintenanceFake";
+            public HpWmiBios.ThermalPolicyVersion ThermalPolicy => HpWmiBios.ThermalPolicyVersion.V1;
+            public int FanCount => 2;
+            public int MaxFanLevel => 63;
+
+            public (int fan1Rpm, int fan2Rpm)? GetFanRpmDirect()
+            {
+                if (!_maxEnabled)
+                {
+                    return (900, 860);
+                }
+
+                return ForceReducedHoldTelemetry ? (5600, 5550) : (6250, 6200);
+            }
+
+            public (byte fan1, byte fan2)? GetFanLevel()
+            {
+                if (!_maxEnabled)
+                {
+                    return (8, 8);
+                }
+
+                return ForceReducedHoldTelemetry ? ((byte)55, (byte)55) : ((byte)63, (byte)63);
+            }
+
+            public bool SetFanMax(bool enabled)
+            {
+                _maxEnabled = enabled;
+                if (enabled)
+                {
+                    SetFanMaxTrueCalls++;
+                }
+
+                return true;
+            }
+
+            public bool SetFanLevel(byte fan1, byte fan2) => true;
+            public bool SetFanMode(HpWmiBios.FanMode mode) => true;
+            public double? GetTemperature() => 70.0;
+            public double? GetGpuTemperature() => 66.0;
             public void ExtendFanCountdown() { }
             public (bool customTgp, bool ppab, int dState)? GetGpuPower() => null;
             public bool SetGpuPower(HpWmiBios.GpuPowerLevel level) => true;

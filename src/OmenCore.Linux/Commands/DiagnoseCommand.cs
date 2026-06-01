@@ -303,6 +303,7 @@ public static class DiagnoseCommand
         if (string.Equals(info.BoardId, "8787", StringComparison.OrdinalIgnoreCase))
         {
             info.Notes.Add("Board 8787 detected (OMEN 15-en0xxx / Ryzen + RTX 2060 generation). Windows support uses a conservative legacy profile; Linux support depends on the kernel exposing ec_sys or hp-wmi control paths on this unit.");
+            info.Notes.Add("Board 8787 not appearing in third-party hp-omen fan-daemon board lists does not by itself mean OmenCore profile control is unsupported; OmenCore uses whichever kernel path is actually exposed (ACPI profile, hp-wmi, hwmon, or legacy EC).");
             if (info.EcIoPathExists)
             {
                 info.Notes.Add("Legacy EC io is present for board 8787. Prefer OmenCore CLI fan/profile commands over raw register writes so safety checks and auto-restore remain active.");
@@ -315,6 +316,11 @@ public static class DiagnoseCommand
             if (!info.HpWmiFan1InputExists && !info.HpWmiFan2InputExists)
             {
                 info.Notes.Add("Board 8787 RPM readback is still field-unverified; fan commands may work even when Linux RPM telemetry is unavailable.");
+            }
+
+            if (info.AcpiPlatformProfileExists)
+            {
+                info.Notes.Add("ACPI platform_profile is present on this board, so performance profile switching can still work even when hp-wmi hwmon fan files are absent.");
             }
 
             info.Recommendations.Add("When requesting Linux 8787 support, attach `sudo omencore-cli diagnose --report`, `sudo dmidecode -t system -t baseboard`, hp-wmi tree, hwmon tree, and the exact RTX 2060 driver/kernel version.");

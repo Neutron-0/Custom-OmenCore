@@ -797,6 +797,17 @@ namespace OmenCore.Hardware
         private void DetectUndervoltCapabilities()
         {
             _logging?.Info("Phase 9: Undervolt capabilities...");
+
+            if (Capabilities.ModelConfig?.SupportsUndervolt == false)
+            {
+                Capabilities.CanUndervolt = false;
+                Capabilities.UndervoltMethod = UndervoltMethod.None;
+                Capabilities.UndervoltRuntimeReady = false;
+                Capabilities.UndervoltBlockReason =
+                    $"Undervolt disabled per model database (not supported on {Capabilities.ModelConfig.ModelName})";
+                _logging?.Info($"  -> {Capabilities.UndervoltBlockReason}");
+                return;
+            }
             
             // Undervolting requires MSR access
             if (Capabilities.SecureBootEnabled)

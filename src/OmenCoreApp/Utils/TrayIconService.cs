@@ -1086,7 +1086,7 @@ namespace OmenCore.Utils
                 {
                     _quickPopup = new QuickPopupWindow();
                     _quickPopup.FanModeChangeRequested += mode => FanModeChangeRequested?.Invoke(mode);
-                    _quickPopup.PerformanceModeChangeRequested += mode => PerformanceModeChangeRequested?.Invoke(mode);
+                    _quickPopup.QuickProfileChangeRequested += profile => QuickProfileChangeRequested?.Invoke(profile);
                     _quickPopup.OpenDashboardRequested += () => _showMainWindow();
                     _quickPopup.Closed += (s, e) => _quickPopup = null;
                 }
@@ -1124,7 +1124,7 @@ namespace OmenCore.Utils
                 {
                     _quickPopup = new QuickPopupWindow();
                     _quickPopup.FanModeChangeRequested += mode => FanModeChangeRequested?.Invoke(mode);
-                    _quickPopup.PerformanceModeChangeRequested += mode => PerformanceModeChangeRequested?.Invoke(mode);
+                    _quickPopup.QuickProfileChangeRequested += profile => QuickProfileChangeRequested?.Invoke(profile);
                     _quickPopup.OpenDashboardRequested += () => _showMainWindow();
                     _quickPopup.Closed += (s, e) => _quickPopup = null;
                 }

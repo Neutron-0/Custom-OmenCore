@@ -1,341 +1,404 @@
-﻿# OmenCore Installation Guide
+# OmenCore Installation Guide
 
-Complete installation instructions for OmenCore v3.7.0 on Windows and Linux.
+Complete installation, upgrade, portable, Linux, and uninstall instructions for OmenCore 3.7.1.
 
----
+## Choose Your Package
 
-## 📋 Table of Contents
+| Package | Platform | Use This When |
+|---|---|---|
+| `OmenCoreSetup-3.7.1.exe` | Windows | You want the normal install flow, Start Menu entry, and optional PawnIO install. |
+| `OmenCore-3.7.1-win-x64.zip` | Windows | You want a portable copy, test build, or no installer changes. |
+| `OmenCore-3.7.1-linux-x64.zip` | Linux | You want the CLI and Avalonia GUI bundle. |
 
-- [Windows Installation](#-windows-installation)
-  - [Option 1: Installer (Recommended)](#option-1-installer-recommended)
-  - [Option 2: Portable ZIP](#option-2-portable-zip)
-  - [Post-Installation](#post-installation-windows)
-- [Linux Installation](#-linux-installation)
-  - [Quick Start (GUI)](#quick-start-gui)
-  - [Quick Start (CLI)](#quick-start-cli)
-  - [Kernel Requirements](#kernel-requirements)
-  - [CLI Usage](#cli-usage)
-  - [Running as a Daemon](#running-as-a-daemon)
-  - [Troubleshooting Linux](#troubleshooting-linux)
-- [Uninstallation](#-uninstallation)
-- [Additional Resources](#-additional-resources)
+Always download from the [latest GitHub Release](https://github.com/theantipopau/omencore/releases/latest), then compare the SHA256 hash against the release notes before running binaries.
 
----
+## Windows Installer
 
-## 🪟 Windows Installation
+### Requirements
 
-### Option 1: Installer (Recommended)
+- Windows 10 build 19041+ or Windows 11.
+- Administrator rights for hardware-control actions.
+- No separate .NET install required for release artifacts.
+- PawnIO recommended for EC/MSR features and Secure Boot-compatible low-level access.
 
-1. **Download** `OmenCoreSetup-3.7.0.exe` from [Releases](https://github.com/theantipopau/omencore/releases/tag/v3.7.0)
+### Install
 
-2. **Verify** the SHA256 hash published in the release notes before running (optional but recommended)
+1. Download `OmenCoreSetup-3.7.1.exe`.
+2. Verify the SHA256 hash from the GitHub Release notes.
+3. Right-click the installer and choose **Run as administrator**.
+4. Keep **Install PawnIO Driver** selected unless you only need WMI-only features and monitoring.
+5. Choose Start Menu/Desktop/startup options.
+6. Launch OmenCore from the Start Menu.
 
-3. **Run** the installer as Administrator
+If Windows SmartScreen shows an unknown-publisher prompt, choose **More info** and then **Run anyway** only if the SHA256 matches the release notes. See [docs/ANTIVIRUS_FAQ.md](docs/ANTIVIRUS_FAQ.md) if antivirus blocks hardware-driver components.
 
-4. **Select options during install:**
-   - ✅ Install PawnIO driver (RECOMMENDED — enables MSR access, Secure Boot compatible)
-   - ✅ Create Start Menu shortcut
-   - ☐ Create Desktop shortcut (optional)
-   - ☐ Start with Windows (optional)
+### First Launch
 
-5. **Launch** OmenCore from the Start Menu
+1. Run OmenCore as Administrator.
+2. Open Diagnostics or About and confirm your model identity summary.
+3. Check the Fan Control page for the capability badge:
+   - `Curves` means custom curves/manual fan levels are available.
+   - `Profile-only` means OmenCore will use OEM firmware fan profiles and block unsupported curve writes.
+4. Use **Restore OEM Auto** if fans sound stuck after experimenting with Max/custom modes.
 
-> **SmartScreen warning:** If Windows SmartScreen shows an "Unknown publisher" prompt, click **More info → Run anyway**. OmenCore is open-source and does not yet have an EV code-signing certificate. See [ANTIVIRUS_FAQ.md](docs/ANTIVIRUS_FAQ.md) if blocked by antivirus.
+### Important Startup Note
 
-### Option 2: Portable ZIP
+Startup hardware restore is disabled by default. Leave it disabled unless you have validated the behavior on your exact model and understand the recovery steps. Some OMEN/Victus firmware has reacted poorly to automatic hardware writes immediately after boot.
 
-1. **Download** `OmenCore-3.7.0-win-x64.zip` from [Releases](https://github.com/theantipopau/omencore/releases/tag/v3.7.0)
+## Windows Portable ZIP
 
-2. **Verify SHA256** of the ZIP (hash published in GitHub Release notes)
+### Install
 
-3. **Extract** to any location (e.g. `C:\OmenCore`)
+1. Download `OmenCore-3.7.1-win-x64.zip`.
+2. Verify the SHA256 hash from the GitHub Release notes.
+3. Extract to a normal writable folder, for example `C:\Tools\OmenCore`.
+4. Right-click `OmenCore.exe` and choose **Run as administrator**.
 
-4. **Run** `OmenCore.exe` as Administrator (right-click → Run as administrator)
+Avoid extracting into `Program Files` unless you want to manage folder permissions manually.
 
-> For portable installs, PawnIO can be installed separately from [pawnio.eu](https://pawnio.eu) if advanced EC/MSR access is needed.
+### PawnIO With Portable Builds
 
-### Post-Installation (Windows)
+Portable packages do not run the installer flow. If PawnIO is not already installed, install it through the normal OmenCore installer or the bundled driver package used by the release. Reboot after installing PawnIO if diagnostics say the driver is installed but not runtime-ready.
 
-- **Config location:** `%APPDATA%\OmenCore\config.json`
-- **Logs location:** `%LOCALAPPDATA%\OmenCore\OmenCore_<timestamp>.log`
-- OmenCore auto-detects your laptop model and selects the best fan control method (WMI BIOS by default — no drivers needed for basic operation)
-- Use **Settings → OGH Cleanup** to safely remove OMEN Gaming Hub if desired
+### Portable Data Locations
 
-> **Startup hardware restore (v3.3.1+):** `EnableStartupHardwareRestore` is **disabled by default**. This feature applies saved hardware settings on every startup, but on OMEN 16 and Victus models it has been observed to cause CMOS state loss. Do **not** enable this option on those models unless you understand the risk and have a recovery plan.
+- Config: `%APPDATA%\OmenCore\config.json`
+- Logs: `%LOCALAPPDATA%\OmenCore\OmenCore_<timestamp>.log`
+- Diagnostics exports: selected by the user at export time.
 
----
+Deleting the extracted portable folder does not remove config, logs, or PawnIO.
 
-## 🐧 Linux Installation
+## Windows Upgrade
 
-### Quick Start (GUI)
+1. Exit OmenCore from the tray menu.
+2. Install `OmenCoreSetup-3.7.1.exe` over the previous version.
+3. Keep PawnIO selected if you use EC/MSR features.
+4. Launch as Administrator.
+5. Open Diagnostics and confirm:
+   - App version is `3.7.1`.
+   - Model identity uses exact ProductId where available.
+   - Fan/RGB/performance capabilities match your hardware.
+
+If upgrading from a much older version, export or back up `%APPDATA%\OmenCore\config.json` first.
+
+## Linux Package
+
+### Requirements
+
+- x64 Linux.
+- Root privileges for hardware writes.
+- A desktop session for the Avalonia GUI.
+- One of the following hardware paths, depending on model:
+  - `hp-wmi` platform profile.
+  - `hp-wmi`/hwmon PWM and fan input files.
+  - `ec_sys` with write support for older models.
+
+### Quick Start: CLI
 
 ```bash
-# 1. Download the Linux release
-VERSION=3.7.0
+VERSION=3.7.1
 wget "https://github.com/theantipopau/omencore/releases/download/v${VERSION}/OmenCore-${VERSION}-linux-x64.zip"
-
-# 2. Extract
 mkdir -p OmenCore-linux-x64
 unzip "OmenCore-${VERSION}-linux-x64.zip" -d OmenCore-linux-x64
 cd OmenCore-linux-x64
-
-# 3. Make executables
 chmod +x omencore-cli omencore-gui
 
-# 4. Launch GUI (prefer normal user session)
+sudo ./omencore-cli status
+sudo ./omencore-cli diagnose --report > omencore-report.txt
+```
+
+### Quick Start: GUI
+
+```bash
+cd OmenCore-linux-x64
 ./omencore-gui
 ```
 
-> Prefer launching the GUI without `sudo`. OmenCore escalates privileged actions when needed.
-
-> If you must launch as root (e.g. in a minimal session), preserve your display and session variables:
-> ```bash
-> sudo --preserve-env=DISPLAY,XAUTHORITY,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS ./omencore-gui
-> ```
-
-> **Software rendering (v3.3.1+):** OmenCore automatically retries in software mode when GPU/GLX initialization fails. The choice is persisted in `render-startup-state.json` so subsequent launches skip the GPU attempt. You can also force it manually: `OMENCORE_GUI_RENDER_MODE=software ./omencore-gui`
-
-> CachyOS / Arch / Fedora users: same steps. The build is self-contained and all .NET dependencies are bundled.
-
-### Quick Start (CLI)
+Prefer the normal user session for GUI launch. If your environment requires root GUI launch, preserve the desktop/session variables:
 
 ```bash
-# 1. Download
-VERSION=3.7.0
-wget "https://github.com/theantipopau/omencore/releases/download/v${VERSION}/OmenCore-${VERSION}-linux-x64.zip"
+sudo --preserve-env=DISPLAY,XAUTHORITY,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS ./omencore-gui
+```
 
-# 2. Extract
-mkdir -p OmenCore-linux-x64
-unzip "OmenCore-${VERSION}-linux-x64.zip" -d OmenCore-linux-x64
-cd OmenCore-linux-x64
+If the renderer fails, force software rendering:
 
-# 3. Install to system path (optional)
+```bash
+OMENCORE_GUI_RENDER_MODE=software ./omencore-gui
+```
+
+### Optional CLI Install To PATH
+
+```bash
 sudo cp omencore-cli /usr/local/bin/
 sudo chmod +x /usr/local/bin/omencore-cli
-
-# 4. Test
 sudo omencore-cli status
 ```
 
-### Kernel Requirements
+Install `omencore-gui` similarly only if you want a system-wide GUI binary.
 
-| OMEN Model | Recommended Kernel | Access Method | Notes |
-|------------|-------------------|---------------|-------|
-| **2023+ (13th Gen+)** | **6.18+** | `hp-wmi` | ✅ Best support — native sysfs fan control |
-| 2023+ (13th Gen+) | 6.5–6.17 | `hp-wmi` | Basic support, some features limited |
-| 2020–2022 | Any | `ec_sys` | `sudo modprobe ec_sys write_support=1` |
-| Pre-2020 | Any | `ec_sys` | Limited; EC registers vary by model |
+## Linux Hardware Paths
 
-**Check your kernel version:**
+### 2023+ OMEN Models
+
+Most 2023+ models should try `hp-wmi` first:
+
 ```bash
-uname -r
+sudo modprobe hp-wmi
+ls /sys/devices/platform/hp-wmi 2>/dev/null
+find /sys/devices/platform -iname '*profile*' -o -iname 'pwm*' -o -iname 'fan*_input'
 ```
 
-**Why kernel 6.18+?**
-Linux 6.18 includes enhanced HP-WMI driver patches for OMEN laptops: native fan curve control via sysfs, improved thermal profile switching, and better RPM readback. Most gaming distros (CachyOS, Arch, Nobara) already ship 6.18+. Ubuntu LTS users can use [mainline](https://github.com/bkw777/mainline) to upgrade.
+Some systems expose only profile switching. Others expose PWM/fan input via hwmon.
 
-**For older models (pre-2023):**
+### Older Models With ec_sys
+
 ```bash
-# Load EC module with write support
 sudo modprobe ec_sys write_support=1
+ls /sys/kernel/debug/ec/ec0/io
+```
 
-# Make persistent across reboots
+To load at boot:
+
+```bash
 echo "ec_sys" | sudo tee /etc/modules-load.d/ec_sys.conf
 echo "options ec_sys write_support=1" | sudo tee /etc/modprobe.d/ec_sys.conf
 ```
 
-**For very new models (2025+):**
-Brand-new OMEN models may not yet be in the hp-wmi driver. Check recognition with `dmesg | grep -i wmi`. Advanced users can patch the hp-wmi driver from [patchwork.kernel.org](https://patchwork.kernel.org/project/platform-driver-x86/list/).
+### hp-omen-gaming-wmi-dkms Compatible Paths
 
-### CLI Usage
+Some Arch/CachyOS users test `hp-omen-gaming-wmi-dkms`. OmenCore does not install or manage DKMS modules. If the module exposes standard `hp-wmi`/hwmon files such as `pwm1_enable`, `pwm1`, and `fan1_input`, OmenCore can label and use it as an `hp-omen-gaming-wmi-dkms compatible` backend.
+
+Install, remove, rebuild, and Secure Boot-sign DKMS packages through your distro tools.
+
+## Linux CLI Examples
 
 ```bash
-# System status
-sudo omencore-cli status
-sudo omencore-cli status --json       # JSON output for scripting
+# Status and diagnostics
+sudo ./omencore-cli status
+sudo ./omencore-cli status --json
+sudo ./omencore-cli diagnose --report > omencore-report.txt
 
 # Fan control
-sudo omencore-cli fan --profile auto
-sudo omencore-cli fan --profile max
-sudo omencore-cli fan --speed 80      # Set 80% speed manually
+sudo ./omencore-cli fan --profile auto
+sudo ./omencore-cli fan --profile max
+sudo ./omencore-cli fan --speed 80
 
-# Keyboard RGB
-sudo omencore-cli keyboard --color FF0000 --brightness 100
+# Keyboard lighting
+sudo ./omencore-cli keyboard --color FF0000 --brightness 100
 
-# Battery management
-sudo omencore-cli battery status
-sudo omencore-cli battery threshold 80   # Limit charge to 80%
+# Battery
+sudo ./omencore-cli battery status
+sudo ./omencore-cli battery threshold 80
 
-# Continuous monitoring
-sudo omencore-cli monitor --interval 1000
-
-# Diagnostics bundle (for bug reports)
-sudo omencore-cli --report > omencore-report.txt
+# Monitoring
+sudo ./omencore-cli monitor --interval 1000
 ```
 
-### Running as a Daemon
+Unsupported commands should report a capability reason instead of silently pretending to work.
+
+## Linux Daemon
 
 ```bash
-# Install systemd service
-sudo omencore-cli daemon --install
-
-# Enable and start
+sudo ./omencore-cli daemon --install
 sudo systemctl enable omencore
 sudo systemctl start omencore
-
-# Check status and logs
 sudo systemctl status omencore
 journalctl -u omencore -f
 ```
 
-**Configuration:**
-- Daemon config: `/etc/omencore/config.toml`
+Configuration locations:
+
+- System daemon config: `/etc/omencore/config.toml`
 - User config: `~/.config/omencore/config.toml`
 
-Generate default config:
+Generate a starter config:
+
 ```bash
-omencore-cli daemon --generate-config > ~/.config/omencore/config.toml
+mkdir -p ~/.config/omencore
+./omencore-cli daemon --generate-config > ~/.config/omencore/config.toml
 ```
 
-### Troubleshooting Linux
+## Diagnostics And Bug Reports
 
-#### "Permission denied" errors
+### Windows
 
-OmenCore requires root for hardware access:
+1. Reproduce the issue.
+2. Open Diagnostics.
+3. Export diagnostics.
+4. Include the model identity summary and the newest `%LOCALAPPDATA%\OmenCore\OmenCore_<timestamp>.log`.
+
+For fan reports, include what you clicked before the issue, whether **Restore OEM Auto** helped, and whether RPM/level readback changed.
+
+### Linux
+
+From a source checkout:
+
 ```bash
-./omencore-gui
-sudo omencore-cli status
+./qa/collect-linux-triage.sh
 ```
 
-#### "ec_sys module not found"
-
-Some distros (Fedora 43+, some Arch builds) don't ship `ec_sys`:
+From a release package:
 
 ```bash
-# On 2023+ models, use hp-wmi instead:
-sudo modprobe hp-wmi
-
-# Check if ACPI EC debug path is available:
-ls /sys/kernel/debug/ec/ec0/io
+sudo ./omencore-cli diagnose --report > omencore-report.txt
+uname -a > kernel.txt
+dmesg | grep -i -E "hp|omen|wmi|ec" > dmesg-omen.txt
 ```
 
-#### Fan control has no effect
+Attach those files to the issue.
+
+## Troubleshooting
+
+### Windows: Fan Control Has No Effect
+
+- Confirm the app is running as Administrator.
+- Check Fan Control capability badge.
+- Export diagnostics and inspect fan command history.
+- If on a profile-only model, use OEM profiles instead of custom curves.
+- Use **Restore OEM Auto** before retesting.
+
+### Windows: Fans Stay High After Load
+
+1. Press **Restore OEM Auto**.
+2. Wait 20-30 seconds.
+3. Export diagnostics.
+4. Include temperature, RPM, active fan mode, active performance profile, and the model identity summary.
+
+WMI V1 boards can hold stale manual floors. v3.7.1 enables floor-clear overrides only where field evidence supports it.
+
+### Windows: PawnIO Installed But Not Ready
+
+- Reboot Windows after installing PawnIO.
+- Run OmenCore as Administrator.
+- Check Diagnostics for PawnIO EC/MSR status.
+- Secure Boot is supported with PawnIO; older WinRing0 warnings usually indicate leftovers or another utility.
+
+### Windows: GPU Power Boost Does Not Reach Expected Wattage
+
+- Confirm GPU Power Boost is available in System Control.
+- Apply Minimum, Medium, and Maximum and check diagnostics/readback.
+- Compare against a consistent workload.
+- Some firmware accepts WMI boost states but still clamps effective wattage.
+- Extended boost is hardware-specific and should not be assumed on RTX 4050/4060-class systems.
+
+### Windows: RGB Turns Off Or Does Not Restore
+
+- Close OMEN Light Studio and OMEN Gaming Hub lighting services if they are taking ownership.
+- Use the Lighting page restore/apply action.
+- Export diagnostics and include `rgb-control-path.txt`.
+- OMEN Max per-key hardware detection does not mean the dedicated per-key editor is enabled yet.
+
+### Windows: OSD Does Not Appear In Fullscreen Game
+
+- Try borderless fullscreen.
+- Confirm OSD is enabled and hotkey is registered.
+- Try RTSS for FPS/overlay interoperability.
+- Some exclusive fullscreen or anti-cheat paths can block normal WPF topmost overlays.
+
+### Linux: Permission Denied
+
+Use `sudo` for CLI hardware commands:
 
 ```bash
-# Check whether your model is recognized by hp-wmi
-dmesg | grep -i wmi
-dmesg | grep -i omen
-
-# If not recognized, generate a report for the issue tracker:
-sudo omencore-cli --report > omencore-report.txt
-```
-
-If hp-wmi exists but no usable profile files are exposed:
-
-```bash
-# Check for both underscore and hyphen variants
-ls /sys/devices/platform/hp-wmi/*profile* 2>/dev/null
-
-# Optional workaround on some OMEN boards (not universal):
-# add kernel cmdline parameter and reboot
-# hp_wmi.force_multiplex=1
-```
-
-Arch/CachyOS users can test AUR package `hp-omen-gaming-wmi-dkms`. On many OMEN systems this automates the hp-wmi profile-path setup (including multiplex-related behavior) with less manual tuning. Results are still board- and firmware-dependent, and some systems still do not expose usable profile control after installing it.
-
-OmenCore 3.7.0 treats this as an experimental compatibility backend rather than a separate Linux fork. If the DKMS module exposes standard `hp-wmi`/`hwmon` files such as `pwm1_enable`, `pwm1`, and `fan1_input`, `omencore-cli status` and `omencore-cli diagnose --report` will label it as an `hp-omen-gaming-wmi-dkms compatible` backend and use the same safe sysfs path. OmenCore does not install DKMS modules itself; install/remove/sign DKMS packages through your distro tools.
-
-If these steps do not help, capture diagnostics and include board + kernel details:
-
-```bash
-uname -r
-sudo omencore-cli diagnose --report > omencore-report.txt
-```
-
-#### GUI won't start (Avalonia)
-
-```bash
-# Check for missing system libraries
-ldd ./omencore-gui | grep "not found"
-
-# Try with an explicit display
-DISPLAY=:0 ./omencore-gui
-
-# If elevated launch is unavoidable, preserve DBus/session variables
-sudo --preserve-env=DISPLAY,XAUTHORITY,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS,OMENCORE_GUI_RENDER_MODE ./omencore-gui
-```
-
-Notes:
-- OmenCore now retries once in software mode automatically when Linux renderer initialization fails.
-- After repeated renderer startup failures, OmenCore can persist software as last-known-good render mode.
-
-#### "Could not load file or assembly 'System.Runtime, Version=8.0.0.0'"
-
-```bash
-# Re-download fixed Linux package into a clean folder
-rm -rf OmenCore-linux-x64
-mkdir -p OmenCore-linux-x64
-VERSION=3.7.0
-wget "https://github.com/theantipopau/omencore/releases/download/v${VERSION}/OmenCore-${VERSION}-linux-x64.zip"
-unzip "OmenCore-${VERSION}-linux-x64.zip" -d OmenCore-linux-x64
-cd OmenCore-linux-x64
-chmod +x omencore-cli omencore-gui
-
-# Verify binary and retry
-file ./omencore-cli
 sudo ./omencore-cli status
 ```
 
-#### "Method not found: Boolean System.OperatingSystem.IsWindows()"
+Launch the GUI as a normal user unless you specifically need root GUI access.
+
+### Linux: GUI Does Not Start
 
 ```bash
-# Fixed in v3.3.1+ Linux GUI package
-./omencore-gui
+ldd ./omencore-gui | grep "not found"
+DISPLAY=:0 ./omencore-gui
+OMENCORE_GUI_RENDER_MODE=software ./omencore-gui
 ```
 
----
+If elevated launch is unavoidable:
 
-## 🗑️ Uninstallation
+```bash
+sudo --preserve-env=DISPLAY,XAUTHORITY,XDG_RUNTIME_DIR,DBUS_SESSION_BUS_ADDRESS,OMENCORE_GUI_RENDER_MODE ./omencore-gui
+```
 
-### Windows — Installer
+### Linux: ec_sys Missing
 
-1. Exit OmenCore (right-click tray icon → Exit)
-2. Uninstall via **Settings → Apps → OmenCore → Uninstall**
-3. *Optional:* Remove PawnIO driver — Device Manager → System devices → PawnIO → Uninstall
-4. *Optional:* Delete remaining user data:
+Some kernels do not ship `ec_sys`. On newer OMEN systems, check `hp-wmi` first:
+
+```bash
+sudo modprobe hp-wmi
+find /sys/devices/platform -iname '*profile*' -o -iname 'pwm*' -o -iname 'fan*_input'
+```
+
+If no control files exist, collect diagnostics and include kernel/distro/model details.
+
+## Uninstall
+
+### Windows Installer
+
+1. Exit OmenCore from the tray.
+2. Open **Settings -> Apps -> Installed apps**.
+3. Uninstall OmenCore.
+4. Optional: remove PawnIO from Device Manager or its uninstaller if you no longer need it.
+5. Optional: delete user data:
    - `%APPDATA%\OmenCore\`
    - `%LOCALAPPDATA%\OmenCore\`
 
-### Windows — Portable
+### Windows Portable
 
-Delete the folder where you extracted OmenCore. No registry entries or system files are created by the portable build.
+1. Exit OmenCore.
+2. Delete the extracted folder.
+3. Optional: delete `%APPDATA%\OmenCore\` and `%LOCALAPPDATA%\OmenCore\`.
+4. Optional: uninstall PawnIO separately if installed.
 
 ### Linux
 
 ```bash
-# Stop and disable daemon (if installed)
-sudo systemctl stop omencore
-sudo systemctl disable omencore
-
-# Remove binaries
+sudo systemctl stop omencore 2>/dev/null || true
+sudo systemctl disable omencore 2>/dev/null || true
 sudo rm -f /usr/local/bin/omencore-cli
 sudo rm -f /usr/local/bin/omencore-gui
-
-# Remove config and data
 sudo rm -rf /etc/omencore
 rm -rf ~/.config/omencore
-
-# Remove extracted archive (if not installed system-wide)
 rm -rf ~/OmenCore-linux-x64
 ```
 
----
+If you enabled `ec_sys` at boot:
 
-## 📚 Additional Resources
+```bash
+sudo rm -f /etc/modules-load.d/ec_sys.conf
+sudo rm -f /etc/modprobe.d/ec_sys.conf
+```
 
-- [README.md](../README.md) — Project overview, features, and requirements
-- [docs/LINUX_INSTALL_GUIDE.md](docs/LINUX_INSTALL_GUIDE.md) — Extended Linux guide with distro-specific notes
-- [docs/ANTIVIRUS_FAQ.md](docs/ANTIVIRUS_FAQ.md) — Antivirus false positive handling
-- [docs/DEFENDER_FALSE_POSITIVE.md](docs/DEFENDER_FALSE_POSITIVE.md) — Windows Defender exclusion steps
-- [Discord Server](https://discord.gg/9WhJdabGk8) — Community support
-- [GitHub Issues](https://github.com/theantipopau/omencore/issues) — Bug reports and feature requests
+## Release Operator Notes
+
+For maintainers preparing 3.7.1:
+
+```powershell
+dotnet restore OmenCore.sln
+dotnet build OmenCore.sln -c Release --no-restore
+dotnet test src/OmenCoreApp.Tests/OmenCoreApp.Tests.csproj -c Release --no-build
+git diff --check
+pwsh ./build-installer.ps1
+pwsh ./build-linux-package.ps1
+```
+
+After building:
+
+```powershell
+Get-FileHash artifacts\OmenCoreSetup-3.7.1.exe -Algorithm SHA256
+Get-FileHash artifacts\OmenCore-3.7.1-win-x64.zip -Algorithm SHA256
+Get-FileHash artifacts\OmenCore-3.7.1-linux-x64.zip -Algorithm SHA256
+```
+
+Publish those hashes in the GitHub Release notes. Do not publish an in-app update without SHA256 hashes.
+
+## Additional Resources
+
+- [README.md](README.md)
+- [docs/CHANGELOG_v3.7.1.md](docs/CHANGELOG_v3.7.1.md)
+- [docs/FINAL_RELEASE_CHECKLIST.md](docs/FINAL_RELEASE_CHECKLIST.md)
+- [docs/LINUX_INSTALL_GUIDE.md](docs/LINUX_INSTALL_GUIDE.md)
+- [docs/ANTIVIRUS_FAQ.md](docs/ANTIVIRUS_FAQ.md)
+- [docs/DEFENDER_FALSE_POSITIVE.md](docs/DEFENDER_FALSE_POSITIVE.md)
+- [drivers/PawnIO/README.md](drivers/PawnIO/README.md)
+- [Discord](https://discord.gg/9WhJdabGk8)
+- [GitHub Issues](https://github.com/theantipopau/omencore/issues)

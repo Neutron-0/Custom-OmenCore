@@ -302,7 +302,8 @@ namespace OmenCore.ViewModels
                         _fanService,
                         _keyboardLightingService,
                         () => _rgbManager,
-                        _ecOperationCoordinator);
+                        _ecOperationCoordinator,
+                        _performanceModeService);
                     
                     _settings = new SettingsViewModel(_logging, _configService, _systemInfoService, 
                         _fanCleaningService, _biosUpdateService, profileExportService, diagnosticsExportService,

@@ -1,5 +1,7 @@
 using FluentAssertions;
 using OmenCore.Hardware;
+using OmenCore.Models;
+using OmenCore.Services.Diagnostics;
 using Xunit;
 
 namespace OmenCoreApp.Tests.Hardware
@@ -52,6 +54,8 @@ namespace OmenCoreApp.Tests.Hardware
             caps8c58.SupportsFanCurves.Should().BeFalse();
             caps8e41.SupportsFanControlEc.Should().BeFalse();
             caps8e41.SupportsFanCurves.Should().BeFalse();
+            caps8e41.AllowV1AutoModeFloorClear.Should().BeTrue("8E41 WMI V1 auto handoff must clear stale manual floors after Max/curve attempts");
+            caps8e41.Notes.Should().Contain("2026-06-02");
         }
 
         [Fact]
@@ -202,6 +206,35 @@ namespace OmenCoreApp.Tests.Hardware
             caps.HasFourZoneRgb.Should().BeFalse();
             caps.SupportsGpuPowerBoost.Should().BeFalse();
             caps.SupportsUndervolt.Should().BeFalse();
+            caps.AllowV1AutoModeFloorClear.Should().BeTrue("8BD4 WMI V1 auto handoff must clear stale fan floors after long gaming sessions");
+            caps.Notes.Should().Contain("2026-06-03");
+        }
+
+        [Fact]
+        public void ModelIdentitySummary_8BD4_ReportsExactProductId()
+        {
+            var modelConfig = ModelCapabilityDatabase.GetPreferredCapabilities("8BD4", "Victus by HP Gaming Laptop 16-s0xxx");
+            var systemInfo = new SystemInfo
+            {
+                Manufacturer = "HP",
+                Model = "Victus by HP Gaming Laptop 16-s0xxx",
+                ProductName = "8BD4",
+                SystemSku = "CND3440GJ3"
+            };
+            var capabilities = new DeviceCapabilities
+            {
+                ProductId = "8BD4",
+                ModelName = "Victus by HP Gaming Laptop 16-s0xxx",
+                ModelFamily = OmenModelFamily.Victus,
+                IsKnownModel = true,
+                ModelConfig = modelConfig
+            };
+
+            var summary = ModelIdentityResolutionService.Build(systemInfo, capabilities);
+
+            summary.ResolutionSource.Should().Be("Exact ProductId");
+            summary.Confidence.Should().Be("Medium");
+            summary.WarningText.Should().Contain("ProductId");
         }
 
         [Fact]
@@ -261,6 +294,7 @@ namespace OmenCoreApp.Tests.Hardware
             caps.SupportsIndependentFanCurves.Should().BeFalse();
             caps.SupportsUndervolt.Should().BeFalse();
             caps.AllowDecoupledWmiThermalPolicyFallback.Should().BeTrue();
+            caps.AllowV1AutoModeFloorClear.Should().BeTrue("8D2F V1 auto handoff must clear the manual floor so fans can ramp down after load");
             caps.UserVerified.Should().BeTrue("the exact 8D2F board identity has field confirmation, even though risky direct EC features stay disabled");
         }
 
@@ -335,8 +369,9 @@ namespace OmenCoreApp.Tests.Hardware
             caps.SupportsFanControlEc.Should().BeFalse("8BCD field evidence points at V1 WMI fan control, not validated direct EC fan writes");
             caps.SupportsIndependentFanCurves.Should().BeFalse("independent curve UI requires validated independent fan ownership");
             caps.MaxFanLevel.Should().Be(63, "latest field evidence shows this board reaches the 63-level ceiling (~6300 RPM)");
+            caps.AllowV1AutoModeFloorClear.Should().BeTrue("8BCD v3.7.0 logs repeatedly skipped V1 zero-floor clear while fans stayed elevated after load");
             caps.UserVerified.Should().BeFalse("2026-05-20 Discord report still needs physical follow-up after the 3.7.0 fixes");
-            caps.Notes.Should().Contain("2026-05-29");
+            caps.Notes.Should().Contain("2026-06-05/06");
         }
     }
 }

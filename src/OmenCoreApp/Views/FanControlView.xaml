@@ -64,7 +64,7 @@
                 <StackPanel Grid.Column="0">
                     <TextBlock Text="FAN &amp; THERMAL CONTROL" FontSize="14" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}"
                                ToolTip="Manage your laptop's cooling performance. All fan control uses your laptop's standard firmware interface (WMI BIOS). Software commands cannot damage hardware."/>
-                    <TextBlock Text="Customize fan curves and monitor cooling performance" FontSize="11" Foreground="{StaticResource TextTertiaryBrush}" Margin="0,2,0,0"/>
+                    <TextBlock Text="{Binding FanProfileHeaderHint}" FontSize="11" Foreground="{StaticResource TextTertiaryBrush}" Margin="0,2,0,0"/>
                     <Border Background="#1A1A1E" CornerRadius="12" Padding="10,5" Margin="0,8,0,0" HorizontalAlignment="Left">
                         <Border.Style>
                             <Style TargetType="Border">
@@ -102,6 +102,12 @@
                             </StackPanel>
                         </Border>
                         <TextBlock Text="{Binding CurrentFanModeName}" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource AccentBrush}" VerticalAlignment="Center"/>
+                        <Border Style="{StaticResource StatusVisualBadge}" Tag="{Binding FanCapabilityVisualState}" Padding="6,2" Margin="10,0,0,0">
+                            <StackPanel Orientation="Horizontal">
+                                <Path Style="{StaticResource StatusVisualGlyph}" Tag="{Binding FanCapabilityVisualState}" Width="10" Height="10" Margin="0,0,4,0"/>
+                                <TextBlock Text="{Binding FanCapabilityBadgeText}" Style="{StaticResource StatusVisualText}" Tag="{Binding FanCapabilityVisualState}"/>
+                            </StackPanel>
+                        </Border>
                         <Border Background="#1A4CAF50" CornerRadius="4" Padding="6,2" Margin="10,0,0,0"
                                 Visibility="{Binding IsCurveActive, Converter={StaticResource BoolToVisibility}}">
                             <TextBlock Text="CURVE ACTIVE" FontSize="9" FontWeight="Bold" Foreground="{StaticResource SuccessBrush}"/>
@@ -168,7 +174,16 @@
                             <TextBlock Text="🌀" FontSize="14" Margin="0,0,8,0" VerticalAlignment="Center"/>
                             <TextBlock Text="FAN PROFILES" FontSize="11" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" VerticalAlignment="Center"/>
                         </StackPanel>
-                        <TextBlock Grid.Column="2" Text="Select a preset or create custom curve" FontSize="10" Foreground="{StaticResource TextTertiaryBrush}" VerticalAlignment="Center" TextWrapping="Wrap" TextAlignment="Right" MaxWidth="220" Margin="12,0,0,0"/>
+                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                            <TextBlock Text="{Binding FanProfileHeaderHint}" FontSize="10" Foreground="{StaticResource TextTertiaryBrush}" VerticalAlignment="Center" TextWrapping="Wrap" TextAlignment="Right" MaxWidth="220"/>
+                            <Button Command="{Binding RestoreOemAutoCommand}"
+                                    Style="{StaticResource OutlineButtonSmall}"
+                                    Padding="10,6"
+                                    Margin="10,0,0,0"
+                                    ToolTip="Clear OmenCore fan ownership and return control to firmware auto mode">
+                                <TextBlock Text="Restore OEM Auto" FontSize="10"/>
+                            </Button>
+                        </StackPanel>
                     </Grid>
                 </Border>
                 
@@ -241,7 +256,7 @@
                             </Border>
                             
                             <TextBlock Grid.Row="1" Text="Extreme" FontSize="13" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" HorizontalAlignment="Center"/>
-                            <TextBlock Grid.Row="2" Text="@75C" FontSize="9" FontWeight="SemiBold" Foreground="#64B5F6" HorizontalAlignment="Center" Margin="0,2,0,6"/>
+                            <TextBlock Grid.Row="2" Text="{Binding ExtremePresetSubtitle}" FontSize="9" FontWeight="SemiBold" Foreground="#64B5F6" HorizontalAlignment="Center" Margin="0,2,0,6"/>
                             
                             <Border Grid.Row="3" Background="#2064B5F6" CornerRadius="4" Padding="6,2" HorizontalAlignment="Center"
                                     Visibility="{Binding IsExtremeSelected, Converter={StaticResource BoolToVisibility}}">
@@ -279,7 +294,7 @@
                             </Border>
                             
                             <TextBlock Grid.Row="1" Text="Gaming" FontSize="13" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" HorizontalAlignment="Center"/>
-                            <TextBlock Grid.Row="2" Text="@80°C" FontSize="9" FontWeight="SemiBold" Foreground="#9C27B0" HorizontalAlignment="Center" Margin="0,2,0,6"/>
+                            <TextBlock Grid.Row="2" Text="{Binding GamingPresetSubtitle}" FontSize="9" FontWeight="SemiBold" Foreground="#9C27B0" HorizontalAlignment="Center" Margin="0,2,0,6"/>
                             
                             <Border Grid.Row="3" Background="#209C27B0" CornerRadius="4" Padding="6,2" HorizontalAlignment="Center"
                                     Visibility="{Binding IsGamingSelected, Converter={StaticResource BoolToVisibility}}">
@@ -370,9 +385,10 @@
                                  Command="{Binding ApplyCustomCurveCommand}"
                                  Style="{StaticResource FanPresetCard}"
                                  Tag="Custom"
+                                 IsEnabled="{Binding FanCurvesAvailable}"
                                  MouseEnter="PresetCard_MouseEnter"
                                  MouseLeave="PresetCard_MouseLeave"
-                                 ToolTip="Apply your custom fan curve defined in the editor below."
+                                 ToolTip="{Binding CustomCurveTooltip}"
                                  Margin="6,0,0,0">
                         <Grid>
                             <Grid.RowDefinitions>
@@ -393,7 +409,7 @@
                             </Border>
                             
                             <TextBlock Grid.Row="1" Text="Custom" FontSize="13" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" HorizontalAlignment="Center"/>
-                            <TextBlock Grid.Row="2" Text="Editor" FontSize="9" FontWeight="SemiBold" Foreground="#FF6B35" HorizontalAlignment="Center" Margin="0,2,0,6"/>
+                            <TextBlock Grid.Row="2" Text="{Binding CustomPresetSubtitle}" FontSize="9" FontWeight="SemiBold" Foreground="#FF6B35" HorizontalAlignment="Center" Margin="0,2,0,6"/>
                             
                             <Border Grid.Row="3" Background="#20FF6B35" CornerRadius="4" Padding="6,2" HorizontalAlignment="Center"
                                     Visibility="{Binding IsCustomSelected, Converter={StaticResource BoolToVisibility}}">
@@ -405,7 +421,7 @@
                 
                 <!-- Settings Row - Compact horizontal layout -->
                 <StackPanel Grid.Row="2"
-                            Visibility="{Binding IsCustomSelected, Converter={StaticResource BoolToVisibility}}">
+                            Visibility="{Binding ShowCurveEditor, Converter={StaticResource BoolToVisibility}}">
                     <!-- Save Custom Preset -->
                     <WrapPanel>
                         <TextBox Text="{Binding CustomPresetName, UpdateSourceTrigger=PropertyChanged, Mode=TwoWay}" 
@@ -518,7 +534,7 @@
 
         <!-- Fan Curve Editor and Telemetry -->
         <Grid Grid.Row="4"
-              Visibility="{Binding IsCustomSelected, Converter={StaticResource BoolToVisibility}}">
+              Visibility="{Binding ShowCurveEditor, Converter={StaticResource BoolToVisibility}}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" MinWidth="320"/>
                 <ColumnDefinition Width="300" MinWidth="220"/>

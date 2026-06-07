@@ -480,6 +480,55 @@ namespace OmenCore.Services
             }
         }
 
+        public bool RestoreOemAutoControl()
+        {
+            if (!FanWritesAvailable)
+            {
+                var reason = DesktopFanWritesBlocked
+                    ? DesktopFanWriteBlockedMessage
+                    : $"Fan control unavailable: {_fanController.Status}";
+                RecordFanCommand("RestoreOemAutoControl", "OEM auto", false, reason);
+                _logging.Warn($"OEM auto restore skipped; {reason}");
+                return false;
+            }
+
+            try
+            {
+                DisableCurve();
+                _activePreset = null;
+                _currentFanMode = "Auto";
+
+                var restored = RestoreAutoControlSerialized();
+                var reset = false;
+                try
+                {
+                    reset = _fanController.ResetEcToDefaults();
+                }
+                catch (Exception resetEx)
+                {
+                    _logging.Warn($"OEM auto restore reset step failed: {resetEx.Message}");
+                }
+
+                var success = restored || reset;
+                RecordFanCommand(
+                    "RestoreOemAutoControl",
+                    "OEM auto",
+                    success,
+                    $"RestoreAutoControl={restored}; ResetEcToDefaults={reset}");
+                _logging.Info(success
+                    ? "OEM auto fan control restored"
+                    : "OEM auto restore did not report success");
+                PublishPresetApplied(_currentFanMode);
+                return success;
+            }
+            catch (Exception ex)
+            {
+                RecordFanCommand("RestoreOemAutoControl", "OEM auto", false, ex.Message);
+                _logging.Error("Failed to restore OEM auto fan control", ex);
+                return false;
+            }
+        }
+
         /// <summary>
         /// Prepare fan control for system suspend by pausing active fan-engine writes
         /// and restoring BIOS auto policy to avoid fan spikes while sleeping.
@@ -796,6 +845,15 @@ namespace OmenCore.Services
         /// </summary>
         public bool ApplyPreset(FanPreset preset, bool immediate = false)
         {
+            if (!FanCurvesAvailable && HasCurvePayload(preset) && preset.Mode == FanMode.Manual)
+            {
+                _logging.Warn($"Fan preset '{preset.Name}' skipped; custom fan curves are disabled for this model.");
+                RecordFanCommand("ApplyPreset", preset.Name, false, "Fan curves disabled by model capability database");
+                return false;
+            }
+
+            preset = PreparePresetForCapability(preset);
+
             if (!FanWritesAvailable)
             {
                 _logging.Warn($"Fan preset '{preset.Name}' skipped; fan control unavailable ({_fanController.Status})");
@@ -1072,6 +1130,13 @@ namespace OmenCore.Services
             {
                 _logging.Warn($"Custom fan curve skipped; fan control unavailable ({_fanController.Status})");
                 RecordFanCommand("ApplyCustomCurve", "custom curve", false, $"Fan control unavailable: {_fanController.Status}");
+                return;
+            }
+
+            if (!FanCurvesAvailable)
+            {
+                _logging.Warn("Custom fan curve skipped; this model is limited to OEM fan profiles.");
+                RecordFanCommand("ApplyCustomCurve", "custom curve", false, "Fan curves disabled by model capability database");
                 return;
             }
             
@@ -1385,6 +1450,10 @@ namespace OmenCore.Services
         }
         public bool FanWritesAvailable => _fanController.IsAvailable && !DesktopFanWritesBlocked;
 
+        public bool FanCurvesAvailable => FanWritesAvailable && (_capabilities?.ModelConfig?.SupportsFanCurves ?? true);
+
+        public bool ManualFanControlAvailable => FanCurvesAvailable;
+
         private bool DesktopFanWritesBlocked => _capabilities?.FanWritesBlockedForSafety == true;
 
         private const string DesktopFanWriteBlockedMessage = "Desktop fan writes disabled by v3.6.3 safety gate; telemetry only";
@@ -1421,6 +1490,29 @@ namespace OmenCore.Services
             }
 
             return false;
+        }
+
+        private FanPreset PreparePresetForCapability(FanPreset preset)
+        {
+            if (FanCurvesAvailable || !HasCurvePayload(preset) || IsMaxPreset(preset))
+            {
+                return preset;
+            }
+
+            var mode = preset.Mode;
+            if (mode == FanMode.Manual)
+            {
+                mode = FanMode.Auto;
+            }
+
+            _logging.Warn($"Fan preset '{preset.Name}' contains a curve, but custom fan curves are disabled for this model; applying OEM fan profile only.");
+            return new FanPreset
+            {
+                Name = preset.Name,
+                Mode = mode,
+                Curve = new List<FanCurvePoint>(),
+                IsBuiltIn = preset.IsBuiltIn
+            };
         }
 
         private void MarkCurveWrite(DateTime now)
@@ -2910,6 +3002,13 @@ namespace OmenCore.Services
                 return;
             }
 
+            if (!ManualFanControlAvailable)
+            {
+                _logging.Warn("ForceSetFanSpeed skipped; manual fan levels are disabled for this model.");
+                RecordFanCommand("ForceSetFanSpeed", $"{percent}%", false, "Manual fan levels disabled by model capability database");
+                return;
+            }
+
             try
             {
                 var success = SetFanSpeedSerialized(percent);
@@ -2935,6 +3034,13 @@ namespace OmenCore.Services
             {
                 _logging.Warn("ForceSetFanSpeeds skipped; fan control unavailable");
                 RecordFanCommand("ForceSetFanSpeeds", $"CPU {cpuPercent}% / GPU {gpuPercent}%", false, $"Fan control unavailable: {_fanController.Status}");
+                return false;
+            }
+
+            if (!ManualFanControlAvailable)
+            {
+                _logging.Warn("ForceSetFanSpeeds skipped; manual fan levels are disabled for this model.");
+                RecordFanCommand("ForceSetFanSpeeds", $"CPU {cpuPercent}% / GPU {gpuPercent}%", false, "Manual fan levels disabled by model capability database");
                 return false;
             }
 

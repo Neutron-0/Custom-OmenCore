@@ -115,17 +115,10 @@ namespace OmenCore.Services.Diagnostics
             summary.IsUserVerified = resolvedModel.UserVerified;
             summary.Notes = resolvedModel.Notes ?? string.Empty;
 
-            if (modelNameMatch != null && string.Equals(resolvedModel.ProductId, modelNameMatch.ProductId, StringComparison.OrdinalIgnoreCase))
-            {
-                summary.ResolutionSource = "Model-name pattern";
-                summary.Confidence = resolvedModel.UserVerified ? "Medium" : "Low";
-                summary.BadgeText = "Inferred match";
-                summary.BadgeTone = "warning";
-                summary.WarningText = "Capability profile was inferred from the WMI model name instead of an exact ProductId entry.";
-                return;
-            }
-
-            if (productIdMatch != null && string.Equals(resolvedModel.ProductId, productIdMatch.ProductId, StringComparison.OrdinalIgnoreCase))
+            var productIdIsAmbiguous = ModelCapabilityDatabase.IsAmbiguousProductId(capabilities.ProductId);
+            if (!productIdIsAmbiguous &&
+                productIdMatch != null &&
+                string.Equals(resolvedModel.ProductId, productIdMatch.ProductId, StringComparison.OrdinalIgnoreCase))
             {
                 summary.ResolutionSource = "Exact ProductId";
                 summary.Confidence = resolvedModel.UserVerified ? "High" : "Medium";
@@ -135,6 +128,20 @@ namespace OmenCore.Services.Diagnostics
                 {
                     summary.WarningText = "Capability profile matched by ProductId, but the entry is not user-verified yet.";
                 }
+                return;
+            }
+
+            if (modelNameMatch != null && string.Equals(resolvedModel.ProductId, modelNameMatch.ProductId, StringComparison.OrdinalIgnoreCase))
+            {
+                summary.ResolutionSource = productIdIsAmbiguous
+                    ? "Ambiguous ProductId + model-name disambiguation"
+                    : "Model-name pattern";
+                summary.Confidence = resolvedModel.UserVerified ? "Medium" : "Low";
+                summary.BadgeText = "Inferred match";
+                summary.BadgeTone = "warning";
+                summary.WarningText = productIdIsAmbiguous
+                    ? "Capability profile used the WMI model name to disambiguate a shared ProductId."
+                    : "Capability profile was inferred from the WMI model name instead of an exact ProductId entry.";
                 return;
             }
 

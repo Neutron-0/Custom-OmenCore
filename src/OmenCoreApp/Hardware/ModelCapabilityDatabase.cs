@@ -70,6 +70,12 @@ namespace OmenCore.Hardware
         /// performance behavior if direct EC/MSR power-limit writes are unavailable.
         /// </summary>
         public bool AllowDecoupledWmiThermalPolicyFallback { get; set; } = false;
+
+        /// <summary>
+        /// Optional override for WMI V1 auto-mode floor clearing. Null follows the conservative
+        /// profile default; true allows SetFanLevel(0,0) after Default/Auto handoff.
+        /// </summary>
+        public bool? AllowV1AutoModeFloorClear { get; set; }
         
         /// <summary>Available performance mode names.</summary>
         public string[] PerformanceModes { get; set; } = new[] { "Default", "Performance", "Cool" };
@@ -536,8 +542,9 @@ namespace OmenCore.Hardware
                 HasMuxSwitch = true,
                 SupportsGpuPowerBoost = true,
                 HasFourZoneRgb = true,
+                AllowV1AutoModeFloorClear = true,
                 UserVerified = false,
-                Notes = "Discord 2026-05-20 + field follow-up 2026-05-29 - OMEN 16-xd0xxx / ProductId 8BCD (Ryzen + RTX 4050). V1 WMI fan control with practical fan-level ceiling near 63 (~6300 RPM); direct EC and independent curves disabled pending register-layout validation."
+                Notes = "Discord 2026-05-20 + field follow-up 2026-05-29; Discord 2026-06-05/06 - OMEN 16-xd0xxx / ProductId 8BCD (Ryzen + RTX 4050). V1 WMI fan control with practical fan-level ceiling near 63 (~6300 RPM); direct EC and independent curves disabled pending register-layout validation. V1 auto-mode floor clear is enabled to release stale manual fan floors after load/profile handoff."
             });
             
             // OMEN 16 (2025) - ap0xxx series (AMD Ryzen AI + RTX 50-series)
@@ -609,8 +616,9 @@ namespace OmenCore.Hardware
                 HasFourZoneRgb = true,
                 SupportsUndervolt = false,
                 AllowDecoupledWmiThermalPolicyFallback = true,
+                AllowV1AutoModeFloorClear = true,
                 UserVerified = true,
-                Notes = "GitHub #111 / Discord 2026-05-20 and 2026-05-21 - OMEN Gaming Laptop 16-am0xxx, ProductId 8D2F. Exact board identity confirmed; product ID has appeared across AMD and Intel Core Ultra variants, so direct EC fan writes and independent curves remain disabled. WMI V1 fan/profile control is retained, and WMI thermal-policy fallback is enabled for performance modes when EC/MSR power-limit writes are unavailable.",
+                Notes = "GitHub #111 / Discord 2026-05-20 and 2026-05-21; Discord 2026-06-02 follow-up - OMEN Gaming Laptop 16-am0xxx, ProductId 8D2F. Exact board identity confirmed; product ID has appeared across AMD and Intel Core Ultra variants, so direct EC fan writes and independent curves remain disabled. WMI V1 fan/profile control is retained, WMI thermal-policy fallback is enabled for performance modes when EC/MSR power-limit writes are unavailable, and V1 auto-mode floor clear is enabled to let fans ramp down after load.",
             });
 
             // OMEN 16 (2025) - am0xxx Intel Core Ultra H + RTX 50-series
@@ -975,8 +983,9 @@ namespace OmenCore.Hardware
                 HasFourZoneRgb = false,
                 HasPerKeyRgb = true,
                 SupportsUndervolt = false,
+                AllowV1AutoModeFloorClear = true,
                 UserVerified = false,
-                Notes = "GitHub #99 / Linux reports for 8E41 (Transcend 14-fb1xxx). Use profile-based control paths; avoid legacy EC writes."
+                Notes = "GitHub #99 / Linux reports for 8E41 (Transcend 14-fb1xxx). Discord 2026-06-02 Windows field report confirms exact board identity and WMI V1 behavior; use profile-based control paths, allow V1 auto handoff floor clear, and avoid legacy EC writes or custom curves."
             });
             
             // ═══════════════════════════════════════════════════════════════════════════════════
@@ -1130,10 +1139,11 @@ namespace OmenCore.Hardware
                 HasMuxSwitch = false,
                 SupportsGpuPowerBoost = false,
                 SupportsUndervolt = false,
+                AllowV1AutoModeFloorClear = true,
                 HasFourZoneRgb = false,
                 HasKeyboardBacklight = true,
                 UserVerified = false,
-                Notes = "RC1 field log - Victus 16-s0xxx (8BD4), Ryzen 7 7840HS + RTX 4060. Conservative WMI V1 fan profile; RGB/GPU boost disabled pending verification."
+                Notes = "RC1 field log - Victus 16-s0xxx (8BD4), Ryzen 7 7840HS + RTX 4060. Conservative WMI V1 fan profile; RGB/GPU boost disabled pending verification. Discord 2026-06-03 reported fans stuck at max after long gaming session; allow WMI V1 auto-mode floor clear while keeping direct EC writes disabled."
             });
 
             // Victus 16 (2024+) Ryzen r0xxx series
@@ -1362,6 +1372,7 @@ namespace OmenCore.Hardware
                     FanZoneCount = templateModel.FanZoneCount,
                     SupportsPerformanceModes = templateModel.SupportsPerformanceModes,
                     AllowDecoupledWmiThermalPolicyFallback = templateModel.AllowDecoupledWmiThermalPolicyFallback,
+                    AllowV1AutoModeFloorClear = templateModel.AllowV1AutoModeFloorClear,
                     HasMuxSwitch = templateModel.HasMuxSwitch,
                     SupportsGpuPowerBoost = templateModel.SupportsGpuPowerBoost,
                     HasFourZoneRgb = templateModel.HasFourZoneRgb,

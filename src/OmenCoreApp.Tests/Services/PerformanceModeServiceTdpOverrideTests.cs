@@ -382,6 +382,37 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public void ApplyTrace_With8D2FModelCapabilities_CapturesPowerAndWmiFallbackPath()
+        {
+            var fan = new RecordingWmiFanController();
+            var ec = new RecordingEcAccess();
+            var powerLimits = new PowerLimitController(ec);
+            var caps = ModelCapabilityDatabase.GetCapabilities("8D2F");
+            var service = BuildService(fan, powerLimits, caps);
+
+            service.LinkFanToPerformanceMode = false;
+            service.Apply(new PerformanceMode
+            {
+                Name = "Performance",
+                CpuPowerLimitWatts = 95,
+                GpuPowerLimitWatts = 140
+            });
+
+            var trace = service.GetApplyTraceSnapshot().Should().ContainSingle().Subject;
+            trace.RequestedModeName.Should().Be("Performance");
+            trace.EffectiveModeName.Should().Be("Performance");
+            trace.EcPowerLimitAvailable.Should().BeFalse();
+            trace.EcPowerLimitApplied.Should().BeFalse();
+            trace.EcPowerLimitSkipReason.Should().Contain("Direct EC writes disabled");
+            trace.WmiPolicyFallbackAttempted.Should().BeTrue();
+            trace.WmiPolicyFallbackApplied.Should().BeTrue();
+            trace.FanPolicyAction.Should().Contain("WMI thermal policy fallback");
+
+            service.GetApplyTraceReport().Should().Contain("Performance Mode Apply Trace");
+            service.GetApplyTraceReport().Should().Contain("fallbackApplied=True");
+        }
+
+        [Fact]
         public void Apply_WithEcUnsafeModelCapabilities_BlocksDirectEcPowerLimits_EvenWithoutWmiFallback()
         {
             var fan = new RecordingWmiFanController();

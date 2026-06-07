@@ -210,6 +210,7 @@ namespace OmenCore.ViewModels
             OnPropertyChanged(nameof(SafetyFloorNoticeText));
             OnPropertyChanged(nameof(CurvePreviewText));
             OnPropertyChanged(nameof(CurveValidationMessage));
+            OnPropertyChanged(nameof(ShowCurveEditor));
         }
 
         private void NotifyFanOwnershipChanged()
@@ -218,6 +219,14 @@ namespace OmenCore.ViewModels
             OnPropertyChanged(nameof(FanOwnershipDetail));
             OnPropertyChanged(nameof(FanOwnershipVisualState));
             OnPropertyChanged(nameof(FanOwnershipVisualLabel));
+            OnPropertyChanged(nameof(FanCapabilityBadgeText));
+            OnPropertyChanged(nameof(FanCapabilityVisualState));
+            OnPropertyChanged(nameof(FanProfileHeaderHint));
+            OnPropertyChanged(nameof(ExtremePresetSubtitle));
+            OnPropertyChanged(nameof(GamingPresetSubtitle));
+            OnPropertyChanged(nameof(CustomPresetSubtitle));
+            OnPropertyChanged(nameof(CustomCurveTooltip));
+            OnPropertyChanged(nameof(ShowCurveEditor));
         }
         
         #endregion
@@ -284,7 +293,9 @@ namespace OmenCore.ViewModels
                     OnPropertyChanged(nameof(IsSilentSelected));
                     OnPropertyChanged(nameof(IsCustomSelected));
                     OnPropertyChanged(nameof(IsConstantSelected));
+                    OnPropertyChanged(nameof(ShowCurveEditor));
                     NotifyFanOwnershipChanged();
+                    RaisePresetCommandStateChanged();
                 }
             }
         }
@@ -322,13 +333,13 @@ namespace OmenCore.ViewModels
         public bool IsCustomSelected
         {
             get => _activeFanMode == "Custom";
-            set { if (value) ActiveFanMode = "Custom"; }
+            set { if (value && FanCurvesAvailable) ActiveFanMode = "Custom"; }
         }
         
         public bool IsConstantSelected
         {
             get => _activeFanMode == "Constant";
-            set { if (value) ActiveFanMode = "Constant"; }
+            set { if (value && ManualFanControlAvailable) ActiveFanMode = "Constant"; }
         }
         
         // Constant speed mode properties (OmenMon-style fixed percentage)
@@ -422,6 +433,11 @@ namespace OmenCore.ViewModels
             {
                 var backend = string.IsNullOrWhiteSpace(RpmSourceDisplay) ? "unknown backend" : RpmSourceDisplay;
                 var status = string.IsNullOrWhiteSpace(CurveApplyStatus) ? "Ready" : CurveApplyStatus;
+                if (ProfileOnlyFanControl)
+                {
+                    return $"Backend: {backend}. Profile-only firmware control; custom curves and fixed fan levels are unavailable. {status}";
+                }
+
                 return $"Backend: {backend}. {status}";
             }
         }
@@ -447,6 +463,32 @@ namespace OmenCore.ViewModels
             _ => "Confirmed"
         };
 
+        public bool FanCurvesAvailable => _fanService.FanCurvesAvailable;
+
+        public bool ManualFanControlAvailable => _fanService.ManualFanControlAvailable;
+
+        public bool ProfileOnlyFanControl => !FanCurvesAvailable;
+
+        public bool ShowCurveEditor => IsCustomSelected && FanCurvesAvailable;
+
+        public string FanCapabilityBadgeText => ProfileOnlyFanControl ? "Profile-only" : "Curves";
+
+        public string FanCapabilityVisualState => ProfileOnlyFanControl ? "degraded" : "confirmed";
+
+        public string FanProfileHeaderHint => ProfileOnlyFanControl
+            ? "Select an OEM fan profile"
+            : "Select a preset or create a custom curve";
+
+        public string ExtremePresetSubtitle => ProfileOnlyFanControl ? "Profile" : "@75C";
+
+        public string GamingPresetSubtitle => ProfileOnlyFanControl ? "Profile" : "@80C";
+
+        public string CustomPresetSubtitle => FanCurvesAvailable ? "Editor" : "Unavailable";
+
+        public string CustomCurveTooltip => FanCurvesAvailable
+            ? "Apply your custom fan curve defined in the editor below."
+            : "Custom fan curves are unavailable for this model; use OEM fan profiles instead.";
+
         public string CustomPresetName
         {
             get => _customPresetName;
@@ -470,7 +512,9 @@ namespace OmenCore.ViewModels
         /// <summary>
         /// Filtered view of FanPresets showing only user-saved (non-built-in) presets.
         /// </summary>
-        public IEnumerable<FanPreset> SavedCustomPresets => FanPresets.Where(p => !p.IsBuiltIn);
+        public IEnumerable<FanPreset> SavedCustomPresets => FanCurvesAvailable
+            ? FanPresets.Where(p => !p.IsBuiltIn)
+            : Enumerable.Empty<FanPreset>();
 
         /// <summary>
         /// Ghost curve shown on the FanCurveEditor when a preset card is hovered.
@@ -490,7 +534,7 @@ namespace OmenCore.ViewModels
         }
 
         /// <summary>Show the given preset as a ghost curve on the editor.</summary>
-        public void SetHoveredPreset(FanPreset? preset) => HoveredPresetCurve = preset?.Curve;
+        public void SetHoveredPreset(FanPreset? preset) => HoveredPresetCurve = FanCurvesAvailable ? preset?.Curve : null;
 
         /// <summary>Clear the ghost overlay.</summary>
         public void ClearHoveredPreset() => HoveredPresetCurve = null;
@@ -498,7 +542,7 @@ namespace OmenCore.ViewModels
         /// <summary>
         /// Whether there are any saved custom presets to show.
         /// </summary>
-        public bool HasSavedPresets => FanPresets.Any(p => !p.IsBuiltIn);
+        public bool HasSavedPresets => FanCurvesAvailable && FanPresets.Any(p => !p.IsBuiltIn);
         
         // Curve editor commands
         public ICommand AddCurvePointCommand { get; }
@@ -512,6 +556,7 @@ namespace OmenCore.ViewModels
         public ICommand ApplyQuietModeCommand { get; }
         public ICommand ApplyGamingModeCommand { get; }
         public ICommand ApplyConstantSpeedCommand { get; }
+        public ICommand RestoreOemAutoCommand { get; }
         public ICommand ReapplySavedPresetCommand { get; }
 
         private bool _immediateApplyOnApply;
@@ -761,20 +806,20 @@ namespace OmenCore.ViewModels
             _fanService.SetHysteresis(_configService.Config.FanHysteresis);
             ImmediateApplyOnApply = _configService.Config.FanTransition.ApplyImmediatelyOnUserAction;
             
-            ApplyCustomCurveCommand = new AsyncRelayCommand(async _ => await ApplyCustomCurveAsync(), _ => !IsApplyingCustomCurve);
+            ApplyCustomCurveCommand = new AsyncRelayCommand(async _ => await ApplyCustomCurveAsync(), _ => FanCurvesAvailable && !IsApplyingCustomCurve);
 
             // Initialize transition values from config
             SmoothingDurationMs = _configService.Config.FanTransition.SmoothingDurationMs;
             SmoothingStepMs = _configService.Config.FanTransition.SmoothingStepMs;
-            SaveCustomPresetCommand = new RelayCommand(_ => SaveCustomPreset());
+            SaveCustomPresetCommand = new RelayCommand(_ => SaveCustomPreset(), _ => FanCurvesAvailable);
             ImportPresetsCommand = new RelayCommand(_ => ImportPresets());
             ExportPresetsCommand = new RelayCommand(_ => ExportPresets());
             DeleteSelectedPresetCommand = new RelayCommand(_ => DeleteSelectedPreset(), _ => CanDeleteSelectedPreset);
             
             // Curve editor commands
-            AddCurvePointCommand = new RelayCommand(_ => AddDefaultCurvePoint(), _ => CustomFanCurve.Count < 10);
-            RemoveCurvePointCommand = new RelayCommand(_ => RemoveLastCurvePoint(), _ => CustomFanCurve.Count > 2);
-            ResetCurveCommand = new RelayCommand(_ => ResetCurveToDefault());
+            AddCurvePointCommand = new RelayCommand(_ => AddDefaultCurvePoint(), _ => FanCurvesAvailable && CustomFanCurve.Count < 10);
+            RemoveCurvePointCommand = new RelayCommand(_ => RemoveLastCurvePoint(), _ => FanCurvesAvailable && CustomFanCurve.Count > 2);
+            ResetCurveCommand = new RelayCommand(_ => ResetCurveToDefault(), _ => FanCurvesAvailable);
             
             // GPU curve editor commands (stubs - use same logic as CPU for now)
             AddGpuCurvePointCommand = new RelayCommand(_ => AddDefaultGpuCurvePoint(), _ => GpuFanCurve.Count < 10);
@@ -788,7 +833,8 @@ namespace OmenCore.ViewModels
             ApplyAutoModeCommand = new RelayCommand(_ => ApplyFanMode("Auto"));
             ApplyQuietModeCommand = new RelayCommand(_ => ApplyQuietMode());
             ApplyGamingModeCommand = new RelayCommand(_ => ApplyGamingMode());
-            ApplyConstantSpeedCommand = new RelayCommand(_ => ApplyConstantSpeed());
+            ApplyConstantSpeedCommand = new RelayCommand(_ => ApplyConstantSpeed(), _ => ManualFanControlAvailable);
+            RestoreOemAutoCommand = new RelayCommand(_ => RestoreOemAutoControl());
             ReapplySavedPresetCommand = new RelayCommand(async _ => await ReapplySavedPresetAsync());
             OpenFanCalibrationWizardCommand = new RelayCommand(_ => OpenFanCalibrationWizard(), _ => IsFanCalibrationAvailable);
             DismissFanPerformanceInfoBannerCommand = new RelayCommand(_ => DismissFanPerformanceInfoBanner());
@@ -873,6 +919,17 @@ namespace OmenCore.ViewModels
             OnPropertyChanged(nameof(FanPerformanceLinkBadgeText));
             OnPropertyChanged(nameof(FanPerformanceLinkDescription));
             OnPropertyChanged(nameof(ShowFanPerformanceInfoBanner));
+        }
+
+        private void RestoreOemAutoControl()
+        {
+            var success = _fanService.RestoreOemAutoControl();
+            ActiveFanMode = "Auto";
+            SelectPresetByNameNoApply("Auto");
+            CurveApplyStatus = success
+                ? "OEM auto restored"
+                : "OEM auto restore did not report success";
+            NotifyFanOwnershipChanged();
         }
 
         private void InitializeFanCalibrationContext()
@@ -1214,7 +1271,24 @@ namespace OmenCore.ViewModels
                     p.Name.Equals(lastPresetName, StringComparison.OrdinalIgnoreCase));
                 if (lastPreset != null)
                 {
-                    return lastPreset;
+                    if (!FanCurvesAvailable && lastPreset.Mode == FanMode.Manual)
+                    {
+                        _logging.Info($"Skipping restored fan preset '{lastPreset.Name}' because custom fan curves are unavailable on this model");
+                    }
+                    else
+                    {
+                        return lastPreset;
+                    }
+                }
+            }
+
+            if (!FanCurvesAvailable)
+            {
+                var autoPreset = FanPresets.FirstOrDefault(p => p.Name == "Auto");
+                if (autoPreset != null)
+                {
+                    ActiveFanMode = "Auto";
+                    return autoPreset;
                 }
             }
 
@@ -1223,6 +1297,12 @@ namespace OmenCore.ViewModels
 
         private void RestoreAdHocCustomCurveFromConfig()
         {
+            if (!FanCurvesAvailable)
+            {
+                _logging.Info("Skipped restoring saved custom fan curve because this model is limited to OEM fan profiles");
+                return;
+            }
+
             var savedCurve = _configService.Config.CustomFanCurve;
             if (savedCurve == null || savedCurve.Count < 2)
             {
@@ -1363,6 +1443,13 @@ namespace OmenCore.ViewModels
             if (_fanService.IsDiagnosticModeActive)
             {
                 _logging.Warn("Skipped custom curve apply request because fan diagnostics mode is active");
+                return;
+            }
+
+            if (!FanCurvesAvailable)
+            {
+                CurveApplyStatus = "Custom curves unavailable on this model";
+                _logging.Warn("Skipped custom curve apply request because this model is limited to OEM fan profiles");
                 return;
             }
 
@@ -1602,6 +1689,17 @@ namespace OmenCore.ViewModels
 
         private void SaveCustomPreset()
         {
+            if (!FanCurvesAvailable)
+            {
+                _logging.Warn("Skipped custom fan preset save because this model is limited to OEM fan profiles");
+                System.Windows.MessageBox.Show(
+                    "Custom fan curves are unavailable for this model. Use the OEM fan profiles instead.",
+                    "Custom Curves Unavailable",
+                    System.Windows.MessageBoxButton.OK,
+                    System.Windows.MessageBoxImage.Information);
+                return;
+            }
+
             // Validate before saving
             var validationError = ValidateFanCurve(CustomFanCurve);
             if (validationError != null)
@@ -1664,6 +1762,12 @@ namespace OmenCore.ViewModels
         
         private void PersistSelectedCustomCurveIfNeeded()
         {
+            if (!FanCurvesAvailable)
+            {
+                _logging.Warn("Skipped persisting custom fan curve because this model is limited to OEM fan profiles");
+                return;
+            }
+
             var curve = CloneCurve(CustomFanCurve);
             var targetPreset = SelectedPreset is { IsBuiltIn: false, Mode: FanMode.Manual }
                 ? SelectedPreset
@@ -1781,7 +1885,13 @@ namespace OmenCore.ViewModels
 
         private void RaisePresetCommandStateChanged()
         {
+            (ApplyCustomCurveCommand as AsyncRelayCommand)?.RaiseCanExecuteChanged();
+            (SaveCustomPresetCommand as RelayCommand)?.RaiseCanExecuteChanged();
             (DeleteSelectedPresetCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            (AddCurvePointCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            (RemoveCurvePointCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            (ResetCurveCommand as RelayCommand)?.RaiseCanExecuteChanged();
+            (ApplyConstantSpeedCommand as RelayCommand)?.RaiseCanExecuteChanged();
         }
         
         private void SavePresetsToConfig()
@@ -1834,6 +1944,12 @@ namespace OmenCore.ViewModels
             try
             {
                 var config = _configService.Load();
+
+                if (!FanCurvesAvailable)
+                {
+                    _logging.Info($"Skipped loading {config.FanPresets.Count} custom fan preset(s); this model is limited to OEM fan profiles");
+                    return;
+                }
                 
                 // Load custom presets from config (built-in presets are added in constructor)
                 foreach (var preset in config.FanPresets)
@@ -2014,6 +2130,13 @@ namespace OmenCore.ViewModels
             if (_fanService.IsDiagnosticModeActive)
             {
                 _logging.Warn("Skipped constant fan speed apply request because fan diagnostics mode is active");
+                return;
+            }
+
+            if (!ManualFanControlAvailable)
+            {
+                CurveApplyStatus = "Fixed fan speed unavailable on this model";
+                _logging.Warn("Skipped constant fan speed apply request because manual fan levels are disabled for this model");
                 return;
             }
 

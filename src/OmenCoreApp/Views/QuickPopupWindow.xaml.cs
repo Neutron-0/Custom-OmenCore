@@ -46,14 +46,14 @@ namespace OmenCore.Views
         public event Action<string>? FanModeChangeRequested;
         
         /// <summary>
-        /// Raised when user requests a performance mode change.
-        /// </summary>
-        public event Action<string>? PerformanceModeChangeRequested;
-
-        /// <summary>
         /// Raised when user wants to open the full dashboard from Quick Access.
         /// </summary>
         public event Action? OpenDashboardRequested;
+
+        /// <summary>
+        /// Raised when user requests a combined quick profile.
+        /// </summary>
+        public event Action<string>? QuickProfileChangeRequested;
 
         public QuickPopupWindow()
         {
@@ -286,9 +286,9 @@ namespace OmenCore.Views
                 ? "Apply this performance mode. Linked mode can also update fan policy."
                 : $"Apply this performance mode. Decoupled mode keeps {preservedFanText} active.";
 
-            PerfQuietBtn.ToolTip = tooltip;
-            PerfBalancedBtn.ToolTip = tooltip;
-            PerfPerformanceBtn.ToolTip = tooltip;
+            QuickQuietBtn.ToolTip = tooltip;
+            QuickBalancedBtn.ToolTip = tooltip;
+            QuickPerformanceBtn.ToolTip = tooltip;
         }
 
         private void UpdateFanModeButtons()
@@ -296,7 +296,6 @@ namespace OmenCore.Views
             // Reset all buttons to default style
             FanAutoBtn.Style = (Style)FindResource("ModeButtonStyle");
             FanMaxBtn.Style = (Style)FindResource("ModeButtonStyle");
-            FanQuietBtn.Style = (Style)FindResource("ModeButtonStyle");
             FanCustomBtn.Style = (Style)FindResource("ModeButtonStyle");
             
             // Highlight active button
@@ -309,11 +308,7 @@ namespace OmenCore.Views
             {
                 FanMaxBtn.Style = activeStyle;
             }
-            else if (FanModeNameResolver.IsQuietAlias(_currentFanMode))
-            {
-                FanQuietBtn.Style = activeStyle;
-            }
-            else
+            else if (FanModeNameResolver.IsCustomAlias(_currentFanMode))
             {
                 FanCustomBtn.Style = activeStyle;
             }
@@ -322,9 +317,9 @@ namespace OmenCore.Views
         private void UpdatePerformanceModeButtons()
         {
             // Reset all buttons to default style
-            PerfBalancedBtn.Style = (Style)FindResource("ModeButtonStyle");
-            PerfPerformanceBtn.Style = (Style)FindResource("ModeButtonStyle");
-            PerfQuietBtn.Style = (Style)FindResource("ModeButtonStyle");
+            QuickBalancedBtn.Style = (Style)FindResource("ModeButtonStyle");
+            QuickPerformanceBtn.Style = (Style)FindResource("ModeButtonStyle");
+            QuickQuietBtn.Style = (Style)FindResource("ModeButtonStyle");
             
             // Highlight active button
             var activeStyle = (Style)FindResource("ActiveModeButtonStyle");
@@ -332,15 +327,15 @@ namespace OmenCore.Views
             {
                 case "balanced":
                 case "default":
-                    PerfBalancedBtn.Style = activeStyle;
+                    QuickBalancedBtn.Style = activeStyle;
                     break;
                 case "performance":
                 case "high":
-                    PerfPerformanceBtn.Style = activeStyle;
+                    QuickPerformanceBtn.Style = activeStyle;
                     break;
                 case "quiet":
                 case "powersaver":
-                    PerfQuietBtn.Style = activeStyle;
+                    QuickQuietBtn.Style = activeStyle;
                     break;
             }
         }
@@ -399,12 +394,15 @@ namespace OmenCore.Views
             }
         }
 
-        private void PerformanceMode_Click(object sender, RoutedEventArgs e)
+        private void QuickProfile_Click(object sender, RoutedEventArgs e)
         {
-            if (sender is Button btn && btn.Tag is string mode)
+            if (sender is Button btn && btn.Tag is string profile)
             {
-                PerformanceModeChangeRequested?.Invoke(mode);
-                UpdatePerformanceMode(mode);
+                QuickProfileChangeRequested?.Invoke(profile);
+                UpdatePerformanceMode(profile);
+                UpdateFanMode(string.Equals(profile, "Balanced", StringComparison.OrdinalIgnoreCase)
+                    ? "Auto"
+                    : profile);
             }
         }
 

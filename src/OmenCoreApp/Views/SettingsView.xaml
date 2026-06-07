@@ -1325,6 +1325,7 @@
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
                                     
                                     <TextBlock Grid.Row="0" Grid.Column="0" Text="Ctrl + Shift + F" FontFamily="Consolas" 
@@ -1337,24 +1338,29 @@
                                     <TextBlock Grid.Row="1" Grid.Column="1" Text="Cycle performance modes" 
                                                Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0"/>
                                     
-                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Ctrl + Shift + B" FontFamily="Consolas" 
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Ctrl + Shift + E" FontFamily="Consolas"
                                                Foreground="{StaticResource AccentBrush}" FontSize="12" Margin="0,4,0,0"/>
-                                    <TextBlock Grid.Row="2" Grid.Column="1" Text="Boost mode (Performance)" 
-                                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0"/>
-                                    
-                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Ctrl + Shift + Q" FontFamily="Consolas" 
-                                               Foreground="{StaticResource AccentBrush}" FontSize="12" Margin="0,4,0,0"/>
-                                    <TextBlock Grid.Row="3" Grid.Column="1" Text="Quiet mode" 
-                                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0"/>
-                                    
-                                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Ctrl + Shift + O" FontFamily="Consolas" 
-                                               Foreground="{StaticResource AccentBrush}" FontSize="12" Margin="0,4,0,0"/>
-                                    <TextBlock Grid.Row="4" Grid.Column="1" Text="Show/hide OmenCore window" 
+                                    <TextBlock Grid.Row="2" Grid.Column="1" Text="Cycle General profiles"
                                                Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0"/>
 
-                                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Win + F12" FontFamily="Consolas"
+                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Ctrl + Shift + B" FontFamily="Consolas"
                                                Foreground="{StaticResource AccentBrush}" FontSize="12" Margin="0,4,0,0"/>
-                                    <TextBlock Grid.Row="5" Grid.Column="1" Text="Show OmenCore window"
+                                    <TextBlock Grid.Row="3" Grid.Column="1" Text="Boost mode (Performance)"
+                                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0"/>
+
+                                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Ctrl + Shift + Q" FontFamily="Consolas"
+                                               Foreground="{StaticResource AccentBrush}" FontSize="12" Margin="0,4,0,0"/>
+                                    <TextBlock Grid.Row="4" Grid.Column="1" Text="Quiet mode"
+                                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0"/>
+
+                                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Ctrl + Shift + O" FontFamily="Consolas"
+                                               Foreground="{StaticResource AccentBrush}" FontSize="12" Margin="0,4,0,0"/>
+                                    <TextBlock Grid.Row="5" Grid.Column="1" Text="Show/hide OmenCore window"
+                                               Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0"/>
+
+                                    <TextBlock Grid.Row="6" Grid.Column="0" Text="Win + F12" FontFamily="Consolas"
+                                               Foreground="{StaticResource AccentBrush}" FontSize="12" Margin="0,4,0,0"/>
+                                    <TextBlock Grid.Row="6" Grid.Column="1" Text="Show OmenCore window"
                                                Foreground="{StaticResource TextSecondaryBrush}" FontSize="12" Margin="0,4,0,0"/>
                                 </Grid>
                             </StackPanel>

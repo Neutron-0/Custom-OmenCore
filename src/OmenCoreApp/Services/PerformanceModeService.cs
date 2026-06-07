@@ -19,6 +19,9 @@ namespace OmenCore.Services
         private readonly ModelCapabilities? _modelCapabilities;
         private readonly RuntimeEcOperationCoordinator _ecOperationCoordinator;
         private PerformanceMode? _currentMode;
+        private const int MaxApplyTraceEntries = 40;
+        private readonly Queue<PerformanceModeApplyTraceEntry> _applyTrace = new();
+        private readonly object _applyTraceLock = new();
 
         /// <summary>
         /// When false (default), switching performance modes does NOT write fan policy.
@@ -52,8 +55,8 @@ namespace OmenCore.Services
         public event EventHandler<string>? ModeApplied;
 
         public PerformanceModeService(
-            IFanController fanController, 
-            PowerPlanService powerPlanService, 
+            IFanController fanController,
+            PowerPlanService powerPlanService,
             PowerLimitController? powerLimitController,
             LoggingService logging,
             IPowerVerificationService? powerVerificationService = null,
@@ -81,18 +84,26 @@ namespace OmenCore.Services
                 var hasValidGpuLimit = effectiveMode.GpuPowerLimitWatts > 0;
                 var hasAnyValidEcLimit = hasValidCpuLimit || hasValidGpuLimit;
                 var directEcPowerLimitWritesBlocked = DirectEcPowerLimitWritesBlocked;
+                var ecPowerLimitAvailable = _powerLimitController != null &&
+                    _powerLimitController.IsAvailable &&
+                    !directEcPowerLimitWritesBlocked;
+                var ecPowerLimitApplied = false;
+                var ecPowerLimitSkipReason = string.Empty;
+                var wmiPolicyFallbackAttempted = false;
+                var wmiPolicyFallbackApplied = false;
+                var fanPolicyAction = "Unchanged";
                 var modeInfo = $"⚡ Applying performance mode: '{effectiveMode.Name}'";
                 if (!string.IsNullOrEmpty(effectiveMode.LinkedPowerPlanGuid))
                 {
                     modeInfo += $" (Power Plan: {effectiveMode.LinkedPowerPlanGuid})";
                 }
                 _logging.Info(modeInfo);
-                
+
                 // Step 1: Apply Windows power plan
                 _powerPlanService.Apply(effectiveMode);
-                
+
                 // Step 2: Apply EC-level power limits (CPU PL1/PL2, GPU TGP)
-                if (_powerLimitController != null && _powerLimitController.IsAvailable && !directEcPowerLimitWritesBlocked)
+                if (ecPowerLimitAvailable)
                 {
                     try
                     {
@@ -102,32 +113,34 @@ namespace OmenCore.Services
                         if (!hasValidCpuLimit && !hasValidGpuLimit)
                         {
                             _logging.Warn($"⚠️ Skipping EC power-limit apply for '{effectiveMode.Name}' because both limits are non-positive (CPU={effectiveMode.CpuPowerLimitWatts}W, GPU={effectiveMode.GpuPowerLimitWatts}W)");
+                            ecPowerLimitSkipReason = "CPU/GPU limits are non-positive";
                         }
                         else
                         {
-                        _ecOperationCoordinator.Execute("PerformanceModeService", "ApplyPerformanceLimits", () =>
-                        {
+                            _ecOperationCoordinator.Execute("PerformanceModeService", "ApplyPerformanceLimits", () =>
+                            {
+                                if (_powerVerificationService != null && _powerVerificationService.IsAvailable)
+                                {
+                                    var before = _powerVerificationService.GetCurrentPowerLimits();
+                                    _logging.Info($"⚡ Power limits before apply ({effectiveMode.Name}): PL1={before.cpuPl1}W, PL2={before.cpuPl2}W, GPU={before.gpuTgp}W, ModeReg={before.performanceMode}");
+                                }
+
+                                _powerLimitController!.ApplyPerformanceLimits(effectiveMode);
+                                ecPowerLimitApplied = true;
+                                _logging.Info($"⚡ Power limits applied: CPU={effectiveMode.CpuPowerLimitWatts}W, GPU={effectiveMode.GpuPowerLimitWatts}W");
+
+                                if (_powerVerificationService != null && _powerVerificationService.IsAvailable)
+                                {
+                                    var after = _powerVerificationService.GetCurrentPowerLimits();
+                                    _logging.Info($"⚡ Power limits after apply ({effectiveMode.Name}): PL1={after.cpuPl1}W, PL2={after.cpuPl2}W, GPU={after.gpuTgp}W, ModeReg={after.performanceMode}");
+                                }
+                            });
+
+                            // Verify the power limits were applied correctly (non-blocking, outside EC gate)
                             if (_powerVerificationService != null && _powerVerificationService.IsAvailable)
                             {
-                                var before = _powerVerificationService.GetCurrentPowerLimits();
-                                _logging.Info($"⚡ Power limits before apply ({effectiveMode.Name}): PL1={before.cpuPl1}W, PL2={before.cpuPl2}W, GPU={before.gpuTgp}W, ModeReg={before.performanceMode}");
+                                _ = VerifyPowerLimitsAndLogAsync(effectiveMode);
                             }
-
-                            _powerLimitController!.ApplyPerformanceLimits(effectiveMode);
-                            _logging.Info($"⚡ Power limits applied: CPU={effectiveMode.CpuPowerLimitWatts}W, GPU={effectiveMode.GpuPowerLimitWatts}W");
-
-                            if (_powerVerificationService != null && _powerVerificationService.IsAvailable)
-                            {
-                                var after = _powerVerificationService.GetCurrentPowerLimits();
-                                _logging.Info($"⚡ Power limits after apply ({effectiveMode.Name}): PL1={after.cpuPl1}W, PL2={after.cpuPl2}W, GPU={after.gpuTgp}W, ModeReg={after.performanceMode}");
-                            }
-                        });
-
-                        // Verify the power limits were applied correctly (non-blocking, outside EC gate)
-                        if (_powerVerificationService != null && _powerVerificationService.IsAvailable)
-                        {
-                            _ = VerifyPowerLimitsAndLogAsync(effectiveMode);
-                        }
                         }
                     }
                     catch (Exception ex)
@@ -155,11 +168,20 @@ namespace OmenCore.Services
                     if (directEcPowerLimitWritesBlocked)
                     {
                         _logging.Info($"Direct EC power-limit writes skipped for '{effectiveMode.Name}' on model '{_modelCapabilities?.ModelName}' - using WMI thermal policy fallback when available");
+                        ecPowerLimitSkipReason = $"Direct EC writes disabled for model '{_modelCapabilities?.ModelName ?? "unknown"}'";
+                    }
+                    else if (_powerLimitController == null)
+                    {
+                        ecPowerLimitSkipReason = "PowerLimitController unavailable";
+                    }
+                    else if (!_powerLimitController.IsAvailable)
+                    {
+                        ecPowerLimitSkipReason = "PowerLimitController not available";
                     }
 
                     _logging.Info("ℹ️ EC power limit control not available - using Windows power plan only");
                 }
-                
+
                 // Step 3: Adjust fan curve based on power profile.
                 // Only runs when LinkFanToPerformanceMode is true (opt-in, default off).
                 // By default, performance mode switches only affect power plan and EC power limits;
@@ -171,6 +193,7 @@ namespace OmenCore.Services
                         // Try to set performance mode via WMI BIOS first
                         if (SetFanPerformanceModeSerialized(effectiveMode.Name))
                         {
+                            fanPolicyAction = "Linked fan policy";
                             _logging.Info($"🌀 Fan mode set to '{effectiveMode.Name}' via {_fanController.Backend}");
                         }
                         else
@@ -181,6 +204,7 @@ namespace OmenCore.Services
                             {
                                 new FanCurvePoint { TemperatureC = 0, FanPercent = fanPercent }
                             });
+                            fanPolicyAction = "Linked fallback curve";
                             _logging.Info($"🌀 Fan speed set to {fanPercent}% for '{effectiveMode.Name}' mode");
                         }
                     }
@@ -204,12 +228,16 @@ namespace OmenCore.Services
 
                     if (shouldUseWmiThermalPolicyFallback)
                     {
+                        wmiPolicyFallbackAttempted = true;
                         if (SetFanPerformanceModeSerialized(effectiveMode.Name))
                         {
+                            wmiPolicyFallbackApplied = true;
+                            fanPolicyAction = "Decoupled WMI thermal policy fallback";
                             _logging.Info($"🌀 Applied decoupled WMI thermal policy hold for '{effectiveMode.Name}' because EC power limits are unavailable");
                         }
                         else
                         {
+                            fanPolicyAction = "Decoupled WMI thermal policy fallback failed";
                             _logging.Warn($"⚠️ WMI thermal policy fallback failed for '{effectiveMode.Name}' while EC power limits were unavailable");
                         }
                     }
@@ -218,9 +246,31 @@ namespace OmenCore.Services
                         _logging.Info("ℹ️ Fan policy unchanged — LinkFanToPerformanceMode is off");
                     }
                 }
-                
+
                 _logging.Info($"✓ Performance mode '{effectiveMode.Name}' applied successfully");
-                
+
+                RecordApplyTrace(new PerformanceModeApplyTraceEntry
+                {
+                    TimestampUtc = DateTime.UtcNow,
+                    RequestedModeName = mode.Name,
+                    EffectiveModeName = effectiveMode.Name,
+                    CpuPowerLimitWatts = effectiveMode.CpuPowerLimitWatts,
+                    CpuBoostPowerLimitWatts = effectiveMode.CpuBoostPowerLimitWatts,
+                    GpuPowerLimitWatts = effectiveMode.GpuPowerLimitWatts,
+                    LinkedPowerPlanGuid = effectiveMode.LinkedPowerPlanGuid,
+                    ModelName = _modelCapabilities?.ModelName,
+                    ProductId = _modelCapabilities?.ProductId,
+                    FanBackend = _fanController.Backend,
+                    LinkFanToPerformanceMode = LinkFanToPerformanceMode,
+                    AllowWmiThermalPolicyFallback = AllowDecoupledWmiThermalPolicyFallback,
+                    EcPowerLimitAvailable = ecPowerLimitAvailable,
+                    EcPowerLimitApplied = ecPowerLimitApplied,
+                    EcPowerLimitSkipReason = ecPowerLimitSkipReason,
+                    WmiPolicyFallbackAttempted = wmiPolicyFallbackAttempted,
+                    WmiPolicyFallbackApplied = wmiPolicyFallbackApplied,
+                    FanPolicyAction = fanPolicyAction
+                });
+
                 // Raise event for UI synchronization (sidebar, tray, etc.)
                 PublishModeApplied(effectiveMode.Name);
             }
@@ -246,6 +296,53 @@ namespace OmenCore.Services
                 }
             }
         }
+
+        private void RecordApplyTrace(PerformanceModeApplyTraceEntry entry)
+        {
+            lock (_applyTraceLock)
+            {
+                while (_applyTrace.Count >= MaxApplyTraceEntries)
+                {
+                    _applyTrace.Dequeue();
+                }
+
+                _applyTrace.Enqueue(entry);
+            }
+        }
+
+        public IReadOnlyList<PerformanceModeApplyTraceEntry> GetApplyTraceSnapshot()
+        {
+            lock (_applyTraceLock)
+            {
+                return _applyTrace.ToList();
+            }
+        }
+
+        public string GetApplyTraceReport()
+        {
+            var entries = GetApplyTraceSnapshot();
+            var lines = new System.Text.StringBuilder();
+
+            lines.AppendLine("Performance Mode Apply Trace");
+            lines.AppendLine($"CurrentMode: {_currentMode?.Name ?? "<none>"}");
+            lines.AppendLine($"Controls: {ControlCapabilityDescription}");
+            lines.AppendLine($"Entries: {entries.Count}");
+            lines.AppendLine(new string('-', 80));
+
+            foreach (var entry in entries)
+            {
+                lines.AppendLine($"{entry.TimestampUtc:O} | requested={entry.RequestedModeName} | effective={entry.EffectiveModeName}");
+                lines.AppendLine($"  model={entry.ModelName ?? "<unknown>"} ({entry.ProductId ?? "unknown"}); fanBackend={entry.FanBackend}");
+                lines.AppendLine($"  limits: PL1={entry.CpuPowerLimitWatts}W; PL2={(entry.CpuBoostPowerLimitWatts?.ToString() ?? "auto")}W; GPU={entry.GpuPowerLimitWatts}W; plan={entry.LinkedPowerPlanGuid ?? "<none>"}");
+                lines.AppendLine($"  ecPower: available={entry.EcPowerLimitAvailable}; applied={entry.EcPowerLimitApplied}; skip={FormatTraceValue(entry.EcPowerLimitSkipReason)}");
+                lines.AppendLine($"  fanPolicy: linked={entry.LinkFanToPerformanceMode}; fallbackAllowed={entry.AllowWmiThermalPolicyFallback}; fallbackAttempted={entry.WmiPolicyFallbackAttempted}; fallbackApplied={entry.WmiPolicyFallbackApplied}; action={entry.FanPolicyAction}");
+            }
+
+            return lines.ToString();
+        }
+
+        private static string FormatTraceValue(string? value) =>
+            string.IsNullOrWhiteSpace(value) ? "<none>" : value;
 
         private bool SetFanPerformanceModeSerialized(string modeName) =>
             _ecOperationCoordinator.Execute(
@@ -387,13 +484,13 @@ namespace OmenCore.Services
             // Map common names to default modes
             PerformanceMode? mode = modeName.ToLowerInvariant() switch
             {
-                "performance" => new PerformanceMode 
-                { 
-                    Name = "Performance", 
-                    CpuPowerLimitWatts = 95, 
-                    GpuPowerLimitWatts = 140 
+                "performance" => new PerformanceMode
+                {
+                    Name = "Performance",
+                    CpuPowerLimitWatts = 95,
+                    GpuPowerLimitWatts = 140
                 },
-                "quiet" or "silent" or "powersaver" => new PerformanceMode 
+                "quiet" or "silent" or "powersaver" => new PerformanceMode
                 {
                     Name = "Quiet",
                     CpuPowerLimitWatts = 35,
@@ -412,7 +509,7 @@ namespace OmenCore.Services
                     GpuPowerLimitWatts = 100
                 }
             };
-            
+
             Apply(mode);
         }
 
@@ -431,7 +528,7 @@ namespace OmenCore.Services
         /// When false, performance modes only change Windows power plan and fan policy.
         /// </summary>
         public bool EcPowerControlAvailable => _powerLimitController != null && _powerLimitController.IsAvailable && !DirectEcPowerLimitWritesBlocked;
-        
+
         /// <summary>
         /// Get a human-readable description of what controls are available.
         /// Useful for UI to show users what changing performance mode actually does.
@@ -441,16 +538,16 @@ namespace OmenCore.Services
             get
             {
                 var capabilities = new List<string> { "Windows Power Plan" };
-                
+
                 if (FanPolicyAvailable)
                     capabilities.Add("Fan Policy");
 
                 if (AllowDecoupledWmiThermalPolicyFallback && FanPolicyAvailable)
                     capabilities.Add("WMI Performance Policy Fallback");
-                    
+
                 if (_powerLimitController != null && _powerLimitController.IsAvailable && !DirectEcPowerLimitWritesBlocked)
                     capabilities.Add("CPU/GPU Power Limits");
-                    
+
                 return string.Join(", ", capabilities);
             }
         }
@@ -464,5 +561,27 @@ namespace OmenCore.Services
         }
 
         public IReadOnlyList<PerformanceMode> GetModes(AppConfig config) => config.PerformanceModes;
+    }
+
+    public sealed class PerformanceModeApplyTraceEntry
+    {
+        public DateTime TimestampUtc { get; init; }
+        public string RequestedModeName { get; init; } = string.Empty;
+        public string EffectiveModeName { get; init; } = string.Empty;
+        public int CpuPowerLimitWatts { get; init; }
+        public int? CpuBoostPowerLimitWatts { get; init; }
+        public int GpuPowerLimitWatts { get; init; }
+        public string? LinkedPowerPlanGuid { get; init; }
+        public string? ModelName { get; init; }
+        public string? ProductId { get; init; }
+        public string FanBackend { get; init; } = string.Empty;
+        public bool LinkFanToPerformanceMode { get; init; }
+        public bool AllowWmiThermalPolicyFallback { get; init; }
+        public bool EcPowerLimitAvailable { get; init; }
+        public bool EcPowerLimitApplied { get; init; }
+        public string EcPowerLimitSkipReason { get; init; } = string.Empty;
+        public bool WmiPolicyFallbackAttempted { get; init; }
+        public bool WmiPolicyFallbackApplied { get; init; }
+        public string FanPolicyAction { get; init; } = string.Empty;
     }
 }

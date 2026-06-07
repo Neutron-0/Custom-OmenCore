@@ -29,9 +29,11 @@ namespace OmenCoreApp.Tests.Services
             public string Status => "Test";
             public string Backend => "Test";
             public List<int> SetCalls { get; } = new List<int>();
+            public List<FanPreset> PresetCalls { get; } = new List<FanPreset>();
+            public int CustomCurveCalls { get; private set; }
 
-            public bool ApplyPreset(FanPreset preset) => true;
-            public bool ApplyCustomCurve(IEnumerable<FanCurvePoint> curve) => true;
+            public bool ApplyPreset(FanPreset preset) { PresetCalls.Add(preset); return true; }
+            public bool ApplyCustomCurve(IEnumerable<FanCurvePoint> curve) { CustomCurveCalls++; return true; }
             public bool SetFanSpeed(int percent) { SetCalls.Add(percent); return true; }
             public bool SetFanSpeeds(int cpuPercent, int gpuPercent) { SetCalls.Add(Math.Max(cpuPercent, gpuPercent)); return true; }
             public bool SetMaxFanSpeed(bool enabled) => true;
@@ -293,6 +295,106 @@ namespace OmenCoreApp.Tests.Services
             await fanService.ForceApplyCurveNowAsync(cpuTemp: 62, gpuTemp: 0, immediate: false);
 
             controller.SetCalls.Should().BeEmpty("88D2 conservative policy should avoid tiny curve deltas that cause fan hunting");
+            logging.Dispose();
+        }
+
+        [Fact]
+        public void CurveDisabledModel_StripsBuiltInCurvePayloadsAndRejectsManualCurves()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var controller = new RecordingFanController();
+            var thermalProvider = new OmenCore.Hardware.ThermalSensorProvider(new OmenCore.Hardware.LibreHardwareMonitorImpl());
+            var notificationService = new NotificationService(logging);
+            var capabilities = new OmenCore.Hardware.DeviceCapabilities
+            {
+                ProductId = "8E41",
+                Chassis = OmenCore.Hardware.ChassisType.Laptop,
+                ModelFamily = OmenCore.Hardware.OmenModelFamily.Transcend,
+                CanSetFanSpeed = true,
+                ModelConfig = new OmenCore.Hardware.ModelCapabilities
+                {
+                    ProductId = "8E41",
+                    Family = OmenCore.Hardware.OmenModelFamily.Transcend,
+                    SupportsFanCurves = false
+                }
+            };
+
+            var fanService = new FanService(controller, thermalProvider, logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService(), capabilities: capabilities);
+            var extremePreset = new FanPreset
+            {
+                Name = "Extreme",
+                Mode = FanMode.Performance,
+                Curve = new List<FanCurvePoint>
+                {
+                    new FanCurvePoint { TemperatureC = 60, FanPercent = 75 },
+                    new FanCurvePoint { TemperatureC = 75, FanPercent = 100 }
+                }
+            };
+
+            fanService.ApplyPreset(extremePreset).Should().BeTrue();
+
+            controller.PresetCalls.Should().ContainSingle();
+            controller.PresetCalls[0].Name.Should().Be("Extreme");
+            controller.PresetCalls[0].Curve.Should().BeEmpty("8E41 is profile-only, so built-in curve cards must not enable continuous manual fan writes");
+            fanService.IsCurveActive.Should().BeFalse();
+
+            var customPreset = new FanPreset
+            {
+                Name = "Custom",
+                Mode = FanMode.Manual,
+                Curve = extremePreset.Curve
+            };
+
+            fanService.ApplyPreset(customPreset).Should().BeFalse("manual custom curves are disabled for this profile-only model");
+            controller.PresetCalls.Should().ContainSingle("the rejected custom preset must not reach the controller");
+
+            fanService.ApplyCustomCurve(extremePreset.Curve);
+            controller.CustomCurveCalls.Should().Be(0, "direct custom curve calls must also be gated by model capability");
+
+            fanService.ManualFanControlAvailable.Should().BeFalse("8E41 should remain profile-only for direct fan levels");
+            fanService.ForceSetFanSpeed(70);
+            fanService.ForceSetFanSpeeds(70, 80).Should().BeFalse("direct manual fan writes are disabled for this profile-only model");
+            controller.SetCalls.Should().BeEmpty("manual fixed-speed writes must not reach the controller on 8E41");
+
+            logging.Dispose();
+        }
+
+        [Fact]
+        public void RestoreOemAutoControl_DisablesCurveAndRecordsRecoveryCommand()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var controller = new RecordingFanController();
+            var thermalProvider = new OmenCore.Hardware.ThermalSensorProvider(new OmenCore.Hardware.LibreHardwareMonitorImpl());
+            var notificationService = new NotificationService(logging);
+
+            var fanService = new FanService(controller, thermalProvider, logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService());
+            fanService.ApplyPreset(new FanPreset
+            {
+                Name = "Gaming",
+                Mode = FanMode.Performance,
+                Curve = new List<FanCurvePoint>
+                {
+                    new FanCurvePoint { TemperatureC = 50, FanPercent = 50 },
+                    new FanCurvePoint { TemperatureC = 80, FanPercent = 90 }
+                }
+            });
+
+            fanService.RestoreOemAutoControl().Should().BeTrue();
+
+            fanService.GetCurrentFanMode().Should().Be("Auto");
+            fanService.ActivePresetName.Should().BeNull();
+            fanService.IsCurveActive.Should().BeFalse();
+            var recovery = fanService.GetCommandHistorySnapshot().Last();
+            recovery.Command.Should().Be("RestoreOemAutoControl");
+            recovery.Target.Should().Be("OEM auto");
+            recovery.Success.Should().BeTrue();
+            recovery.Details.Should().Contain("RestoreAutoControl=True");
+            recovery.Details.Should().Contain("ResetEcToDefaults=True");
+
             logging.Dispose();
         }
 

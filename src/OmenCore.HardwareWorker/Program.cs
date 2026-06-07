@@ -399,6 +399,7 @@ class Program
         
         _computer.Open();
         Console.WriteLine("LibreHardwareMonitor initialized.");
+        QuarantineHybridAmdGpuTelemetryIfNeeded();
         
         // Initialize PawnIO fallback for CPU temp when primary sensor path returns null/zero.
         try
@@ -422,6 +423,32 @@ class Program
         
         // Log detected GPUs for diagnostics
         LogDetectedHardware();
+    }
+
+    private static void QuarantineHybridAmdGpuTelemetryIfNeeded()
+    {
+        try
+        {
+            var hardware = _computer?.Hardware?.ToList();
+            if (hardware == null || hardware.Count == 0)
+            {
+                return;
+            }
+
+            var hasAmdGpu = hardware.Any(h => h.HardwareType == HardwareType.GpuAmd);
+            var hasNvidiaGpu = hardware.Any(h => h.HardwareType == HardwareType.GpuNvidia);
+            if (!hasAmdGpu || !hasNvidiaGpu)
+            {
+                return;
+            }
+
+            ActivateAmdGpuTelemetryQuarantine(
+                "Hybrid AMD+NVIDIA laptop detected; AMD ADL telemetry is disabled to avoid LibreHardwareMonitor ADL frame-metrics access violations");
+        }
+        catch (Exception ex)
+        {
+            LogToFile($"[{DateTime.Now:O}] Failed to evaluate hybrid AMD GPU telemetry quarantine: {ex.Message}\n");
+        }
     }
     
     private static void LogDetectedHardware()
@@ -465,6 +492,12 @@ class Program
                 hw.HardwareType == HardwareType.GpuAmd ||
                 hw.HardwareType == HardwareType.GpuIntel)
             {
+                if (_amdGpuTelemetryQuarantined && hw.HardwareType == HardwareType.GpuAmd)
+                {
+                    LogToFile($"[{DateTime.Now:O}] [GPU Detected] AMD telemetry skipped: {hw.Name} ({_amdGpuTelemetryQuarantineReason})\n");
+                    continue;
+                }
+
                 hw.Update();
                 var tempSensors = hw.Sensors.Where(s => s.SensorType == SensorType.Temperature).ToList();
                 var loadSensors = hw.Sensors.Where(s => s.SensorType == SensorType.Load).ToList();

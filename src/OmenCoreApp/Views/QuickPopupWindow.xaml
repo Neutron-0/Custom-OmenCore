@@ -184,15 +184,32 @@
                 </Grid>
             </Border>
             
-            <!-- Fan Mode Section -->
-            <TextBlock Grid.Row="2" Text="Fan Mode" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6"/>
+            <!-- Quick Profile Section -->
+            <TextBlock Grid.Row="2" Text="Quick Profile" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6"/>
             <UniformGrid Grid.Row="3" Rows="1" Margin="0,0,0,12">
-                <Button x:Name="FanQuietBtn" Style="{StaticResource ModeButtonStyle}" Click="FanMode_Click" Tag="Quiet">
+                <Button x:Name="QuickQuietBtn" Style="{StaticResource ModeButtonStyle}" Click="QuickProfile_Click" Tag="Quiet">
                     <StackPanel>
                         <TextBlock Text="🤫" FontSize="18" HorizontalAlignment="Center"/>
                         <TextBlock Text="Quiet" FontSize="11" HorizontalAlignment="Center" Margin="0,4,0,0"/>
                     </StackPanel>
                 </Button>
+                <Button x:Name="QuickBalancedBtn" Style="{StaticResource ModeButtonStyle}" Click="QuickProfile_Click" Tag="Balanced">
+                    <StackPanel>
+                        <TextBlock Text="⚖️" FontSize="18" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Balanced" FontSize="11" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                    </StackPanel>
+                </Button>
+                <Button x:Name="QuickPerformanceBtn" Style="{StaticResource ModeButtonStyle}" Click="QuickProfile_Click" Tag="Performance">
+                    <StackPanel>
+                        <TextBlock Text="🚀" FontSize="18" HorizontalAlignment="Center"/>
+                        <TextBlock Text="Perform" FontSize="11" HorizontalAlignment="Center" Margin="0,4,0,0"/>
+                    </StackPanel>
+                </Button>
+            </UniformGrid>
+
+            <!-- Fan Mode Section -->
+            <TextBlock Grid.Row="4" Text="Fan Mode" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6"/>
+            <UniformGrid Grid.Row="5" Rows="1" Margin="0,0,0,12" VerticalAlignment="Top">
                 <Button x:Name="FanAutoBtn" Style="{StaticResource ModeButtonStyle}" Click="FanMode_Click" Tag="Auto">
                     <StackPanel>
                         <TextBlock Text="⚡" FontSize="18" HorizontalAlignment="Center"/>
@@ -210,29 +227,6 @@
                     <StackPanel>
                         <TextBlock Text="🔥" FontSize="18" HorizontalAlignment="Center"/>
                         <TextBlock Text="Max" FontSize="11" HorizontalAlignment="Center" Margin="0,4,0,0"/>
-                    </StackPanel>
-                </Button>
-            </UniformGrid>
-            
-            <!-- Performance Mode Section -->
-            <TextBlock Grid.Row="4" Text="Performance Mode" FontSize="12" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,0,0,6"/>
-            <UniformGrid Grid.Row="5" Rows="1" Margin="0,0,0,12" VerticalAlignment="Top">
-                <Button x:Name="PerfQuietBtn" Style="{StaticResource ModeButtonStyle}" Click="PerformanceMode_Click" Tag="Quiet">
-                    <StackPanel>
-                        <TextBlock Text="🔋" FontSize="18" HorizontalAlignment="Center"/>
-                        <TextBlock Text="Quiet" FontSize="11" HorizontalAlignment="Center" Margin="0,4,0,0"/>
-                    </StackPanel>
-                </Button>
-                <Button x:Name="PerfBalancedBtn" Style="{StaticResource ModeButtonStyle}" Click="PerformanceMode_Click" Tag="Balanced">
-                    <StackPanel>
-                        <TextBlock Text="⚖️" FontSize="18" HorizontalAlignment="Center"/>
-                        <TextBlock Text="Balanced" FontSize="11" HorizontalAlignment="Center" Margin="0,4,0,0"/>
-                    </StackPanel>
-                </Button>
-                <Button x:Name="PerfPerformanceBtn" Style="{StaticResource ModeButtonStyle}" Click="PerformanceMode_Click" Tag="Performance">
-                    <StackPanel>
-                        <TextBlock Text="🚀" FontSize="18" HorizontalAlignment="Center"/>
-                        <TextBlock Text="Perform" FontSize="11" HorizontalAlignment="Center" Margin="0,4,0,0"/>
                     </StackPanel>
                 </Button>
             </UniformGrid>

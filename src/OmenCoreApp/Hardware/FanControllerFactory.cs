@@ -373,7 +373,8 @@ namespace OmenCore.Hardware
             {
                 var conservativeWmiProfile = _capabilities?.ModelConfig != null &&
                     (!_capabilities.ModelConfig.SupportsFanControlEc || !_capabilities.ModelConfig.UserVerified);
-                var allowV1AutoModeFloorClear = !conservativeWmiProfile;
+                var allowV1AutoModeFloorClear =
+                    _capabilities?.ModelConfig?.AllowV1AutoModeFloorClear ?? !conservativeWmiProfile;
                 var controller = new WmiFanController(
                     _libreHwMonitor!,
                     _logging,

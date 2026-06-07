@@ -126,6 +126,49 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public async Task LaunchReadinessFile_IsIncludedInExport()
+        {
+            var svc = new DiagnosticExportService(_logging, _tempDir);
+            var zipPath = await svc.CollectAndExportAsync();
+
+            zipPath.Should().NotBeNullOrEmpty();
+
+            if (File.Exists(zipPath))
+            {
+                using var archive = ZipFile.OpenRead(zipPath);
+                var entry = archive.Entries
+                    .FirstOrDefault(e => e.Name.Equals("launch-readiness.txt", StringComparison.OrdinalIgnoreCase));
+                entry.Should().NotBeNull("launch-readiness.txt must be present in the diagnostic bundle");
+            }
+            else
+            {
+                var txtPath = Path.Combine(zipPath, "launch-readiness.txt");
+                File.Exists(txtPath).Should().BeTrue("launch-readiness.txt must be written to the export folder");
+            }
+        }
+
+        [Fact]
+        public async Task LaunchReadinessFile_ContainsExpectedUnavailableSections()
+        {
+            var svc = new DiagnosticExportService(_logging, _tempDir);
+            var zipPath = await svc.CollectAndExportAsync();
+
+            string content = ReadFileFromExport(zipPath, "launch-readiness.txt");
+
+            content.Should().Contain("3.7.1 LAUNCH READINESS SNAPSHOT");
+            content.Should().Contain("[Fan Recovery]");
+            content.Should().Contain("Fan service unavailable.");
+            content.Should().Contain("[Performance Mode Apply Trace]");
+            content.Should().Contain("Performance mode service unavailable.");
+            content.Should().Contain("[CPU Temperature Authority]");
+            content.Should().Contain("Monitoring service unavailable.");
+            content.Should().Contain("[HP Keyboard RGB]");
+            content.Should().Contain("Keyboard lighting service unavailable.");
+            content.Should().Contain("[Hardware Worker Containment]");
+            content.Should().Contain("AMD ADL quarantine status");
+        }
+
+        [Fact]
         public async Task ResourceFootprintFile_ContainsLightweightBaselineSections()
         {
             const string timerName = "Test_ResourceFootprint_Timer";

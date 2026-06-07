@@ -101,5 +101,34 @@ namespace OmenCoreApp.Tests.Services
             summary.KeyboardWarningText.Should().Contain("not user-verified");
             summary.ClipboardSummary.Should().NotContain("Keyboard model: Unknown");
         }
+
+        [Fact]
+        public void Build_8BCDExactProductId_ReportsExactMediumConfidence()
+        {
+            var systemInfo = new SystemInfo
+            {
+                Manufacturer = "HP",
+                Model = "OMEN by HP Gaming Laptop 16-xd0xxx",
+                ProductName = "8BCD",
+                SystemSku = "CND42907M9",
+                BiosVersion = "F.32"
+            };
+            var capabilities = new DeviceCapabilities
+            {
+                ProductId = "8BCD",
+                ModelName = systemInfo.Model,
+                ModelFamily = OmenModelFamily.OMEN16,
+                IsKnownModel = true,
+                ModelConfig = ModelCapabilityDatabase.GetCapabilities("8BCD")
+            };
+
+            var summary = ModelIdentityResolutionService.Build(systemInfo, capabilities);
+
+            summary.ResolutionSource.Should().Be("Exact ProductId");
+            summary.Confidence.Should().Be("Medium");
+            summary.WarningText.Should().Contain("not user-verified");
+            summary.ClipboardSummary.Should().Contain("Resolution source: Exact ProductId");
+            summary.ClipboardSummary.Should().NotContain("Capability profile was inferred from the WMI model name");
+        }
     }
 }

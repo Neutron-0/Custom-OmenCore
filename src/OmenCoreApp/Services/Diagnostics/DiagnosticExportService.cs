@@ -30,6 +30,7 @@ namespace OmenCore.Services.Diagnostics
         private readonly KeyboardLightingService? _keyboardLightingService;
         private readonly Func<RgbManager?>? _rgbManagerProvider;
         private readonly RuntimeEcOperationCoordinator _ecOperationCoordinator;
+        private readonly PerformanceModeService? _performanceModeService;
 
         public DiagnosticExportService(
             LoggingService logging,
@@ -39,7 +40,8 @@ namespace OmenCore.Services.Diagnostics
             FanService? fanService = null,
             KeyboardLightingService? keyboardLightingService = null,
             Func<RgbManager?>? rgbManagerProvider = null,
-            RuntimeEcOperationCoordinator? ecOperationCoordinator = null)
+            RuntimeEcOperationCoordinator? ecOperationCoordinator = null,
+            PerformanceModeService? performanceModeService = null)
         {
             _logging = logging;
             _logsDirectory = logsDirectory;
@@ -49,6 +51,7 @@ namespace OmenCore.Services.Diagnostics
             _keyboardLightingService = keyboardLightingService;
             _rgbManagerProvider = rgbManagerProvider;
             _ecOperationCoordinator = ecOperationCoordinator ?? new RuntimeEcOperationCoordinator(logging);
+            _performanceModeService = performanceModeService;
         }
 
         /// <summary>
@@ -83,6 +86,7 @@ namespace OmenCore.Services.Diagnostics
                     CollectRuntimePerformanceSnapshotAsync(exportPath),
                     CollectBoundedPerformanceSnapshotsAsync(exportPath),
                     CollectBackgroundTimerSnapshotAsync(exportPath),
+                    CollectLaunchReadinessSnapshotAsync(exportPath, effectiveMonitoringService, effectiveFanService),
                     CollectRgbControlPathAsync(exportPath),
                     CollectModelIdentityTraceAsync(exportPath),
                     CollectTuningSafetySnapshotAsync(exportPath),
@@ -393,6 +397,95 @@ namespace OmenCore.Services.Diagnostics
             }
         }
 
+        private async Task CollectLaunchReadinessSnapshotAsync(
+            string exportPath,
+            HardwareMonitoringService? monitoringService,
+            FanService? fanService)
+        {
+            try
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine("=== 3.7.1 LAUNCH READINESS SNAPSHOT ===");
+                sb.AppendLine($"CapturedUtc: {DateTime.UtcNow:O}");
+                sb.AppendLine("Purpose: summarize the 3.7.1 field-validation state for fan recovery, performance-mode routing, CPU authority, RGB support, and hardware-worker containment.");
+                sb.AppendLine();
+
+                sb.AppendLine("[Fan Recovery]");
+                if (fanService == null)
+                {
+                    sb.AppendLine("Fan service unavailable.");
+                }
+                else
+                {
+                    sb.AppendLine($"Backend: {fanService.Backend}");
+                    sb.AppendLine($"FanWritesAvailable: {fanService.FanWritesAvailable}");
+                    sb.AppendLine($"FanCurvesAvailable: {fanService.FanCurvesAvailable}");
+                    sb.AppendLine($"ManualFanControlAvailable: {fanService.ManualFanControlAvailable}");
+                    sb.AppendLine($"CurrentMode: {fanService.GetCurrentFanMode() ?? "<unknown>"}");
+                    sb.AppendLine($"ActivePreset: {fanService.ActivePresetName ?? "<none>"}");
+                    sb.AppendLine($"CurveActive: {fanService.IsCurveActive}");
+                    sb.AppendLine($"HoldActive: {fanService.IsHoldActive}");
+                    sb.AppendLine($"RecentFanCommandCount: {fanService.GetCommandHistorySnapshot().Count}");
+                    sb.AppendLine("RecoveryAction: RestoreOemAutoControl clears OmenCore fan ownership and returns control to firmware auto mode.");
+                }
+
+                sb.AppendLine();
+                sb.AppendLine("[Performance Mode Apply Trace]");
+                if (_performanceModeService == null)
+                {
+                    sb.AppendLine("Performance mode service unavailable.");
+                }
+                else
+                {
+                    sb.Append(_performanceModeService.GetApplyTraceReport());
+                }
+
+                sb.AppendLine();
+                sb.AppendLine("[CPU Temperature Authority]");
+                if (monitoringService == null)
+                {
+                    sb.AppendLine("Monitoring service unavailable.");
+                }
+                else
+                {
+                    sb.AppendLine($"MonitoringSource: {monitoringService.MonitoringSource}");
+                    sb.AppendLine($"Health: {monitoringService.HealthStatus}");
+                    sb.AppendLine($"LastSampleAgeSeconds: {FormatMaybeInfiniteSeconds(monitoringService.LastSampleAge)}");
+                }
+
+                sb.AppendLine();
+                sb.AppendLine("[HP Keyboard RGB]");
+                if (_keyboardLightingService == null)
+                {
+                    sb.AppendLine("Keyboard lighting service unavailable.");
+                }
+                else
+                {
+                    sb.AppendLine($"Available: {_keyboardLightingService.IsAvailable}");
+                    sb.AppendLine($"ActiveBackend: {_keyboardLightingService.BackendType}");
+                    sb.AppendLine($"PerKeyActive: {_keyboardLightingService.IsPerKey}");
+                    sb.AppendLine($"PerKeyCapableHardware: {_keyboardLightingService.IsPerKeyCapableHardware}");
+                    if (_keyboardLightingService.IsPerKeyCapableHardware && !_keyboardLightingService.IsPerKey)
+                    {
+                        sb.AppendLine("PerKeyLaunchStatus: HID per-key backend/editor pending; keep zone/light-bar fallback available where supported.");
+                    }
+                }
+
+                sb.AppendLine();
+                sb.AppendLine("[Hardware Worker Containment]");
+                sb.AppendLine("AMD ADL quarantine status is reported by HardwareWorker.log when active.");
+                sb.AppendLine("Expected hybrid behavior: unstable AMD ADL-backed iGPU telemetry can be quarantined while NVIDIA, CPU, fan, memory, battery, and storage telemetry remain active.");
+
+                File.WriteAllText(Path.Combine(exportPath, "launch-readiness.txt"), sb.ToString());
+                _logging.Info("Collected 3.7.1 launch readiness snapshot");
+                await Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                _logging.Warn($"Failed to collect launch readiness snapshot: {ex.Message}");
+            }
+        }
+
         private async Task CollectRgbControlPathAsync(string exportPath)
         {
             try
@@ -431,6 +524,10 @@ namespace OmenCore.Services.Diagnostics
             sb.AppendLine($"ActiveBackend: {_keyboardLightingService.BackendType}");
             sb.AppendLine($"PerKeyActive: {_keyboardLightingService.IsPerKey}");
             sb.AppendLine($"PerKeyCapableHardware: {_keyboardLightingService.IsPerKeyCapableHardware}");
+            if (_keyboardLightingService.IsPerKeyCapableHardware && !_keyboardLightingService.IsPerKey)
+            {
+                sb.AppendLine("PerKeyLaunchStatus: HID per-key backend/editor pending; zone/light-bar fallback remains the supported path in this build.");
+            }
             sb.AppendLine();
         }
 

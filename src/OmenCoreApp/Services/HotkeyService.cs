@@ -77,6 +77,25 @@ namespace OmenCore.Services
             _logging = logging;
         }
 
+        public HotkeyDiagnosticSnapshot GetDiagnosticSnapshot()
+        {
+            return new HotkeyDiagnosticSnapshot
+            {
+                Enabled = _isEnabled,
+                WindowHandleReady = _windowHandle != IntPtr.Zero,
+                RegisteredCount = _registeredHotkeys.Count,
+                PendingCount = _pendingHotkeys.Count,
+                RegisteredBindings = _registeredHotkeys.Values
+                    .OrderBy(binding => binding.Action)
+                    .Select(binding => HotkeyDiagnosticBinding.From(binding))
+                    .ToArray(),
+                PendingBindings = _pendingHotkeys
+                    .OrderBy(binding => binding.Action)
+                    .Select(binding => HotkeyDiagnosticBinding.From(binding))
+                    .ToArray()
+            };
+        }
+
         /// <summary>
         /// Initialize hotkey handling with the main window
         /// </summary>
@@ -541,6 +560,35 @@ namespace OmenCore.Services
                 parts.Add(Key.ToString());
                 return string.Join(" + ", parts);
             }
+        }
+    }
+
+    public sealed class HotkeyDiagnosticSnapshot
+    {
+        public bool Enabled { get; init; }
+        public bool WindowHandleReady { get; init; }
+        public int RegisteredCount { get; init; }
+        public int PendingCount { get; init; }
+        public HotkeyDiagnosticBinding[] RegisteredBindings { get; init; } = Array.Empty<HotkeyDiagnosticBinding>();
+        public HotkeyDiagnosticBinding[] PendingBindings { get; init; } = Array.Empty<HotkeyDiagnosticBinding>();
+    }
+
+    public sealed class HotkeyDiagnosticBinding
+    {
+        public int Id { get; init; }
+        public HotkeyAction Action { get; init; }
+        public string Chord { get; init; } = string.Empty;
+        public bool IsEnabled { get; init; }
+
+        public static HotkeyDiagnosticBinding From(HotkeyBinding binding)
+        {
+            return new HotkeyDiagnosticBinding
+            {
+                Id = binding.Id,
+                Action = binding.Action,
+                Chord = binding.DisplayString,
+                IsEnabled = binding.IsEnabled
+            };
         }
     }
 }

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Reflection;
 using System.Threading;
@@ -27,6 +28,46 @@ namespace OmenCoreApp.Tests.ViewModels
             }
 
             public Task<bool> TryRestartAsync() => Task.FromResult(true);
+        }
+
+        private sealed class TestFanController : IFanController
+        {
+            public bool IsAvailable => true;
+            public string Status => "Test";
+            public string Backend => "Test";
+            public bool ApplyPreset(FanPreset preset) => true;
+            public bool ApplyCustomCurve(System.Collections.Generic.IEnumerable<FanCurvePoint> curve) => true;
+            public bool SetFanSpeed(int percent) => true;
+            public bool SetFanSpeeds(int cpuPercent, int gpuPercent) => true;
+            public bool SetMaxFanSpeed(bool enabled) => true;
+            public bool SetPerformanceMode(string modeName) => true;
+            public bool RestoreAutoControl() => true;
+            public System.Collections.Generic.IEnumerable<FanTelemetry> ReadFanSpeeds() => Array.Empty<FanTelemetry>();
+            public void ApplyMaxCooling() { }
+            public void ApplyAutoMode() { }
+            public void ApplyQuietMode() { }
+            public bool ResetEcToDefaults() => true;
+            public bool ApplyThrottlingMitigation() => true;
+            public bool VerifyMaxApplied(out string details) { details = ""; return true; }
+            public void Dispose() { }
+        }
+
+        private static FanService CreateFanService(LoggingService logging)
+        {
+            var hwMonitor = new LibreHardwareMonitorImpl();
+            var thermalProvider = new ThermalSensorProvider(hwMonitor);
+            var notificationService = new NotificationService(logging);
+            return new FanService(new TestFanController(), thermalProvider, logging, notificationService, 1000, new ResumeRecoveryDiagnosticsService());
+        }
+
+        private static void AddFanTelemetry(FanService fanService)
+        {
+            var field = typeof(FanService).GetField("_fanTelemetry", BindingFlags.NonPublic | BindingFlags.Instance);
+            field.Should().NotBeNull();
+
+            var telemetry = field!.GetValue(fanService).Should().BeAssignableTo<ObservableCollection<FanTelemetry>>().Subject;
+            telemetry.Add(new FanTelemetry { Name = "CPU Fan", SpeedRpm = 2400, DutyCyclePercent = 42, Temperature = 55 });
+            telemetry.Add(new FanTelemetry { Name = "GPU Fan", SpeedRpm = 2200, DutyCyclePercent = 38, Temperature = 52 });
         }
 
         [Fact]
@@ -251,6 +292,54 @@ namespace OmenCoreApp.Tests.ViewModels
 
                 vm.GpuTempChipDisplay.Should().Be("Idle");
                 vm.RefreshCommand.Should().NotBeNull("the Dashboard refresh button should be connected to the view model");
+            }
+            finally
+            {
+                logging.Dispose();
+            }
+        }
+
+        [Fact]
+        public void FanCurveProjection_IgnoresLikelyBrokenBiosTemperatureSentinel()
+        {
+            var tmp = Path.Combine(Path.GetTempPath(), "OmenCoreTests", Guid.NewGuid().ToString());
+            Directory.CreateDirectory(tmp);
+            Environment.SetEnvironmentVariable("OMENCORE_CONFIG_DIR", tmp);
+
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            try
+            {
+                var monitoring = new HardwareMonitoringService(
+                    new MonitoringBridgeStub(),
+                    logging,
+                    new MonitoringPreferences(),
+                    new ResumeRecoveryDiagnosticsService());
+                var fanService = CreateFanService(logging);
+                AddFanTelemetry(fanService);
+
+                using var vm = new DashboardViewModel(monitoring, fanService);
+                var onSampleUpdated = typeof(DashboardViewModel).GetMethod("OnSampleUpdated", BindingFlags.Instance | BindingFlags.NonPublic);
+                onSampleUpdated.Should().NotBeNull();
+
+                var sample = new MonitoringSample
+                {
+                    Timestamp = DateTime.UtcNow,
+                    CpuTemperatureC = 100,
+                    GpuTemperatureC = 52,
+                    CpuTemperatureState = TelemetryDataState.Valid,
+                    GpuTemperatureState = TelemetryDataState.Valid,
+                    Fan1Rpm = 2400,
+                    Fan2Rpm = 2200
+                };
+
+                onSampleUpdated!.Invoke(vm, new object?[] { null, sample });
+
+                vm.FanCurvePoints.Should().ContainSingle();
+                vm.FanCurvePoints[0].TemperatureC.Should().Be(52,
+                    "a lone 100C reading paired with a normal sensor is a known broken-BIOS sentinel pattern and should not pollute fan curve averages");
+                vm.FanCurveSummary.Should().Contain("52");
             }
             finally
             {

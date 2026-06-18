@@ -50,6 +50,25 @@ namespace OmenCore.Services
         /// </summary>
         public ConcurrentDictionary<int, ProcessInfo> ActiveProcesses { get; } = new();
 
+        /// <summary>
+        /// Whether process polling is currently active.
+        /// </summary>
+        public bool IsMonitoring => _isMonitoring;
+
+        /// <summary>
+        /// Number of normalized executable names currently tracked.
+        /// </summary>
+        public int TrackedProcessCount
+        {
+            get
+            {
+                lock (_trackedLock)
+                {
+                    return _trackedProcesses.Count;
+                }
+            }
+        }
+
         public ProcessMonitoringService(LoggingService logging)
         {
             _logging = logging;

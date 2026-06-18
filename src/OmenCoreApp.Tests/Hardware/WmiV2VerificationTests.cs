@@ -414,6 +414,25 @@ namespace OmenCoreApp.Tests.Hardware
         }
 
         [Fact]
+        public void CountdownExtensionCallback_MaxMode_ModelOverride_ReappliesAfterOneLowSample()
+        {
+            var fake = new MaintenanceFakeWmiBios();
+            var controller = new WmiFanController(null, null, 0, injectedWmiBios: fake, maxModeDropChecksBeforeReapply: 1);
+
+            controller.ApplyPreset(new FanPreset { Name = "Max" }).Should().BeTrue();
+            controller.StopCountdownExtension();
+
+            var maxCallsBefore = fake.SetFanMaxTrueCalls;
+            fake.ForceLowTelemetry = true;
+
+            InvokeCountdownExtensionCallback(controller);
+
+            fake.SetFanMaxTrueCalls.Should().Be(maxCallsBefore + 1,
+                "8D41-style firmware reclaim should reassert Max on the first low telemetry sample");
+            controller.LastMaxModeExternalResetUtc.Should().NotBeNull();
+        }
+
+        [Fact]
         public void CountdownExtensionCallback_MaxMode_ReappliesWhen63ScaleBoardDropsTo55()
         {
             var fake = new Board63MaintenanceFakeWmiBios();

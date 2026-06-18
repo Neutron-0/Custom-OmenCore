@@ -459,7 +459,9 @@
                                     <!-- Power -->
                                     <StackPanel Grid.Column="0">
                                         <TextBlock Text="POWER" Style="{StaticResource GaugeLabel}" HorizontalAlignment="Center"/>
-                                        <TextBlock Text="{Binding CpuPowerWatts, StringFormat={}{0:F0}W}" FontSize="18" FontWeight="Bold" 
+                                        <TextBlock Text="{Binding CpuPowerDisplay}"
+                                                   ToolTip="{Binding CpuPowerTooltip}"
+                                                   FontSize="18" FontWeight="Bold"
                                                    FontFamily="Consolas" Foreground="{StaticResource AccentGreenBrush}" 
                                                    HorizontalAlignment="Center" Margin="0,4,0,0"/>
                                     </StackPanel>
@@ -568,7 +570,9 @@
                                     <!-- Power -->
                                     <StackPanel Grid.Column="0">
                                         <TextBlock Text="POWER" Style="{StaticResource GaugeLabel}" HorizontalAlignment="Center"/>
-                                        <TextBlock Text="{Binding GpuPowerWatts, StringFormat={}{0:F0}W}" FontSize="18" FontWeight="Bold" 
+                                        <TextBlock Text="{Binding GpuPowerDisplay}"
+                                                   ToolTip="{Binding GpuPowerTooltip}"
+                                                   FontSize="18" FontWeight="Bold"
                                                    FontFamily="Consolas" Foreground="{StaticResource AccentGreenBrush}" 
                                                    HorizontalAlignment="Center" Margin="0,4,0,0"/>
                                     </StackPanel>

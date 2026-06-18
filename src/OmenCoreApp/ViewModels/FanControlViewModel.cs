@@ -272,7 +272,7 @@ namespace OmenCore.ViewModels
             }
         }
         
-        public string CurrentFanModeName => SelectedPreset?.Name ?? "Auto";
+        public string CurrentFanModeName => IsConstantSelected ? "Direct" : SelectedPreset?.Name ?? "Auto";
         
         // Unified preset selection state for RadioButton cards
         private string _activeFanMode = "Auto";
@@ -294,6 +294,8 @@ namespace OmenCore.ViewModels
                     OnPropertyChanged(nameof(IsCustomSelected));
                     OnPropertyChanged(nameof(IsConstantSelected));
                     OnPropertyChanged(nameof(ShowCurveEditor));
+                    OnPropertyChanged(nameof(ShowConstantControl));
+                    OnPropertyChanged(nameof(CurrentFanModeName));
                     NotifyFanOwnershipChanged();
                     RaisePresetCommandStateChanged();
                 }
@@ -355,13 +357,8 @@ namespace OmenCore.ViewModels
                     _constantFanPercent = clamped;
                     OnPropertyChanged();
                     OnPropertyChanged(nameof(ConstantFanRpmEstimate));
+                    OnPropertyChanged(nameof(DirectPresetSubtitle));
                     NotifyFanOwnershipChanged();
-                    
-                    // If in constant mode, apply immediately
-                    if (IsConstantSelected)
-                    {
-                        ApplyConstantSpeed();
-                    }
                 }
             }
         }
@@ -471,13 +468,15 @@ namespace OmenCore.ViewModels
 
         public bool ShowCurveEditor => IsCustomSelected && FanCurvesAvailable;
 
+        public bool ShowConstantControl => IsConstantSelected && ManualFanControlAvailable;
+
         public string FanCapabilityBadgeText => ProfileOnlyFanControl ? "Profile-only" : "Curves";
 
         public string FanCapabilityVisualState => ProfileOnlyFanControl ? "degraded" : "confirmed";
 
         public string FanProfileHeaderHint => ProfileOnlyFanControl
             ? "Select an OEM fan profile"
-            : "Select a preset or create a custom curve";
+            : "Select a preset, direct fan level, or custom curve";
 
         public string ExtremePresetSubtitle => ProfileOnlyFanControl ? "Profile" : "@75C";
 
@@ -485,9 +484,15 @@ namespace OmenCore.ViewModels
 
         public string CustomPresetSubtitle => FanCurvesAvailable ? "Editor" : "Unavailable";
 
+        public string DirectPresetSubtitle => ManualFanControlAvailable ? $"{ConstantFanPercent}%" : "Unavailable";
+
         public string CustomCurveTooltip => FanCurvesAvailable
             ? "Apply your custom fan curve defined in the editor below."
             : "Custom fan curves are unavailable for this model; use OEM fan profiles instead.";
+
+        public string DirectFanControlTooltip => ManualFanControlAvailable
+            ? "Hold fans at a fixed requested level using manual fan control."
+            : "Direct fixed fan level control is unavailable for this model; use OEM fan profiles instead.";
 
         public string CustomPresetName
         {
@@ -2143,9 +2148,7 @@ namespace OmenCore.ViewModels
             // Snapshot the percent now (slider may move again before the Task runs)
             var percent = ConstantFanPercent;
 
-            // Guard against overlapping WMI writes when the user drags the slider.
-            // If a write is already in flight, drop this tick — the caller will requeue
-            // when the slider settles (WPF fires PropertyChanged on every increment).
+            // Guard against overlapping WMI writes from repeated Apply actions.
             if (_isApplyingConstantSpeed)
                 return;
 

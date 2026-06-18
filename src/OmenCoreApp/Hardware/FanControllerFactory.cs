@@ -382,7 +382,8 @@ namespace OmenCore.Hardware
                     _capabilities?.ModelConfig?.MaxFanLevel,
                     ecAccess: _ecAccess,
                     strictFanModeReadback: !conservativeWmiProfile,
-                    allowV1AutoModeFloorClear: allowV1AutoModeFloorClear);
+                    allowV1AutoModeFloorClear: allowV1AutoModeFloorClear,
+                    maxModeDropChecksBeforeReapply: _capabilities?.ModelConfig?.MaxModeDropChecksBeforeReapply);
                 if (controller.IsAvailable)
                 {
                     if (conservativeWmiProfile)

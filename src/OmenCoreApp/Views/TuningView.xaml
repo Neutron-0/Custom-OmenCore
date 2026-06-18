@@ -129,6 +129,7 @@
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <Path Data="{StaticResource IconAbout}"
                           Fill="#7CC9FF"
@@ -152,7 +153,32 @@
                                    Foreground="{StaticResource TextMutedBrush}"
                                    Margin="0,4,0,0"
                                    TextWrapping="Wrap"/>
+                        <TextBlock Text="{Binding SystemControl.TuningRollbackStatusText}"
+                                   FontSize="10"
+                                   Foreground="{StaticResource TextMutedBrush}"
+                                   Margin="0,4,0,0"
+                                   TextWrapping="Wrap"/>
                     </StackPanel>
+                    <Button Grid.Column="2"
+                            Style="{StaticResource SecondaryButton}"
+                            Command="{Binding SystemControl.ApplySafeTuningRollbackCommand}"
+                            Padding="12,7"
+                            Margin="14,0,0,0"
+                            VerticalAlignment="Center"
+                            ToolTip="Reset live tuning where available and normalize startup tuning state to safe Balanced/Auto defaults.">
+                        <StackPanel Orientation="Horizontal">
+                            <Path Data="{StaticResource IconRestore}"
+                                  Width="12"
+                                  Height="12"
+                                  Fill="{StaticResource TextSecondaryBrush}"
+                                  Stretch="Uniform"
+                                  Margin="0,0,6,0"
+                                  VerticalAlignment="Center"/>
+                            <TextBlock Text="Safe Rollback"
+                                       FontSize="11"
+                                       FontWeight="SemiBold"/>
+                        </StackPanel>
+                    </Button>
                 </Grid>
             </Border>
 

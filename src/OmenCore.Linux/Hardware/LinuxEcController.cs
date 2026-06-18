@@ -1272,6 +1272,15 @@ public class LinuxEcController
     private bool SetFanProfileViaAcpiHwmon(FanProfile profile)
     {
         bool success = false;
+
+        if (!HasAcpiProfileAccess && HasHwmonFanAccess && profile is not (FanProfile.Auto or FanProfile.Max))
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("⚠ This kernel exposes hwmon fan mode only, not a writable thermal profile.");
+            Console.WriteLine("  Auto and Max can be requested through pwm_enable; Silent/Balanced/Gaming require ACPI/HP-WMI profile support.");
+            Console.ResetColor();
+            return false;
+        }
         
         // Map fan profile to ACPI platform profile
         if (HasAcpiProfileAccess)

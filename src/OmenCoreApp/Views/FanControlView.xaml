@@ -143,7 +143,10 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel Grid.Column="0">
-                    <TextBlock Text="⚠️  Possible Fan Hardware Issue Detected" FontSize="13" FontWeight="Bold" Foreground="{StaticResource WarningBrush}"/>
+                    <StackPanel Orientation="Horizontal">
+                        <Path Data="{StaticResource IconWarning}" Fill="{StaticResource WarningBrush}" Width="14" Height="14" Stretch="Uniform" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="Possible Fan Hardware Issue Detected" FontSize="13" FontWeight="Bold" Foreground="{StaticResource WarningBrush}"/>
+                    </StackPanel>
                     <TextBlock Text="{Binding RpmSanityWarningMessage}" FontSize="11" Foreground="{StaticResource TextSecondaryBrush}" Margin="0,6,0,0" TextWrapping="Wrap"/>
                     <TextBlock Text="OmenCore uses your laptop's standard firmware interface (WMI BIOS). Software commands cannot damage hardware. If the issue persists, contact HP support or check your fans physically." FontSize="10" Foreground="{StaticResource TextTertiaryBrush}" Margin="0,8,0,0" TextWrapping="Wrap" FontStyle="Italic"/>
                 </StackPanel>
@@ -160,6 +163,7 @@
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
                 
                 <!-- Section Header -->
@@ -171,7 +175,7 @@
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <StackPanel Grid.Column="0" Orientation="Horizontal">
-                            <TextBlock Text="🌀" FontSize="14" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                            <Path Data="{StaticResource IconFan}" Fill="{StaticResource AccentBrush}" Width="14" Height="14" Stretch="Uniform" Margin="0,0,8,0" VerticalAlignment="Center"/>
                             <TextBlock Text="FAN PROFILES" FontSize="11" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" VerticalAlignment="Center"/>
                         </StackPanel>
                         <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
@@ -188,7 +192,7 @@
                 </Border>
                 
                 <!-- Preset Cards Grid - 2 rows to avoid clipping at smaller widths/DPI scaling -->
-                <UniformGrid Grid.Row="1" Rows="2" Columns="3" Margin="0,0,0,16">
+                <UniformGrid Grid.Row="1" Rows="2" Columns="4" Margin="0,0,0,16">
                     <!-- Max Cooling -->
                     <RadioButton GroupName="FanPreset"
                                  IsChecked="{Binding IsMaxSelected}"
@@ -222,7 +226,44 @@
                             
                             <Border Grid.Row="3" Background="#20FF4444" CornerRadius="4" Padding="6,2" HorizontalAlignment="Center"
                                     Visibility="{Binding IsMaxSelected, Converter={StaticResource BoolToVisibility}}">
-                                <TextBlock Text="✓" FontSize="10" FontWeight="Bold" Foreground="#FF4444"/>
+                                <Path Data="{StaticResource IconCheck}" Fill="#FF4444" Width="11" Height="11" Stretch="Uniform"/>
+                            </Border>
+                        </Grid>
+                    </RadioButton>
+
+                    <!-- Direct Fixed Level -->
+                    <RadioButton GroupName="FanPreset"
+                                 IsChecked="{Binding IsConstantSelected}"
+                                 Command="{Binding ApplyConstantSpeedCommand}"
+                                 Style="{StaticResource FanPresetCard}"
+                                 Tag="Direct"
+                                 IsEnabled="{Binding ManualFanControlAvailable}"
+                                 ToolTip="{Binding DirectFanControlTooltip}"
+                                 Margin="3,0,3,0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <Border Grid.Row="0" Width="40" Height="40" CornerRadius="20" Margin="0,0,0,8" HorizontalAlignment="Center">
+                                <Border.Background>
+                                    <RadialGradientBrush>
+                                        <GradientStop Color="#3026C6DA" Offset="0"/>
+                                        <GradientStop Color="#0026C6DA" Offset="1"/>
+                                    </RadialGradientBrush>
+                                </Border.Background>
+                                <Path Data="{StaticResource IconTune}" Fill="#26C6DA" Width="20" Height="20" Stretch="Uniform" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                            </Border>
+
+                            <TextBlock Grid.Row="1" Text="Direct" FontSize="13" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" HorizontalAlignment="Center"/>
+                            <TextBlock Grid.Row="2" Text="{Binding DirectPresetSubtitle}" FontSize="9" FontWeight="SemiBold" Foreground="#26C6DA" HorizontalAlignment="Center" Margin="0,2,0,6"/>
+
+                            <Border Grid.Row="3" Background="#2026C6DA" CornerRadius="4" Padding="6,2" HorizontalAlignment="Center"
+                                    Visibility="{Binding IsConstantSelected, Converter={StaticResource BoolToVisibility}}">
+                                <TextBlock Text="OK" FontSize="10" FontWeight="Bold" Foreground="#26C6DA"/>
                             </Border>
                         </Grid>
                     </RadioButton>
@@ -260,7 +301,7 @@
                             
                             <Border Grid.Row="3" Background="#2064B5F6" CornerRadius="4" Padding="6,2" HorizontalAlignment="Center"
                                     Visibility="{Binding IsExtremeSelected, Converter={StaticResource BoolToVisibility}}">
-                                <TextBlock Text="✓" FontSize="10" FontWeight="Bold" Foreground="#64B5F6"/>
+                                <Path Data="{StaticResource IconCheck}" Fill="#64B5F6" Width="11" Height="11" Stretch="Uniform"/>
                             </Border>
                         </Grid>
                     </RadioButton>
@@ -298,7 +339,7 @@
                             
                             <Border Grid.Row="3" Background="#209C27B0" CornerRadius="4" Padding="6,2" HorizontalAlignment="Center"
                                     Visibility="{Binding IsGamingSelected, Converter={StaticResource BoolToVisibility}}">
-                                <TextBlock Text="✓" FontSize="10" FontWeight="Bold" Foreground="#9C27B0"/>
+                                <Path Data="{StaticResource IconCheck}" Fill="#9C27B0" Width="11" Height="11" Stretch="Uniform"/>
                             </Border>
                         </Grid>
                     </RadioButton>
@@ -336,7 +377,7 @@
                             
                             <Border Grid.Row="3" Background="#204CAF50" CornerRadius="4" Padding="6,2" HorizontalAlignment="Center"
                                     Visibility="{Binding IsAutoSelected, Converter={StaticResource BoolToVisibility}}">
-                                <TextBlock Text="✓" FontSize="10" FontWeight="Bold" Foreground="#4CAF50"/>
+                                <Path Data="{StaticResource IconCheck}" Fill="#4CAF50" Width="11" Height="11" Stretch="Uniform"/>
                             </Border>
                         </Grid>
                     </RadioButton>
@@ -374,7 +415,7 @@
                             
                             <Border Grid.Row="3" Background="#20607D8B" CornerRadius="4" Padding="6,2" HorizontalAlignment="Center"
                                     Visibility="{Binding IsSilentSelected, Converter={StaticResource BoolToVisibility}}">
-                                <TextBlock Text="✓" FontSize="10" FontWeight="Bold" Foreground="#607D8B"/>
+                                <Path Data="{StaticResource IconCheck}" Fill="#607D8B" Width="11" Height="11" Stretch="Uniform"/>
                             </Border>
                         </Grid>
                     </RadioButton>
@@ -413,14 +454,70 @@
                             
                             <Border Grid.Row="3" Background="#20FF6B35" CornerRadius="4" Padding="6,2" HorizontalAlignment="Center"
                                     Visibility="{Binding IsCustomSelected, Converter={StaticResource BoolToVisibility}}">
-                                <TextBlock Text="✓" FontSize="10" FontWeight="Bold" Foreground="#FF6B35"/>
+                                <Path Data="{StaticResource IconCheck}" Fill="#FF6B35" Width="11" Height="11" Stretch="Uniform"/>
                             </Border>
                         </Grid>
                     </RadioButton>
                 </UniformGrid>
+
+                <Border Grid.Row="2"
+                        Background="#0D0D0F"
+                        BorderBrush="#3026C6DA"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="14,12"
+                        Margin="0,0,0,0"
+                        Visibility="{Binding ShowConstantControl, Converter={StaticResource BoolToVisibility}}">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0" Width="150" Margin="0,0,16,0">
+                            <TextBlock Text="DIRECT FAN LEVEL" FontSize="11" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}"/>
+                            <TextBlock Text="{Binding ConstantFanPercent, StringFormat='{}{0}% requested'}"
+                                       FontSize="20"
+                                       FontWeight="Bold"
+                                       Foreground="#26C6DA"
+                                       Margin="0,4,0,0"/>
+                            <TextBlock Text="{Binding ConstantFanRpmEstimate, StringFormat='~{0} RPM'}"
+                                       FontSize="10"
+                                       Foreground="{StaticResource TextTertiaryBrush}"
+                                       Margin="0,2,0,0"/>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                            <Slider Minimum="0"
+                                    Maximum="100"
+                                    TickFrequency="5"
+                                    IsSnapToTickEnabled="True"
+                                    Value="{Binding ConstantFanPercent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                    Style="{StaticResource ModernSlider}"
+                                    ToolTip="Drag to request a fixed fan level"/>
+                            <Grid Margin="0,5,0,0">
+                                <TextBlock Text="0%" FontSize="10" Foreground="{StaticResource TextTertiaryBrush}" HorizontalAlignment="Left"/>
+                                <TextBlock Text="50%" FontSize="10" Foreground="{StaticResource TextTertiaryBrush}" HorizontalAlignment="Center"/>
+                                <TextBlock Text="100%" FontSize="10" Foreground="{StaticResource TextTertiaryBrush}" HorizontalAlignment="Right"/>
+                            </Grid>
+                        </StackPanel>
+
+                        <Button Grid.Column="2"
+                                Command="{Binding ApplyConstantSpeedCommand}"
+                                Style="{StaticResource ModernButton}"
+                                Height="32"
+                                Padding="12,0"
+                                Margin="16,0,0,0"
+                                VerticalAlignment="Center"
+                                ToolTip="Apply the selected direct fan level now">
+                            <TextBlock Text="Apply" FontSize="11"/>
+                        </Button>
+                    </Grid>
+                </Border>
                 
                 <!-- Settings Row - Compact horizontal layout -->
-                <StackPanel Grid.Row="2"
+                <StackPanel Grid.Row="3"
                             Visibility="{Binding ShowCurveEditor, Converter={StaticResource BoolToVisibility}}">
                     <!-- Save Custom Preset -->
                     <WrapPanel>
@@ -831,13 +928,15 @@
                                                VerticalAlignment="Center"/>
                                 </StackPanel>
                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
-                                    <Button Content="📋" 
+                                    <Button
                                             Command="{Binding CopyFromCpuCurveCommand}"
                                             Style="{StaticResource SecondaryButton}"
                                             Width="32" Height="28"
                                             FontSize="12"
                                             Margin="0,0,4,0"
-                                            ToolTip="Copy CPU curve to GPU"/>
+                                            ToolTip="Copy CPU curve to GPU">
+                                        <Path Data="{StaticResource IconCopy}" Fill="{StaticResource TextPrimaryBrush}" Width="12" Height="12" Stretch="Uniform"/>
+                                    </Button>
                                     <Button Content="+" 
                                             Command="{Binding AddGpuCurvePointCommand}"
                                             Style="{StaticResource SecondaryButton}"
@@ -931,7 +1030,7 @@
                                     Visibility="{Binding ThermalProtectionActive, Converter={StaticResource BoolToVisibility}}"
                                     ToolTip="{Binding ThermalProtectionStatusText}">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="🛡️" FontSize="12" Margin="0,0,6,0"/>
+                                    <Path Data="{StaticResource IconCheck}" Fill="{StaticResource SuccessBrush}" Width="12" Height="12" Stretch="Uniform" Margin="0,0,6,0"/>
                                     <TextBlock Text="Thermal Protection Active"
                                                FontSize="11"
                                                FontWeight="SemiBold"

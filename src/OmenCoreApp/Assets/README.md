@@ -10,3 +10,6 @@ Current placeholders:
 - corsair-placeholder.svg
 - razer-placeholder.svg
 - logitech-placeholder.svg
+
+OmenCore release/brand assets:
+- omencore-thermal-mark.svg - lightweight vector mark for release notes, docs, and future in-app artwork

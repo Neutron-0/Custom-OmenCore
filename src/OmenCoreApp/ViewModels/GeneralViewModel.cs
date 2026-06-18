@@ -38,6 +38,8 @@ namespace OmenCore.ViewModels
         private double _gpuLoad;
         private double _gpuPowerWatts;
         private double _cpuPowerWatts;
+        private TelemetryDataState _cpuPowerState = TelemetryDataState.Unknown;
+        private TelemetryDataState _gpuPowerState = TelemetryDataState.Unknown;
         private double _ramUsedGb;
         private double _ramTotalGb;
         private MonitoringSample? _lastProjectedSample;
@@ -233,13 +235,55 @@ namespace OmenCore.ViewModels
         public double GpuPowerWatts
         {
             get => _gpuPowerWatts;
-            set { _gpuPowerWatts = value; OnPropertyChanged(); }
+            set
+            {
+                _gpuPowerWatts = SanitizePowerWatts(value);
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(GpuPowerDisplay));
+                OnPropertyChanged(nameof(GpuPowerTooltip));
+                OnPropertyChanged(nameof(IsGpuPowerAvailable));
+            }
         }
         
         public double CpuPowerWatts
         {
             get => _cpuPowerWatts;
-            set { _cpuPowerWatts = value; OnPropertyChanged(); }
+            set
+            {
+                _cpuPowerWatts = SanitizePowerWatts(value);
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(CpuPowerDisplay));
+                OnPropertyChanged(nameof(CpuPowerTooltip));
+                OnPropertyChanged(nameof(IsCpuPowerAvailable));
+            }
+        }
+
+        public TelemetryDataState CpuPowerState
+        {
+            get => _cpuPowerState;
+            private set
+            {
+                if (_cpuPowerState == value) return;
+                _cpuPowerState = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(CpuPowerDisplay));
+                OnPropertyChanged(nameof(CpuPowerTooltip));
+                OnPropertyChanged(nameof(IsCpuPowerAvailable));
+            }
+        }
+
+        public TelemetryDataState GpuPowerState
+        {
+            get => _gpuPowerState;
+            private set
+            {
+                if (_gpuPowerState == value) return;
+                _gpuPowerState = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(GpuPowerDisplay));
+                OnPropertyChanged(nameof(GpuPowerTooltip));
+                OnPropertyChanged(nameof(IsGpuPowerAvailable));
+            }
         }
         
         public double RamUsedGb
@@ -262,6 +306,12 @@ namespace OmenCore.ViewModels
         public string GpuTempDisplay => GpuTemp > 0 ? $"{GpuTemp:F0}°C" : "—°C";
         public bool IsCpuTempAvailable => CpuTemp > 0;
         public bool IsGpuTempAvailable => GpuTemp > 0;
+        public string CpuPowerDisplay => FormatPowerDisplay(CpuPowerWatts, CpuPowerState);
+        public string GpuPowerDisplay => FormatPowerDisplay(GpuPowerWatts, GpuPowerState);
+        public bool IsCpuPowerAvailable => HasDisplayablePower(CpuPowerWatts, CpuPowerState);
+        public bool IsGpuPowerAvailable => HasDisplayablePower(GpuPowerWatts, GpuPowerState);
+        public string CpuPowerTooltip => BuildPowerTooltip("CPU", CpuPowerWatts, CpuPowerState);
+        public string GpuPowerTooltip => BuildPowerTooltip("GPU", GpuPowerWatts, GpuPowerState);
 
         // Profile selection indicators
         public bool IsPerformanceSelected => SelectedProfile == "Performance";
@@ -637,6 +687,8 @@ namespace OmenCore.ViewModels
 
                 CpuLoad = sample.CpuLoadPercent;
                 GpuLoad = sample.GpuLoadPercent;
+                CpuPowerState = sample.CpuPowerState;
+                GpuPowerState = InferGpuPowerState(sample);
                 GpuPowerWatts = sample.GpuPowerWatts;
                 CpuPowerWatts = sample.CpuPowerWatts;
                 RamUsedGb = sample.RamUsageGb;
@@ -690,6 +742,7 @@ namespace OmenCore.ViewModels
                 || Math.Abs(sample.GpuLoadPercent - previous.GpuLoadPercent) >= UiProjectionLoadDelta
                 || Math.Abs(sample.CpuPowerWatts - previous.CpuPowerWatts) >= UiProjectionPowerDelta
                 || Math.Abs(sample.GpuPowerWatts - previous.GpuPowerWatts) >= UiProjectionPowerDelta
+                || sample.CpuPowerState != previous.CpuPowerState
                 || Math.Abs(sample.Fan1Rpm - previous.Fan1Rpm) >= UiProjectionFanRpmDelta
                 || Math.Abs(sample.Fan2Rpm - previous.Fan2Rpm) >= UiProjectionFanRpmDelta
                 || sample.CpuTemperatureState != previous.CpuTemperatureState
@@ -703,6 +756,60 @@ namespace OmenCore.ViewModels
             if (rpm <= 0) return 0;
             if (rpm >= 5500) return 100;
             return Math.Clamp((int)Math.Round(rpm / 55.0), 0, 100);
+        }
+
+        private static double SanitizePowerWatts(double watts)
+        {
+            if (!double.IsFinite(watts) || watts < 0)
+                return 0;
+
+            return watts;
+        }
+
+        private static bool HasDisplayablePower(double watts, TelemetryDataState state)
+        {
+            if (!double.IsFinite(watts) || watts <= 0)
+                return false;
+
+            return state is not TelemetryDataState.Unavailable and not TelemetryDataState.Invalid;
+        }
+
+        private static string FormatPowerDisplay(double watts, TelemetryDataState state)
+        {
+            return HasDisplayablePower(watts, state)
+                ? $"{watts:F0}W"
+                : "--W";
+        }
+
+        private static string BuildPowerTooltip(string label, double watts, TelemetryDataState state)
+        {
+            if (HasDisplayablePower(watts, state))
+            {
+                return $"{label} package power from monitoring telemetry.";
+            }
+
+            return state switch
+            {
+                TelemetryDataState.Stale => $"{label} power telemetry is stale.",
+                TelemetryDataState.Invalid => $"{label} power telemetry returned an invalid value.",
+                TelemetryDataState.Unavailable => $"{label} power sensor is unavailable on this backend.",
+                TelemetryDataState.Inactive => $"{label} power telemetry is inactive.",
+                TelemetryDataState.Zero => $"{label} power sensor returned 0W; hiding it as unavailable.",
+                _ => $"{label} power telemetry is not available yet."
+            };
+        }
+
+        private static TelemetryDataState InferGpuPowerState(MonitoringSample sample)
+        {
+            if (sample.GpuTemperatureState == TelemetryDataState.Inactive)
+                return TelemetryDataState.Inactive;
+
+            if (!double.IsFinite(sample.GpuPowerWatts) || sample.GpuPowerWatts < 0)
+                return TelemetryDataState.Invalid;
+
+            return sample.GpuPowerWatts > 0
+                ? TelemetryDataState.Valid
+                : TelemetryDataState.Unknown;
         }
 
         #endregion

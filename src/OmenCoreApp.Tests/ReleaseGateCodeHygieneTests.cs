@@ -441,8 +441,8 @@ namespace OmenCoreApp.Tests
 
             content.Should().Contain("Source: \"PawnIO_setup.exe\"; DestDir: \"{tmp}\"",
                 "the release installer must embed the PawnIO setup and extract it to the installer temp folder");
-            content.Should().Contain("Filename: \"{tmp}\\PawnIO_setup.exe\"; Parameters: \"-silent\"",
-                "PawnIO should be installed silently from the bundled temp copy when the task is selected");
+            content.Should().Contain("Filename: \"{tmp}\\PawnIO_setup.exe\"; Parameters: \"-install -silent\"",
+                "PawnIO should receive the required install verb and run silently from the bundled temp copy when the task is selected");
             content.Should().Contain("Flags: waituntilterminated runhidden",
                 "the PawnIO sub-installer should run without surfacing a separate installer window");
             content.Should().Contain("Check: not IsPawnIOInstalled",
@@ -468,6 +468,30 @@ namespace OmenCoreApp.Tests
         }
 
         // ─── Source-root discovery smoke test ─────────────────────────────────
+
+        [Fact]
+        public void RuntimePresentation_MainWindowChromeUsesStableAsciiControls()
+        {
+            var root = GetMainSourceRoot();
+            if (!Directory.Exists(root))
+                return;
+
+            var xamlPath = Path.Combine(root, "Views", "MainWindow.xaml");
+            var codePath = Path.Combine(root, "Views", "MainWindow.xaml.cs");
+            var xaml = File.ReadAllText(xamlPath);
+            var code = File.ReadAllText(codePath);
+
+            xaml.Should().Contain("Content=\"-\"",
+                "window chrome should avoid glyphs that can mojibake under mixed editor encodings");
+            xaml.Should().Contain("Content=\"[ ]\"",
+                "the normal maximize button should use ASCII-stable chrome text");
+            xaml.Should().Contain("Content=\"x\"",
+                "the close button should avoid glyphs that can mojibake under mixed editor encodings");
+            code.Should().Contain("MaximizeButton.Content = WindowState == WindowState.Maximized ? \"[]\" : \"[ ]\";",
+                "runtime maximize/restore updates should stay ASCII-stable");
+            code.Should().Contain("catch (InvalidOperationException ex)",
+                "expected title-bar drag races should be logged explicitly instead of swallowed by a bare catch");
+        }
 
         [Fact]
         public void SourceRoot_ContainsExpectedFiles()

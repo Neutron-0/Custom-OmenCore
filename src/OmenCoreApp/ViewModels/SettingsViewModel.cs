@@ -13,6 +13,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
+using System.Xml.Linq;
 using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
 using OmenCore.Models;
@@ -49,6 +50,10 @@ namespace OmenCore.ViewModels
         private bool _liteModeEnabled;
         private bool _linkFanToPerformanceMode;
         private bool _enableStartupHardwareRestore;
+        private bool _startupRestoreFansEnabled;
+        private bool _startupRestorePerformanceEnabled;
+        private bool _startupRestoreRgbEnabled;
+        private bool _startupRestoreTuningEnabled;
         private bool _allowStartupRestoreOnOmen16OrVictus;
         private bool _useSoftwareRendering;
         private int _historyCount = 120;
@@ -366,6 +371,69 @@ namespace OmenCore.ViewModels
                 {
                     _enableStartupHardwareRestore = value;
                     OnPropertyChanged();
+                    OnPropertyChanged(nameof(StartupRestoreCategoryTogglesEnabled));
+                    OnPropertyChanged(nameof(StartupHardwareRestoreStatus));
+                    SaveSettings();
+                }
+            }
+        }
+
+        public bool StartupRestoreCategoryTogglesEnabled => EnableStartupHardwareRestore;
+
+        public bool StartupRestoreFansEnabled
+        {
+            get => _startupRestoreFansEnabled;
+            set
+            {
+                if (_startupRestoreFansEnabled != value)
+                {
+                    _startupRestoreFansEnabled = value;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(StartupHardwareRestoreStatus));
+                    SaveSettings();
+                }
+            }
+        }
+
+        public bool StartupRestorePerformanceEnabled
+        {
+            get => _startupRestorePerformanceEnabled;
+            set
+            {
+                if (_startupRestorePerformanceEnabled != value)
+                {
+                    _startupRestorePerformanceEnabled = value;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(StartupHardwareRestoreStatus));
+                    SaveSettings();
+                }
+            }
+        }
+
+        public bool StartupRestoreRgbEnabled
+        {
+            get => _startupRestoreRgbEnabled;
+            set
+            {
+                if (_startupRestoreRgbEnabled != value)
+                {
+                    _startupRestoreRgbEnabled = value;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(StartupHardwareRestoreStatus));
+                    SaveSettings();
+                }
+            }
+        }
+
+        public bool StartupRestoreTuningEnabled
+        {
+            get => _startupRestoreTuningEnabled;
+            set
+            {
+                if (_startupRestoreTuningEnabled != value)
+                {
+                    _startupRestoreTuningEnabled = value;
+                    OnPropertyChanged();
                     OnPropertyChanged(nameof(StartupHardwareRestoreStatus));
                     SaveSettings();
                 }
@@ -388,10 +456,20 @@ namespace OmenCore.ViewModels
         }
 
         public string StartupHardwareRestoreStatus => EnableStartupHardwareRestore
-            ? AllowStartupRestoreOnOmen16OrVictus
-                ? "Enabled for all supported models"
-                : "Enabled, but blocked on OMEN 16/Victus guardrail models"
+            ? $"{StartupRestorePolicy.BuildSummary(BuildStartupRestorePreviewConfig())}. " +
+              (AllowStartupRestoreOnOmen16OrVictus
+                  ? "OMEN 16/Victus guardrail override is enabled."
+                  : "OMEN 16/Victus guardrail override is off.")
             : "Disabled";
+
+        private AppConfig BuildStartupRestorePreviewConfig() => new()
+        {
+            EnableStartupHardwareRestore = EnableStartupHardwareRestore,
+            StartupRestoreFansEnabled = StartupRestoreFansEnabled,
+            StartupRestorePerformanceEnabled = StartupRestorePerformanceEnabled,
+            StartupRestoreRgbEnabled = StartupRestoreRgbEnabled,
+            StartupRestoreTuningEnabled = StartupRestoreTuningEnabled
+        };
 
         public bool UseSoftwareRendering
         {
@@ -2903,6 +2981,10 @@ namespace OmenCore.ViewModels
             _liteModeEnabled = _config.LiteModeEnabled;
             _linkFanToPerformanceMode = _config.LinkFanToPerformanceMode;
             _enableStartupHardwareRestore = _config.EnableStartupHardwareRestore;
+            _startupRestoreFansEnabled = StartupRestorePolicy.IsEnabled(_config, StartupRestoreCategory.Fans);
+            _startupRestorePerformanceEnabled = StartupRestorePolicy.IsEnabled(_config, StartupRestoreCategory.Performance);
+            _startupRestoreRgbEnabled = StartupRestorePolicy.IsEnabled(_config, StartupRestoreCategory.Rgb);
+            _startupRestoreTuningEnabled = StartupRestorePolicy.IsEnabled(_config, StartupRestoreCategory.Tuning);
             _allowStartupRestoreOnOmen16OrVictus = _config.AllowStartupRestoreOnOmen16OrVictus;
             _useSoftwareRendering = _config.UseSoftwareRendering;
             
@@ -2951,6 +3033,10 @@ namespace OmenCore.ViewModels
             _config.LiteModeEnabled = _liteModeEnabled;
             _config.LinkFanToPerformanceMode = _linkFanToPerformanceMode;
             _config.EnableStartupHardwareRestore = _enableStartupHardwareRestore;
+            _config.StartupRestoreFansEnabled = _startupRestoreFansEnabled;
+            _config.StartupRestorePerformanceEnabled = _startupRestorePerformanceEnabled;
+            _config.StartupRestoreRgbEnabled = _startupRestoreRgbEnabled;
+            _config.StartupRestoreTuningEnabled = _startupRestoreTuningEnabled;
             _config.AllowStartupRestoreOnOmen16OrVictus = _allowStartupRestoreOnOmen16OrVictus;
             _config.UseSoftwareRendering = _useSoftwareRendering;
             
@@ -2990,12 +3076,13 @@ namespace OmenCore.ViewModels
         {
             try
             {
+                var currentExePath = Process.GetCurrentProcess().MainModule?.FileName;
                 using var process = new Process
                 {
                     StartInfo = new ProcessStartInfo
                     {
                         FileName = "schtasks",
-                        Arguments = "/query /tn \"OmenCore\" /fo list",
+                        Arguments = "/query /tn \"OmenCore\" /xml",
                         UseShellExecute = false,
                         CreateNoWindow = true,
                         RedirectStandardOutput = true,
@@ -3006,17 +3093,62 @@ namespace OmenCore.ViewModels
                 var output = process.StandardOutput.ReadToEnd();
                 process.WaitForExit(3000);
                 
-                // If exit code is 0 and output contains task name, task exists
-                var taskExists = process.ExitCode == 0 && output.Contains("OmenCore");
+                var taskExists = process.ExitCode == 0 && IsStartupTaskXmlValid(output, currentExePath);
                 if (taskExists)
                 {
-                    _logging.Info("Startup task 'OmenCore' found in Task Scheduler");
+                    _logging.Info("Startup task 'OmenCore' found and validated in Task Scheduler");
+                }
+                else if (process.ExitCode == 0)
+                {
+                    _logging.Warn("Startup task 'OmenCore' exists but is disabled or points to an invalid command. Re-enable Start with Windows to recreate it.");
                 }
                 return taskExists;
             }
             catch (Exception ex)
             {
                 _logging.Warn($"Could not check Task Scheduler for startup task: {ex.Message}");
+                return false;
+            }
+        }
+
+        private static bool IsStartupTaskXmlValid(string xml, string? expectedExePath)
+        {
+            if (string.IsNullOrWhiteSpace(xml))
+                return false;
+
+            try
+            {
+                var document = XDocument.Parse(xml);
+                var ns = document.Root?.Name.Namespace ?? XNamespace.None;
+                var enabledText = document.Root?
+                    .Element(ns + "Settings")?
+                    .Element(ns + "Enabled")?
+                    .Value;
+                var isEnabled = !string.Equals(enabledText, "false", StringComparison.OrdinalIgnoreCase);
+
+                var command = document.Root?
+                    .Element(ns + "Actions")?
+                    .Element(ns + "Exec")?
+                    .Element(ns + "Command")?
+                    .Value?
+                    .Trim();
+
+                if (!isEnabled || string.IsNullOrWhiteSpace(command))
+                    return false;
+
+                // A quoted XML Command is treated by Task Scheduler as the executable path
+                // including quote characters, which leaves a task that exists but will not launch.
+                if (command.StartsWith("\"", StringComparison.Ordinal) || command.EndsWith("\"", StringComparison.Ordinal))
+                    return false;
+
+                return string.IsNullOrWhiteSpace(expectedExePath) ||
+                    string.Equals(
+                        Path.GetFullPath(command),
+                        Path.GetFullPath(expectedExePath),
+                        StringComparison.OrdinalIgnoreCase);
+            }
+            catch
+            {
                 return false;
             }
         }
@@ -3083,44 +3215,7 @@ namespace OmenCore.ViewModels
                     // Uses LogonTrigger with StartWhenAvailable=true to handle:
                     //   - Normal restart (logon event fires)
                     //   - Fast Startup shutdown+start (StartWhenAvailable recovers missed trigger)
-                    var xmlContent = $@"<?xml version=""1.0"" encoding=""UTF-16""?>
-<Task version=""1.4"" xmlns=""http://schemas.microsoft.com/windows/2004/02/mit/task"">
-  <RegistrationInfo>
-    <Description>Start OmenCore with Windows (elevated)</Description>
-  </RegistrationInfo>
-  <Triggers>
-    <LogonTrigger>
-      <Enabled>true</Enabled>
-      <Delay>PT5S</Delay>
-    </LogonTrigger>
-  </Triggers>
-  <Principals>
-    <Principal id=""Author"">
-      <LogonType>InteractiveToken</LogonType>
-      <RunLevel>HighestAvailable</RunLevel>
-    </Principal>
-  </Principals>
-  <Settings>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <AllowHardTerminate>true</AllowHardTerminate>
-    <StartWhenAvailable>true</StartWhenAvailable>
-    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
-    <AllowStartOnDemand>true</AllowStartOnDemand>
-    <Enabled>true</Enabled>
-    <Hidden>false</Hidden>
-    <RunOnlyIfIdle>false</RunOnlyIfIdle>
-    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-    <Priority>7</Priority>
-  </Settings>
-  <Actions Context=""Author"">
-    <Exec>
-      <Command>""{exePath}""</Command>
-      <Arguments>--minimized</Arguments>
-    </Exec>
-  </Actions>
-</Task>";
+                    var xmlContent = BuildStartupTaskXml(exePath);
                     
                     // Write XML to temp file and import via schtasks
                     var xmlPath = Path.Combine(Path.GetTempPath(), "OmenCore_Task.xml");
@@ -3167,8 +3262,9 @@ namespace OmenCore.ViewModels
                         
                         // If task creation failed, it's likely because we're not elevated
                         // Try to show a helpful message
-                        var isElevated = System.Security.Principal.WindowsIdentity.GetCurrent()
-                            .Owner?.IsWellKnown(System.Security.Principal.WellKnownSidType.BuiltinAdministratorsSid) == true;
+                        using var identity = System.Security.Principal.WindowsIdentity.GetCurrent();
+                        var isElevated = new System.Security.Principal.WindowsPrincipal(identity)
+                            .IsInRole(System.Security.Principal.WindowsBuiltInRole.Administrator);
                         
                         if (!isElevated)
                         {
@@ -3234,6 +3330,59 @@ namespace OmenCore.ViewModels
                     message: "Failed to modify startup settings",
                     ex: ex);
             }
+        }
+
+        private static string BuildStartupTaskXml(string exePath)
+        {
+            var escapedExePath = System.Security.SecurityElement.Escape(exePath) ?? exePath;
+            var workingDirectory = Path.GetDirectoryName(exePath);
+            var escapedWorkingDirectory = string.IsNullOrWhiteSpace(workingDirectory)
+                ? null
+                : System.Security.SecurityElement.Escape(workingDirectory);
+
+            var workingDirectoryElement = string.IsNullOrWhiteSpace(escapedWorkingDirectory)
+                ? string.Empty
+                : $@"
+      <WorkingDirectory>{escapedWorkingDirectory}</WorkingDirectory>";
+
+            return $@"<?xml version=""1.0"" encoding=""UTF-16""?>
+<Task version=""1.4"" xmlns=""http://schemas.microsoft.com/windows/2004/02/mit/task"">
+  <RegistrationInfo>
+    <Description>Start OmenCore with Windows (elevated)</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+      <Delay>PT5S</Delay>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id=""Author"">
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>HighestAvailable</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+  </Settings>
+  <Actions Context=""Author"">
+    <Exec>
+      <Command>{escapedExePath}</Command>
+      <Arguments>--minimized</Arguments>{workingDirectoryElement}
+    </Exec>
+  </Actions>
+</Task>";
         }
         
         /// <summary>

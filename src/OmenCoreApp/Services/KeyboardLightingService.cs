@@ -71,6 +71,10 @@ namespace OmenCore.Services
 
         public bool IsPerKey => _useV2Backend && (_v2Service?.IsPerKey ?? false);
 
+        public string LastApplyStatus { get; private set; } = "No keyboard lighting apply attempted this session.";
+
+        public string LastApplySurface { get; private set; } = "Unknown";
+
         /// <summary>
         /// True when the detected model is per-key capable, even if the active backend
         /// cannot currently expose per-key control.
@@ -237,7 +241,10 @@ namespace OmenCore.Services
                     _logging.Info("✓ OGH proxy available for possible keyboard control fallback");
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logging.Debug($"OGH proxy keyboard fallback probe failed: {ex.Message}");
+            }
 
             if (!IsAvailable)
             {
@@ -414,9 +421,23 @@ namespace OmenCore.Services
                     TrackV2Result(result.Success);
                     if (result.Success)
                     {
+                        RecordApplyStatus(
+                            $"Applied via V2 {_v2Service.BackendName}. {FormatVerificationStatus(result)}",
+                            DescribeV2LightingSurface());
                         _logging.Info($"✓ Zone colors set via V2 engine ({_v2Service.BackendName})");
                         return;
                     }
+
+                    if (result.AcceptedButUnverified)
+                    {
+                        RecordApplyStatus(
+                            $"V2 {_v2Service.BackendName} accepted the write but did not verify: {FormatVerificationStatus(result)}",
+                            DescribeV2LightingSurface());
+                        _logging.Warn($"V2 engine SetZoneColors accepted but did not verify: {result.FailureReason}. Keeping the applied state without re-labeling it as verified success.");
+                        return;
+                    }
+
+                    RecordApplyStatus($"V2 {_v2Service.BackendName} did not verify: {FormatVerificationStatus(result)}", DescribeV2LightingSurface());
                     _logging.Warn($"V2 engine SetZoneColors failed: {result.FailureReason}. Falling back to V1.");
                 }
 
@@ -446,6 +467,7 @@ namespace OmenCore.Services
                     if (!IsEcKeyboardWriteAllowed())
                     {
                         _logging.Debug("EC keyboard writes throttled");
+                        RecordApplyStatus("Experimental EC keyboard write was throttled to protect the EC.", "Keyboard zones (experimental EC)");
                         return;
                     }
                     for (int i = 0; i < 4; i++)
@@ -453,6 +475,7 @@ namespace OmenCore.Services
                         SetZoneColorViaEc((KeyboardZone)i, v1OrderedColors[i]);
                     }
                     TrackEcResult(true);
+                    RecordApplyStatus("Applied via experimental EC keyboard register writes.", "Keyboard zones (experimental EC)");
                     _logging.Info("✓ All zone colors set via EC (EXPERIMENTAL)");
                     _logging.Info($"✓ Applied keyboard zone colors: Z1=#{v1OrderedColors[0].R:X2}{v1OrderedColors[0].G:X2}{v1OrderedColors[0].B:X2}, Z2=#{v1OrderedColors[1].R:X2}{v1OrderedColors[1].G:X2}{v1OrderedColors[1].B:X2}, Z3=#{v1OrderedColors[2].R:X2}{v1OrderedColors[2].G:X2}{v1OrderedColors[2].B:X2}, Z4=#{v1OrderedColors[3].R:X2}{v1OrderedColors[3].G:X2}{v1OrderedColors[3].B:X2}");
                     return;
@@ -475,6 +498,7 @@ namespace OmenCore.Services
                     
                     if (wmiSuccess)
                     {
+                        RecordApplyStatus("WMI BIOS ColorTable accepted the write. Verify the intended physical surface changed; on some models this may be a light bar rather than the keyboard.", "HP WMI ColorTable zones");
                         _logging.Info($"✓ Keyboard color table set via WMI BIOS ({colorTable.Length} bytes)");
                         _logging.Info($"✓ Applied keyboard zone colors: Z1=#{v1OrderedColors[0].R:X2}{v1OrderedColors[0].G:X2}{v1OrderedColors[0].B:X2}, Z2=#{v1OrderedColors[1].R:X2}{v1OrderedColors[1].G:X2}{v1OrderedColors[1].B:X2}, Z3=#{v1OrderedColors[2].R:X2}{v1OrderedColors[2].G:X2}{v1OrderedColors[2].B:X2}, Z4=#{v1OrderedColors[3].R:X2}{v1OrderedColors[3].G:X2}{v1OrderedColors[3].B:X2}");
                         
@@ -501,6 +525,7 @@ namespace OmenCore.Services
                 
                 if (wmiIndividualSuccess)
                 {
+                    RecordApplyStatus("Applied through individual WMI zone writes.", "HP WMI individual keyboard zones");
                     _logging.Info("✓ All zone colors set individually via WMI");
                     return;
                 }
@@ -528,6 +553,7 @@ namespace OmenCore.Services
                         TrackOghResult(oghOk);
                         if (oghOk)
                         {
+                            RecordApplyStatus("Applied via OMEN Gaming Hub proxy ColorTable fallback.", "OGH-proxied HP lighting zones");
                             _logging.Info("✓ Keyboard colors set via OGH proxy fallback");
                             _logging.Info($"✓ Applied keyboard zone colors: Z1=#{v1OrderedColors[0].R:X2}{v1OrderedColors[0].G:X2}{v1OrderedColors[0].B:X2}, Z2=#{v1OrderedColors[1].R:X2}{v1OrderedColors[1].G:X2}{v1OrderedColors[1].B:X2}, Z3=#{v1OrderedColors[2].R:X2}{v1OrderedColors[2].G:X2}{v1OrderedColors[2].B:X2}, Z4=#{v1OrderedColors[3].R:X2}{v1OrderedColors[3].G:X2}{v1OrderedColors[3].B:X2}");
                             return;
@@ -549,17 +575,55 @@ namespace OmenCore.Services
                         SetZoneColorViaEc((KeyboardZone)i, v1OrderedColors[i]);
                     }
                     TrackEcResult(true);
+                    RecordApplyStatus("Applied via experimental EC fallback after WMI methods failed.", "Keyboard zones (experimental EC fallback)");
                     _logging.Info("✓ All zone colors set via EC fallback (EXPERIMENTAL)");
                     _logging.Info($"✓ Applied keyboard zone colors: Z1=#{v1OrderedColors[0].R:X2}{v1OrderedColors[0].G:X2}{v1OrderedColors[0].B:X2}, Z2=#{v1OrderedColors[1].R:X2}{v1OrderedColors[1].G:X2}{v1OrderedColors[1].B:X2}, Z3=#{v1OrderedColors[2].R:X2}{v1OrderedColors[2].G:X2}{v1OrderedColors[2].B:X2}, Z4=#{v1OrderedColors[3].R:X2}{v1OrderedColors[3].G:X2}{v1OrderedColors[3].B:X2}");
                     return;
                 }
                 
+                RecordApplyStatus("All keyboard lighting backends failed. Colors may not be applied.", "Unavailable");
                 _logging.Error("All keyboard lighting backends failed. Colors may not be applied.");
             }
             catch (Exception ex)
             {
+                RecordApplyStatus($"Keyboard lighting apply failed: {ex.Message}", "Unknown");
                 _logging.Warn($"Failed to set all zone colors: {ex.Message}");
             }
+        }
+
+        private void RecordApplyStatus(string status, string surface)
+        {
+            LastApplyStatus = status;
+            LastApplySurface = surface;
+        }
+
+        private string DescribeV2LightingSurface()
+        {
+            if (_v2Service == null)
+            {
+                return "Unknown";
+            }
+
+            return _v2Service.IsPerKey
+                ? "Per-key keyboard RGB"
+                : _v2Service.BackendName.Contains("ColorTable", StringComparison.OrdinalIgnoreCase)
+                    ? "HP WMI ColorTable zones (keyboard or light bar depending model wiring)"
+                    : "HP keyboard lighting zones";
+        }
+
+        private static string FormatVerificationStatus(RgbApplyResult result)
+        {
+            if (!string.IsNullOrWhiteSpace(result.VerificationAdvisory))
+            {
+                return result.VerificationAdvisory;
+            }
+
+            if (result.SupportsVerification)
+            {
+                return result.VerificationPassed ? "Readback verified." : "Readback did not verify.";
+            }
+
+            return "No reliable readback available.";
         }
         
         /// <summary>
@@ -671,8 +735,8 @@ namespace OmenCore.Services
                     {
                         try
                         {
-                            var result = await capturedService.SetZoneColorsAsync(colors).ConfigureAwait(false);
                             await capturedService.SetBrightnessAsync(80).ConfigureAwait(false);
+                            var result = await capturedService.SetZoneColorsAsync(colors).ConfigureAwait(false);
                             _logging.Info(result.Success
                                 ? $"✓ Defaults restored via V2 engine ({capturedService.BackendName})"
                                 : $"V2 engine defaults failed: {result.FailureReason}");

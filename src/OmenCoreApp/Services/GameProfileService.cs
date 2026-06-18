@@ -16,12 +16,25 @@ namespace OmenCore.Services
     {
         private readonly LoggingService _logging;
         private readonly ProcessMonitoringService _processMonitor;
+        private readonly ConfigurationService _config;
         private readonly string _profilesPath;
         private readonly ObservableCollection<GameProfile> _profiles = new();
         private GameProfile? _activeProfile;
+        private GameProfile? _lastExitedProfile;
         private DateTime _activeProfileStartTime;
 
         public ReadOnlyObservableCollection<GameProfile> Profiles { get; }
+
+        /// <summary>
+        /// Whether automatic process detection is enabled by feature settings.
+        /// </summary>
+        public bool IsAutomationEnabled => _config.Config.Features?.GameProfilesEnabled ?? true;
+
+        /// <summary>
+        /// Last profile that exited. Useful for diagnostics and restore policy decisions.
+        /// </summary>
+        public GameProfile? LastExitedProfile => _lastExitedProfile;
+
         public GameProfile? ActiveProfile
         {
             get => _activeProfile;
@@ -52,12 +65,9 @@ namespace OmenCore.Services
         {
             _logging = logging;
             _processMonitor = processMonitor;
-            _ = config;
+            _config = config;
 
-            // Store profiles in AppData
-            var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            var omenCorePath = Path.Combine(appDataPath, "OmenCore");
-            _profilesPath = Path.Combine(omenCorePath, "game_profiles.json");
+            _profilesPath = Path.Combine(_config.GetConfigFolder(), "game_profiles.json");
 
             Profiles = new ReadOnlyObservableCollection<GameProfile>(_profiles);
 
@@ -74,9 +84,16 @@ namespace OmenCore.Services
             await LoadProfilesAsync();
             _logging.Info($"Game profile service initialized with {_profiles.Count} profile(s)");
 
-            // Start monitoring tracked games
             UpdateTrackedProcesses();
-            _processMonitor.StartMonitoring();
+            if (IsAutomationEnabled)
+            {
+                _processMonitor.StartMonitoring();
+            }
+            else
+            {
+                _processMonitor.StopMonitoring();
+                _logging.Info("Game profile process monitoring is disabled in feature settings");
+            }
         }
 
         /// <summary>
@@ -185,6 +202,7 @@ namespace OmenCore.Services
         {
             var clone = source.Clone();
             _profiles.Add(clone);
+            UpdateTrackedProcesses();
             _logging.Info($"Duplicated profile: {source.Name} → {clone.Name}");
             return clone;
         }
@@ -201,6 +219,7 @@ namespace OmenCore.Services
             }
 
             ActiveProfile = profile;
+            _lastExitedProfile = null;
             _activeProfileStartTime = DateTime.Now;
             profile.LaunchCount++;
             _logging.Info($"Manually activated profile: {profile.Name}");
@@ -218,6 +237,7 @@ namespace OmenCore.Services
             {
                 RecordPlaytime(ActiveProfile);
                 _logging.Info($"Deactivated profile: {ActiveProfile.Name}");
+                _lastExitedProfile = ActiveProfile;
                 ActiveProfile = null;
             }
         }
@@ -282,15 +302,33 @@ namespace OmenCore.Services
 
         private void OnProcessDetected(object? sender, ProcessDetectedEventArgs e)
         {
+            if (!IsAutomationEnabled)
+            {
+                return;
+            }
+
             // Find matching profile (by priority if multiple match)
             var matchingProfiles = _profiles
-                .Where(p => p.MatchesProcess(e.ProcessInfo.ProcessName, e.ProcessInfo.ExecutablePath))
-                .OrderByDescending(p => p.Priority)
+                .Select(p => new
+                {
+                    Profile = p,
+                    MatchScore = p.GetProcessMatchScore(e.ProcessInfo.ProcessName, e.ProcessInfo.ExecutablePath)
+                })
+                .Where(match => match.MatchScore > 0)
+                .OrderByDescending(match => match.MatchScore)
+                .ThenByDescending(match => match.Profile.Priority)
+                .Select(match => match.Profile)
                 .ToList();
 
             if (matchingProfiles.Any())
             {
                 var profile = matchingProfiles.First();
+
+                if (ActiveProfile?.Id == profile.Id)
+                {
+                    _logging.Debug($"Profile '{profile.Name}' is already active for {e.ProcessInfo.ProcessName}; skipping duplicate apply");
+                    return;
+                }
 
                 if (ActiveProfile != null)
                 {
@@ -299,6 +337,7 @@ namespace OmenCore.Services
                 }
 
                 ActiveProfile = profile;
+                _lastExitedProfile = null;
                 _activeProfileStartTime = DateTime.Now;
                 profile.LaunchCount++;
 
@@ -314,13 +353,15 @@ namespace OmenCore.Services
             // Check if the exited process was our active profile
             if (ActiveProfile != null && ActiveProfile.MatchesProcess(e.ProcessInfo.ProcessName, e.ProcessInfo.ExecutablePath))
             {
+                var exitedProfile = ActiveProfile;
                 RecordPlaytime(ActiveProfile);
                 _logging.Info($"Profile '{ActiveProfile.Name}' deactivated (game closed, playtime: {e.Runtime:hh\\:mm\\:ss})");
 
+                _lastExitedProfile = exitedProfile;
                 ActiveProfile = null;
 
                 // Trigger restore defaults
-                ProfileApplyRequested?.Invoke(this, new ProfileApplyEventArgs(null, ProfileTrigger.GameExit));
+                ProfileApplyRequested?.Invoke(this, new ProfileApplyEventArgs(null, ProfileTrigger.GameExit, exitedProfile));
             }
         }
 
@@ -359,6 +400,7 @@ namespace OmenCore.Services
         {
             _processMonitor.ProcessDetected -= OnProcessDetected;
             _processMonitor.ProcessExited -= OnProcessExited;
+            _processMonitor.StopMonitoring();
         }
     }
 
@@ -372,12 +414,14 @@ namespace OmenCore.Services
     public class ProfileApplyEventArgs : EventArgs
     {
         public GameProfile? Profile { get; }
+        public GameProfile? ExitedProfile { get; }
         public ProfileTrigger Trigger { get; }
 
-        public ProfileApplyEventArgs(GameProfile? profile, ProfileTrigger trigger)
+        public ProfileApplyEventArgs(GameProfile? profile, ProfileTrigger trigger, GameProfile? exitedProfile = null)
         {
             Profile = profile;
             Trigger = trigger;
+            ExitedProfile = exitedProfile;
         }
     }
 }

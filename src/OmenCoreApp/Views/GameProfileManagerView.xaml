@@ -360,9 +360,13 @@
                                    Margin="0,0,0,12"/>
 
                         <!-- Priority -->
-                        <Label Content="Priority (higher = takes precedence if multiple games match)"/>
+                        <Label Content="Priority (exact executable paths win first; higher priority breaks ties)"/>
                         <TextBox Text="{Binding SelectedProfile.Priority, UpdateSourceTrigger=PropertyChanged}"
                                  Margin="0,0,0,12"/>
+
+                        <CheckBox Content="Restore default fan/performance settings when game exits"
+                                  IsChecked="{Binding SelectedProfile.RestoreDefaultsOnExit}"
+                                  Margin="0,0,0,12"/>
 
                         <Separator Margin="0,8,0,16"/>
 

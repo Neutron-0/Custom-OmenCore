@@ -87,7 +87,7 @@ namespace OmenCore.Utils
     public class LoadToColorConverter : IValueConverter
     {
         private static readonly SolidColorBrush LowBrush = new(Color.FromRgb(76, 175, 80));
-        private static readonly SolidColorBrush MediumBrush = new(Color.FromRgb(255, 193, 7));
+        private static readonly SolidColorBrush MediumBrush = new(Color.FromRgb(176, 112, 0));
         private static readonly SolidColorBrush HighBrush = new(Color.FromRgb(255, 152, 0));
         private static readonly SolidColorBrush CriticalBrush = new(Color.FromRgb(244, 67, 54));
         private static readonly SolidColorBrush DefaultBrush = new(Color.FromRgb(200, 200, 200));

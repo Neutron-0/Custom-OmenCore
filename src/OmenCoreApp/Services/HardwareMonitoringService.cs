@@ -931,11 +931,12 @@ namespace OmenCore.Services
                 CpuTemperature = sample.CpuTemperatureC,
                 GpuTemperature = sample.GpuTemperatureC,
                 PowerConsumption = CalculateMeasuredPowerConsumption(sample),
-                // Battery health is unknown when sample has no battery reading.
-                // Use -1 sentinel for unknown to avoid fake "100% healthy" UI/telemetry.
-                BatteryHealthPercentage = sample.BatteryChargePercent > 0
+                BatteryChargePercentage = sample.BatteryChargePercent > 0
                     ? Math.Clamp(sample.BatteryChargePercent, 0, 100)
                     : -1,
+                // Battery health is not the same as current charge. Leave health unknown
+                // until a real full-charge/design-capacity source is available.
+                BatteryHealthPercentage = -1,
                 BatteryCycles = 0, // Win32_Battery does not expose cycle count; reserved for future use
                 EstimatedBatteryLifeYears = 3.0, // Static estimate; expandable via HP WMI in a future revision
                 PowerEfficiency = CalculatePowerEfficiency(sample),
@@ -1105,7 +1106,7 @@ namespace OmenCore.Services
             return chartType switch
             {
                 ChartType.PowerConsumption => metrics.PowerConsumption,
-                ChartType.BatteryHealth => metrics.BatteryHealthPercentage >= 0 ? metrics.BatteryHealthPercentage : 0,
+                ChartType.BatteryHealth => metrics.BatteryChargePercentage >= 0 ? metrics.BatteryChargePercentage : 0,
                 ChartType.Temperature => (metrics.CpuTemperature + metrics.GpuTemperature) / 2,
                 ChartType.FanSpeeds => metrics.FanEfficiency, // Real average fan efficiency derived from RPM sample data
                 _ => 0
@@ -1117,7 +1118,7 @@ namespace OmenCore.Services
             return chartType switch
             {
                 ChartType.PowerConsumption => "Watts",
-                ChartType.BatteryHealth => "Percentage",
+                ChartType.BatteryHealth => "Charge %",
                 ChartType.Temperature => "°C",
                 ChartType.FanSpeeds => "RPM",
                 _ => ""

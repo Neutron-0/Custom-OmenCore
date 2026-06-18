@@ -107,11 +107,25 @@ namespace OmenCore.ViewModels
             new(new ObservableCollection<CorsairDevice>());
         private static readonly ReadOnlyObservableCollection<LogitechDevice> _emptyLogitechDevices = 
             new(new ObservableCollection<LogitechDevice>());
+        private const string RgbObservationNotRecorded = "Not recorded";
+        private const string RgbObservationProbeColorHex = "#00FF66";
+        private string _selectedObservedRgbSurface = RgbObservationNotRecorded;
+        private string _rgbSurfaceObservationStatusText = "No RGB surface observation recorded.";
 
         public ReadOnlyObservableCollection<CorsairDevice> CorsairDevices => _corsairService?.Devices ?? _emptyCorsairDevices;
         public ReadOnlyObservableCollection<LogitechDevice> LogitechDevices => _logitechService?.Devices ?? _emptyLogitechDevices;
         public ObservableCollection<CorsairLightingPreset> CorsairLightingPresets { get; } = new();
         public ObservableCollection<KeyboardPreset> KeyboardPresets { get; } = new();
+        public ObservableCollection<string> RgbObservedSurfaceOptions { get; } = new()
+        {
+            RgbObservationNotRecorded,
+            "Keyboard zones changed",
+            "Per-key keys changed",
+            "Light bar changed",
+            "Single backlight changed",
+            "Nothing changed",
+            "Different or unknown surface changed"
+        };
         public ICommand ApplyCorsairPresetToSystemCommand { get; }
         public ICommand SyncAllRgbCommand { get; }
         
@@ -687,6 +701,18 @@ namespace OmenCore.ViewModels
         {
             get => _keyboardRestoreStatusText;
             private set => SetProperty(ref _keyboardRestoreStatusText, value);
+        }
+
+        public string SelectedObservedRgbSurface
+        {
+            get => _selectedObservedRgbSurface;
+            set => SetProperty(ref _selectedObservedRgbSurface, value);
+        }
+
+        public string RgbSurfaceObservationStatusText
+        {
+            get => _rgbSurfaceObservationStatusText;
+            private set => SetProperty(ref _rgbSurfaceObservationStatusText, value);
         }
         
         /// <summary>
@@ -1278,6 +1304,8 @@ namespace OmenCore.ViewModels
         // 4-Zone Keyboard Commands
         public ICommand ApplyKeyboardColorsCommand { get; }
         public ICommand RestoreKeyboardLightingCommand { get; }
+        public ICommand RunRgbSurfaceProbeCommand { get; }
+        public ICommand SaveRgbSurfaceObservationCommand { get; }
         public ICommand ApplyAllZonesSameColorCommand { get; }
         public ICommand ApplyQuickColorCommand { get; }
         public ICommand SetZone1ColorCommand { get; }
@@ -1314,6 +1342,7 @@ namespace OmenCore.ViewModels
             
             // Load saved keyboard colors from config
             LoadKeyboardColorsFromConfig();
+            LoadRgbSurfaceObservationFromConfig();
             LoadRgbCardToggleStateFromConfig();
 
             // Initialize Corsair commands (only functional if service is available)
@@ -1366,6 +1395,8 @@ namespace OmenCore.ViewModels
             // 4-Zone Keyboard Commands
             ApplyKeyboardColorsCommand = new AsyncRelayCommand(async _ => await ApplyKeyboardColorsAsync());
             RestoreKeyboardLightingCommand = new AsyncRelayCommand(async _ => await RestoreKeyboardLightingAsync());
+            RunRgbSurfaceProbeCommand = new AsyncRelayCommand(async _ => await RunRgbSurfaceProbeAsync(), _ => IsKeyboardLightingAvailable);
+            SaveRgbSurfaceObservationCommand = new RelayCommand(_ => SaveRgbSurfaceObservation());
             ApplyAllZonesSameColorCommand = new AsyncRelayCommand(async _ => await ApplyAllZonesSameColorAsync());
             ApplyQuickColorCommand = new AsyncRelayCommand(async param => await ApplyQuickColorAsync(param as string));
             SetZone1ColorCommand = new RelayCommand(_ => OpenColorPickerForZone(1, "WASD"));
@@ -2185,7 +2216,7 @@ namespace OmenCore.ViewModels
                 }
                 
                 _logging.Info($"✓ Applied keyboard zone colors: Z1={_zone1ColorHex}, Z2={_zone2ColorHex}, Z3={_zone3ColorHex}, Z4={_zone4ColorHex}");
-                KeyboardRestoreStatusText = $"Applied via {KeyboardLightingBackend}: Z1 {_zone1ColorHex}, Z2 {_zone2ColorHex}, Z3 {_zone3ColorHex}, Z4 {_zone4ColorHex}.";
+                KeyboardRestoreStatusText = $"{_keyboardLightingService.LastApplyStatus} Surface: {_keyboardLightingService.LastApplySurface}.";
                 await Task.CompletedTask;
             }, "Applying keyboard colors...");
         }
@@ -2203,9 +2234,73 @@ namespace OmenCore.ViewModels
             {
                 LoadKeyboardColorsFromConfig();
                 await ApplyCurrentKeyboardZonesToBackendAsync();
-                KeyboardRestoreStatusText = $"Restored saved keyboard colors via {KeyboardLightingBackend}.";
+                KeyboardRestoreStatusText = $"Restored saved keyboard colors. {_keyboardLightingService.LastApplyStatus} Surface: {_keyboardLightingService.LastApplySurface}.";
                 _logging.Info($"Restored keyboard lighting from saved colors via {KeyboardLightingBackend}: Z1={_zone1ColorHex}, Z2={_zone2ColorHex}, Z3={_zone3ColorHex}, Z4={_zone4ColorHex}");
             }, "Restoring keyboard lighting...");
+        }
+
+        private async Task RunRgbSurfaceProbeAsync()
+        {
+            if (_keyboardLightingService == null || !_keyboardLightingService.IsAvailable)
+            {
+                RgbSurfaceObservationStatusText = "RGB probe unavailable because no HP keyboard lighting backend is active.";
+                _logging.Warn("RGB observed-surface probe requested, but no keyboard backend is available");
+                return;
+            }
+
+            await ExecuteWithLoadingAsync(async () =>
+            {
+                var probeColor = ParseDrawingColor(RgbObservationProbeColorHex);
+                await _keyboardLightingService.SetAllZoneColors(new[] { probeColor, probeColor, probeColor, probeColor });
+
+                SaveRgbSurfaceObservationProbeMetadata(updateSurface: false);
+                RgbSurfaceObservationStatusText =
+                    $"Probe sent via {KeyboardLightingBackend}; select what changed and save. {_keyboardLightingService.LastApplyStatus}";
+                _logging.Info($"RGB observed-surface probe applied {RgbObservationProbeColorHex} via {KeyboardLightingBackend}; surface selection pending");
+            }, "Probing RGB surface...");
+        }
+
+        private void SaveRgbSurfaceObservation()
+        {
+            try
+            {
+                if (_configService == null)
+                {
+                    RgbSurfaceObservationStatusText = "RGB observation could not be saved because configuration is unavailable.";
+                    return;
+                }
+
+                SaveRgbSurfaceObservationProbeMetadata(updateSurface: true);
+                RgbSurfaceObservationStatusText = BuildRgbSurfaceObservationStatus(_configService.Config.KeyboardLighting);
+                _logging.Info($"RGB observed surface saved: {SelectedObservedRgbSurface}");
+            }
+            catch (Exception ex)
+            {
+                RgbSurfaceObservationStatusText = $"RGB observation save failed: {ex.Message}";
+                _logging.Warn($"Failed to save RGB observed surface: {ex.Message}");
+            }
+        }
+
+        private void SaveRgbSurfaceObservationProbeMetadata(bool updateSurface)
+        {
+            if (_configService == null) return;
+
+            if (_configService.Config.KeyboardLighting == null)
+                _configService.Config.KeyboardLighting = new KeyboardLightingSettings();
+
+            var settings = _configService.Config.KeyboardLighting;
+            if (updateSurface)
+            {
+                settings.ObservedSurface = string.IsNullOrWhiteSpace(SelectedObservedRgbSurface)
+                    ? RgbObservationNotRecorded
+                    : SelectedObservedRgbSurface.Trim();
+            }
+
+            settings.ObservedProbeColorHex = RgbObservationProbeColorHex;
+            settings.ObservedBackend = KeyboardLightingBackend;
+            settings.ObservedApplyStatus = _keyboardLightingService?.LastApplyStatus ?? "No keyboard lighting apply attempted this session.";
+            settings.ObservedAtUtc = DateTime.UtcNow;
+            _configService.Save(_configService.Config);
         }
 
         private Task ApplyCurrentKeyboardZonesToBackendAsync()
@@ -2320,6 +2415,55 @@ namespace OmenCore.ViewModels
                 _logging.Warn($"Failed to load keyboard colors: {ex.Message}");
             }
         }
+
+        private void LoadRgbSurfaceObservationFromConfig()
+        {
+            try
+            {
+                var config = _configService?.Config?.KeyboardLighting;
+                if (config == null)
+                {
+                    SelectedObservedRgbSurface = RgbObservationNotRecorded;
+                    RgbSurfaceObservationStatusText = "No RGB surface observation recorded.";
+                    return;
+                }
+
+                var observedSurface = string.IsNullOrWhiteSpace(config.ObservedSurface)
+                    ? RgbObservationNotRecorded
+                    : config.ObservedSurface.Trim();
+
+                if (!RgbObservedSurfaceOptions.Contains(observedSurface))
+                {
+                    RgbObservedSurfaceOptions.Add(observedSurface);
+                }
+
+                SelectedObservedRgbSurface = observedSurface;
+                RgbSurfaceObservationStatusText = BuildRgbSurfaceObservationStatus(config);
+            }
+            catch (Exception ex)
+            {
+                _logging.Warn($"Failed to load RGB surface observation: {ex.Message}");
+            }
+        }
+
+        private static string BuildRgbSurfaceObservationStatus(KeyboardLightingSettings settings)
+        {
+            if (settings.ObservedAtUtc == null ||
+                string.IsNullOrWhiteSpace(settings.ObservedSurface) ||
+                string.Equals(settings.ObservedSurface, RgbObservationNotRecorded, StringComparison.OrdinalIgnoreCase))
+            {
+                return "No RGB surface observation recorded.";
+            }
+
+            var backend = string.IsNullOrWhiteSpace(settings.ObservedBackend)
+                ? "unknown backend"
+                : settings.ObservedBackend.Trim();
+            var color = string.IsNullOrWhiteSpace(settings.ObservedProbeColorHex)
+                ? RgbObservationProbeColorHex
+                : settings.ObservedProbeColorHex.Trim();
+
+            return $"Observed {settings.ObservedSurface} using {backend} at {settings.ObservedAtUtc.Value.ToLocalTime():g}; probe {color}.";
+        }
         
         private void SaveKeyboardColorsToConfig()
         {
@@ -2375,6 +2519,13 @@ namespace OmenCore.ViewModels
                 if (config == null || !config.ApplyOnStartup)
                 {
                     _logging.Info("Keyboard color restore disabled or no saved colors");
+                    return;
+                }
+
+                if (_configService?.Config == null ||
+                    !StartupRestorePolicy.IsEnabled(_configService.Config, StartupRestoreCategory.Rgb))
+                {
+                    _logging.Info("RGB startup restore category disabled - skipping keyboard color restore");
                     return;
                 }
                 

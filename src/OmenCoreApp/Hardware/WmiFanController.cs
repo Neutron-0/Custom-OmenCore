@@ -27,6 +27,7 @@ namespace OmenCore.Hardware
         private readonly LoggingService? _logging;
         private readonly bool _strictFanModeReadback;
         private readonly bool _allowV1AutoModeFloorClear;
+        private readonly int _maxModeDropChecksBeforeReapply;
         private bool _disposed;
 
         // Manual fan control state
@@ -69,7 +70,7 @@ namespace OmenCore.Hardware
         private DateTime? _lastMaxModeExternalResetUtc;
         private string? _lastMaxModeExternalResetDetails;
         private const int MaxModeMaintenanceIntervalMs = 8000;
-        private const int MaxModeMinDropChecksBeforeReapply = 2;
+        private const int DefaultMaxModeDropChecksBeforeReapply = 2;
         private const int MaxModeTelemetryUnavailableReassertCycles = 3;
         private const int ManualModeReapplyIntervalMs = 15000;
         private const int HighDutyManualModeReapplyIntervalMs = 5000;
@@ -160,7 +161,8 @@ namespace OmenCore.Hardware
             IHpWmiBios? injectedWmiBios = null,
             IEcAccess? ecAccess = null,
             bool strictFanModeReadback = true,
-            bool allowV1AutoModeFloorClear = true)
+            bool allowV1AutoModeFloorClear = true,
+            int? maxModeDropChecksBeforeReapply = null)
         {
             _hwMonitor = hwMonitor;
             _logging = logging;
@@ -168,6 +170,10 @@ namespace OmenCore.Hardware
             _ecAccess = ecAccess;
             _strictFanModeReadback = strictFanModeReadback;
             _allowV1AutoModeFloorClear = allowV1AutoModeFloorClear;
+            _maxModeDropChecksBeforeReapply = Math.Clamp(
+                maxModeDropChecksBeforeReapply ?? DefaultMaxModeDropChecksBeforeReapply,
+                1,
+                DefaultMaxModeDropChecksBeforeReapply);
             
             // Apply user/model override if set, then read the (possibly overridden) max level
             if ((maxFanLevelOverride > 0 || modelMaxFanLevel.HasValue) && _wmiBios is HpWmiBios concrete)
@@ -182,6 +188,7 @@ namespace OmenCore.Hardware
                     ? $"model database: {modelMaxFanLevel.Value}"
                     : "auto-detected";
             _logging?.Info($"WmiFanController: Max fan level = {_maxFanLevel} ({maxFanLevelSource})");
+            _logging?.Info($"WmiFanController: Capabilities — MaxModeDropChecksBeforeReapply={_maxModeDropChecksBeforeReapply}, AllowV1AutoModeFloorClear={_allowV1AutoModeFloorClear}, StrictFanModeReadback={_strictFanModeReadback}");
         }
         
         // Helper methods for getting sensor data with WMI BIOS fallback
@@ -1666,9 +1673,9 @@ namespace OmenCore.Hardware
                         }
 
                         _maxModeLowTelemetryStreak++;
-                        if (_maxModeLowTelemetryStreak < MaxModeMinDropChecksBeforeReapply)
+                        if (_maxModeLowTelemetryStreak < _maxModeDropChecksBeforeReapply)
                         {
-                            _logging?.Debug($"Max mode telemetry low ({healthDetails}) - waiting for sustained confirmation ({_maxModeLowTelemetryStreak}/{MaxModeMinDropChecksBeforeReapply})");
+                            _logging?.Debug($"Max mode telemetry low ({healthDetails}) - waiting for sustained confirmation ({_maxModeLowTelemetryStreak}/{_maxModeDropChecksBeforeReapply})");
                             return;
                         }
 

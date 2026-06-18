@@ -76,6 +76,12 @@ namespace OmenCore.Hardware
         /// profile default; true allows SetFanLevel(0,0) after Default/Auto handoff.
         /// </summary>
         public bool? AllowV1AutoModeFloorClear { get; set; }
+
+        /// <summary>
+        /// Optional model-specific override for how many low Max-mode telemetry checks must be
+        /// observed before reasserting SetFanMax(true). Null uses the controller default.
+        /// </summary>
+        public int? MaxModeDropChecksBeforeReapply { get; set; }
         
         /// <summary>Available performance mode names.</summary>
         public string[] PerformanceModes { get; set; } = new[] { "Default", "Performance", "Cool" };
@@ -284,6 +290,38 @@ namespace OmenCore.Hardware
                 Notes = "Discord field report - OMEN 15-dc1077tx (ProductId 8574): WMI BIOS command path not functional, EC fan control and PawnIO undervolt runtime available; RGB kept conservative until exact keyboard protocol is verified."
             });
 
+            // Discord field report (2026-06-15): OMEN by HP Laptop 15-dh0xxx / ProductId 8600.
+            // v3.7.1 resolved this board through FAMILY_LEGACY, leaving fan modes barely effective
+            // except Max and showing missing/stale telemetry when PawnIO was absent (CPU stuck near
+            // 28C, CPU power 0W, fan RPM 0). Keep direct EC writes disabled until PawnIO-backed
+            // readback proves the legacy register layout; route Quick Profiles through the OEM WMI
+            // thermal-policy path as the safest exact-board first pass.
+            AddModel(new ModelCapabilities
+            {
+                ProductId = "8600",
+                ModelName = "OMEN 15-dh0xxx (2019) Intel",
+                ModelNamePattern = "15-dh0",
+                ModelYear = 2019,
+                Family = OmenModelFamily.Legacy,
+                SupportsFanControlWmi = true,
+                SupportsFanControlEc = false,
+                SupportsFanCurves = true,
+                SupportsIndependentFanCurves = false,
+                SupportsRpmReadback = false,
+                FanZoneCount = 2,
+                MaxFanLevel = 55,
+                SupportsPerformanceModes = true,
+                HasMuxSwitch = false,
+                SupportsGpuPowerBoost = true,
+                HasKeyboardBacklight = true,
+                HasFourZoneRgb = false,
+                SupportsUndervolt = true,
+                SupportsPowerLimits = false,
+                AllowDecoupledWmiThermalPolicyFallback = true,
+                UserVerified = false,
+                Notes = "Discord wafflist 2026-06-15 - OMEN by HP Laptop 15-dh0xxx / ProductId 8600. Exact conservative legacy profile added after FAMILY_LEGACY fallback, barely-effective fan modes except Max, missing PawnIO, CPU temp stuck near 28C, CPU power 0W, and fan RPM 0. Direct EC writes and RPM readback remain disabled until PawnIO/readback validation confirms the board path; WMI thermal-policy fallback enabled for Quick Profiles."
+            });
+
             // GitHub #120: HP OMEN Laptop 15-en0038ur (2020 AMD, Ryzen 7 4800H + RTX 2060)
             // Product/Baseboard ID 8787. Reporter confirmed WMI ColorTable lighting, accepted
             // basic fan commands, MUX, and GPU power controls; fan RPM readback still reports 0.
@@ -308,6 +346,36 @@ namespace OmenCore.Hardware
                 SupportsUndervolt = false,
                 UserVerified = false,
                 Notes = "GitHub #120 - HP OMEN Laptop 15-en0038ur, ProductId 8787. Initial support from diagnostics; fan RPM readback remains pending verification."
+            });
+
+            // Discord field report (2026-06-12): OMEN Laptop 15-ek0xxx / ProductId 878C
+            // (i7-10750H + GTX 1650 Ti). v3.7.1 resolved this board through FAMILY_LEGACY;
+            // Quick Profile Performance/Balanced/Quiet left fans near 1900 RPM even at 99C,
+            // while Custom -> Max could wake the coolers. Keep direct EC writes disabled and
+            // route profile changes through the OEM WMI thermal-policy path until PL limits are
+            // verified from readback logs.
+            AddModel(new ModelCapabilities
+            {
+                ProductId = "878C",
+                ModelName = "OMEN 15-ek0xxx (2020) Intel",
+                ModelNamePattern = "15-ek0",
+                ModelYear = 2020,
+                Family = OmenModelFamily.Legacy,
+                SupportsFanControlWmi = true,
+                SupportsFanControlEc = false,
+                SupportsFanCurves = true,
+                SupportsIndependentFanCurves = false,
+                SupportsRpmReadback = true,
+                FanZoneCount = 2,
+                MaxFanLevel = 55,
+                SupportsPerformanceModes = true,
+                HasMuxSwitch = false,
+                SupportsGpuPowerBoost = true,
+                HasFourZoneRgb = true,
+                SupportsUndervolt = true,
+                AllowDecoupledWmiThermalPolicyFallback = true,
+                UserVerified = false,
+                Notes = "Discord Sky 2026-06-12 - OMEN Laptop 15-ek0xxx / ProductId 878C, i7-10750H + GTX 1650 Ti. Exact conservative legacy WMI profile added after Performance/Balanced/Quiet left fans near low RPM at 99C while Custom Max worked; direct EC writes disabled and WMI thermal-policy fallback enabled pending PL1/PL2 readback validation."
             });
 
             AddModel(new ModelCapabilities
@@ -705,6 +773,7 @@ namespace OmenCore.Hardware
                 MaxFanLevel = 100,
                 SupportsPerformanceModes = true,
                 AllowDecoupledWmiThermalPolicyFallback = true,
+                MaxModeDropChecksBeforeReapply = 1,
                 PerformanceModes = new[] { "Default", "Performance", "Cool" },
                 HasMuxSwitch = true, // Advanced Optimus / MUX switch available
                 SupportsGpuPowerBoost = true, // RTX 50-series MAX configs support GPU Power Boost/PPAB paths
@@ -719,7 +788,8 @@ namespace OmenCore.Hardware
                        "WARNING: EC registers have completely different layout than legacy OMEN models. " +
                        "Writing to legacy EC addresses (0x34, 0x62, etc.) corrupts EC state and causes " +
                        "caps lock blinking panic. Use WMI/ACPI platform_profile only. " +
-                       "V2 fan commands forced. WMI thermal-policy fallback is enabled so Quick Profiles can hold OEM performance behavior when direct EC/MSR limits report unavailable."
+                       "V2 fan commands forced. WMI thermal-policy fallback is enabled so Quick Profiles can hold OEM performance behavior when direct EC/MSR limits report unavailable. " +
+                       "Discord 2026-06-07 v3.7.1 log shows Max mode levels repeatedly dropping under firmware control; use aggressive one-sample Max reassertion while staying on WMI-only paths."
             });
             
             // OMEN MAX 16t (2025) - 16t-ah000 variant - Intel Core Ultra 7 255HX + RTX 5070 Ti
@@ -739,6 +809,7 @@ namespace OmenCore.Hardware
                 SupportsRpmReadback = true,
                 FanZoneCount = 2,
                 MaxFanLevel = 100,
+                MaxModeDropChecksBeforeReapply = 1,
                 SupportsPerformanceModes = true,
                 AllowDecoupledWmiThermalPolicyFallback = true,
                 PerformanceModes = new[] { "Default", "Performance", "Cool" },
@@ -799,6 +870,7 @@ namespace OmenCore.Hardware
                 SupportsRpmReadback = true,
                 FanZoneCount = 2,
                 MaxFanLevel = 100,
+                MaxModeDropChecksBeforeReapply = 1,
                 SupportsPerformanceModes = true,
                 PerformanceModes = new[] { "Default", "Performance", "Cool", "L5P" },
                 HasMuxSwitch = true,
@@ -1064,11 +1136,40 @@ namespace OmenCore.Hardware
                 HasMuxSwitch = false,
                 SupportsGpuPowerBoost = false,
                 SupportsUndervolt = false,
+                SupportsPowerLimits = false,
+                PerformanceModes = new[] { "Quiet", "Balanced", "Performance" },
                 AllowDecoupledWmiThermalPolicyFallback = true,
                 HasFourZoneRgb = false,
                 HasKeyboardBacklight = true,
                 UserVerified = false,
-                Notes = "GitHub #135 diagnostics — Victus 15-fb1xxx exact ProductId 8C30. Conservative Victus profile: WMI fan/profile control retained, direct EC writes disabled, single-zone backlight assumed pending broader field verification."
+                Notes = "GitHub #135/#139 diagnostics — Victus 15-fb1xxx exact ProductId 8C30. Conservative Victus profile: WMI fan/profile control retained, direct EC writes and CPU power-limit UI disabled, WMI thermal-policy fallback enabled for Performance/Balanced/Quiet pending before/after wattage readback; single-zone backlight assumed pending broader field verification."
+            });
+
+            // GitHub Issue #138: Victus 15 ProductId 8DCD reports Performance mode still
+            // leaving the CPU EC-limited around 40W. Do not guess PL1/PL2 values from a
+            // title-only report; use the conservative Victus 15 control profile so
+            // Performance applies through the OEM WMI thermal-policy fallback instead of
+            // direct EC writes until diagnostics confirm the exact power envelope.
+            AddModel(new ModelCapabilities
+            {
+                ProductId = "8DCD",
+                ModelName = "HP Victus 15 (8DCD)",
+                ModelNamePattern = "Victus 15",
+                ModelYear = 2024,
+                Family = OmenModelFamily.Victus,
+                SupportsFanControlWmi = true,
+                SupportsFanControlEc = false,
+                SupportsFanCurves = true,
+                SupportsIndependentFanCurves = false,
+                FanZoneCount = 1,
+                HasMuxSwitch = false,
+                SupportsGpuPowerBoost = false,
+                SupportsUndervolt = false,
+                AllowDecoupledWmiThermalPolicyFallback = true,
+                HasFourZoneRgb = false,
+                HasKeyboardBacklight = true,
+                UserVerified = false,
+                Notes = "GitHub #138 - Victus 15 ProductId 8DCD reports Performance mode remains EC-limited around 40W. Conservative exact profile disables direct EC writes and enables WMI thermal-policy fallback pending diagnostics/readback validation."
             });
 
             // Victus 15 (2023) - fb1xxx series
@@ -1092,11 +1193,13 @@ namespace OmenCore.Hardware
                 HasMuxSwitch = false,
                 SupportsGpuPowerBoost = false,
                 SupportsUndervolt = false,
+                SupportsPowerLimits = false,
+                PerformanceModes = new[] { "Quiet", "Balanced", "Performance" },
                 AllowDecoupledWmiThermalPolicyFallback = true,
                 HasFourZoneRgb = false,
                 HasKeyboardBacklight = true,
                 UserVerified = false,
-                Notes = "GitHub #135 — Victus 15-fb1xxx. Conservative Victus profile: WMI fan/profile control retained, direct EC writes disabled, single-zone backlight assumed pending field verification."
+                Notes = "GitHub #135/#139 — Victus 15-fb1xxx. Conservative Victus profile: WMI fan/profile control retained, direct EC writes and CPU power-limit UI disabled, WMI thermal-policy fallback enabled for Performance/Balanced/Quiet pending before/after wattage readback; single-zone backlight assumed pending field verification."
             });
 
             // Victus 16 (2023/2024) - d1xxx series
@@ -1123,7 +1226,7 @@ namespace OmenCore.Hardware
             
             // Victus 16-s0xxx (2023/2024) AMD Ryzen 7 7840HS + RTX 4060.
             // RC1 field log 2026-05-16: ProductId 8BD4, BIOS F.30, V1 WMI fan control,
-            // two fan levels exposed, no confirmed MUX/GPU boost/RGB control.
+            // two fan levels exposed, no confirmed MUX/GPU boost; RGB handled through WMI ColorTable.
             AddModel(new ModelCapabilities
             {
                 ProductId = "8BD4",
@@ -1139,11 +1242,11 @@ namespace OmenCore.Hardware
                 HasMuxSwitch = false,
                 SupportsGpuPowerBoost = false,
                 SupportsUndervolt = false,
-                AllowV1AutoModeFloorClear = true,
-                HasFourZoneRgb = false,
+                AllowV1AutoModeFloorClear = false,
+                HasFourZoneRgb = true,
                 HasKeyboardBacklight = true,
                 UserVerified = false,
-                Notes = "RC1 field log - Victus 16-s0xxx (8BD4), Ryzen 7 7840HS + RTX 4060. Conservative WMI V1 fan profile; RGB/GPU boost disabled pending verification. Discord 2026-06-03 reported fans stuck at max after long gaming session; allow WMI V1 auto-mode floor clear while keeping direct EC writes disabled."
+                Notes = "RC1 field log - Victus 16-s0xxx (8BD4), Ryzen 7 7840HS + RTX 4060. Conservative WMI V1 fan profile; GPU boost disabled pending verification. Discord 2026-06-08 / 7Z5Z2EA reports basic keyboard RGB should be controllable through WMI ColorTable; EC keyboard writes remain disabled. Discord 2026-06-03 reported fans stuck at max after long gaming session; v3.7.1 Discord 2026-06-07 logs showed non-reactive/0 RPM fan behavior after SetFanLevel(0,0), so V1 manual-zero floor clear is disabled pending a safer handoff sequence."
             });
 
             // Victus 16 (2024+) Ryzen r0xxx series
@@ -1205,6 +1308,27 @@ namespace OmenCore.Hardware
             });
             
             // ═══════════════════════════════════════════════════════════════════════════════════
+            AddModel(new ModelCapabilities
+            {
+                ProductId = "88EE",
+                ModelName = "HP Victus 16-e0194nw",
+                ModelNamePattern = "16-e0",
+                ModelYear = 2022,
+                Family = OmenModelFamily.Victus,
+                SupportsFanControlWmi = true,
+                SupportsFanControlEc = false,
+                SupportsFanCurves = false,
+                SupportsIndependentFanCurves = false,
+                FanZoneCount = 2,
+                HasMuxSwitch = false,
+                SupportsGpuPowerBoost = false,
+                SupportsUndervolt = false,
+                HasFourZoneRgb = false,
+                HasKeyboardBacklight = true,
+                UserVerified = false,
+                Notes = "GitHub #140 - HP Victus 16-e0194nw / ProductId 88EE. Exact conservative sibling of 88EC added so model identity resolves by ProductId instead of low-confidence 16-e0 model-name pattern; feature flags remain conservative pending field verification."
+            });
+
             // OMEN Desktop Series (WMI fan control + desktop RGB)
             // ═══════════════════════════════════════════════════════════════════════════════════
             

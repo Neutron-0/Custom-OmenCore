@@ -130,5 +130,107 @@ namespace OmenCoreApp.Tests.Services
             summary.ClipboardSummary.Should().Contain("Resolution source: Exact ProductId");
             summary.ClipboardSummary.Should().NotContain("Capability profile was inferred from the WMI model name");
         }
+
+        [Fact]
+        public void Build_878CExactProductId_ReplacesLegacyFamilyFallback()
+        {
+            var systemInfo = new SystemInfo
+            {
+                Manufacturer = "HP",
+                Model = "OMEN Laptop 15-ek0xxx",
+                ProductName = "878C",
+                SystemSku = "5CD045FMXY",
+                BiosVersion = "F.00"
+            };
+            var capabilities = new DeviceCapabilities
+            {
+                ProductId = "878C",
+                ModelName = systemInfo.Model,
+                ModelFamily = OmenModelFamily.Legacy,
+                IsKnownModel = true,
+                ModelConfig = ModelCapabilityDatabase.GetCapabilities("878C")
+            };
+
+            var summary = ModelIdentityResolutionService.Build(systemInfo, capabilities);
+
+            summary.ResolutionSource.Should().Be("Exact ProductId");
+            summary.Confidence.Should().Be("Medium");
+            summary.ResolvedModel.Should().Contain("15-ek0");
+            summary.WarningText.Should().Contain("not user-verified");
+            summary.KeyboardResolutionSource.Should().Be("Exact ProductId");
+            summary.KeyboardModel.Should().Contain("15-ek0");
+            summary.KeyboardConfidence.Should().Be("Medium");
+            summary.ClipboardSummary.Should().Contain("Resolution source: Exact ProductId");
+            summary.ClipboardSummary.Should().NotContain("Family fallback");
+            summary.ClipboardSummary.Should().NotContain("Keyboard model: Unknown");
+        }
+
+        [Fact]
+        public void Build_8600ExactProductId_ReplacesLegacyFamilyFallback()
+        {
+            var systemInfo = new SystemInfo
+            {
+                Manufacturer = "HP",
+                Model = "OMEN by HP Laptop 15-dh0xxx",
+                ProductName = "8600",
+                SystemSku = "CND0127265",
+                BiosVersion = "F.00"
+            };
+            var capabilities = new DeviceCapabilities
+            {
+                ProductId = "8600",
+                ModelName = systemInfo.Model,
+                ModelFamily = OmenModelFamily.Legacy,
+                IsKnownModel = true,
+                ModelConfig = ModelCapabilityDatabase.GetCapabilities("8600")
+            };
+
+            var summary = ModelIdentityResolutionService.Build(systemInfo, capabilities);
+
+            summary.ResolutionSource.Should().Be("Exact ProductId");
+            summary.Confidence.Should().Be("Medium");
+            summary.ResolvedModel.Should().Contain("15-dh0");
+            summary.WarningText.Should().Contain("not user-verified");
+            summary.KeyboardResolutionSource.Should().Be("Exact ProductId");
+            summary.KeyboardModel.Should().Contain("15-dh0");
+            summary.KeyboardConfidence.Should().Be("Medium");
+            summary.ClipboardSummary.Should().Contain("Resolution source: Exact ProductId");
+            summary.ClipboardSummary.Should().NotContain("Family fallback");
+            summary.ClipboardSummary.Should().NotContain("Keyboard model: Unknown");
+        }
+
+        [Fact]
+        public void Build_88EEExactProductId_ReplacesVictusE0ModelPatternFallback()
+        {
+            var systemInfo = new SystemInfo
+            {
+                Manufacturer = "HP",
+                Model = "Victus by HP Laptop 16-e0xxx",
+                ProductName = "88EE",
+                SystemSku = "5CD203NZTV",
+                BiosVersion = "F.00"
+            };
+            var capabilities = new DeviceCapabilities
+            {
+                ProductId = "88EE",
+                ModelName = systemInfo.Model,
+                ModelFamily = OmenModelFamily.Victus,
+                IsKnownModel = true,
+                ModelConfig = ModelCapabilityDatabase.GetCapabilities("88EE")
+            };
+
+            var summary = ModelIdentityResolutionService.Build(systemInfo, capabilities);
+
+            summary.ResolutionSource.Should().Be("Exact ProductId");
+            summary.Confidence.Should().Be("Medium");
+            summary.ResolvedModel.Should().Contain("e0194nw");
+            summary.KeyboardResolutionSource.Should().Be("Exact ProductId");
+            summary.KeyboardModel.Should().Contain("e0194nw");
+            summary.KeyboardConfidence.Should().Be("Medium");
+            summary.ClipboardSummary.Should().Contain("Capability ProductId: 88EE");
+            summary.ClipboardSummary.Should().Contain("Resolution source: Exact ProductId");
+            summary.ClipboardSummary.Should().NotContain("Resolution source: Model-name pattern");
+            summary.ClipboardSummary.Should().NotContain("Keyboard source: Model-name series match");
+        }
     }
 }

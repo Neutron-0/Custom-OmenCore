@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using OmenCore.Corsair;
 using OmenCore.Services;
@@ -115,6 +116,30 @@ namespace OmenCore.Models
         /// Users can still apply Performance mode / GPU Power Boost manually from UI.
         /// </summary>
         public bool EnableStartupHardwareRestore { get; set; } = false;
+
+        /// <summary>
+        /// Optional per-category startup restore switch for fan state.
+        /// Null preserves legacy behavior: enabled when the broad startup restore gate is enabled.
+        /// </summary>
+        public bool? StartupRestoreFansEnabled { get; set; }
+
+        /// <summary>
+        /// Optional per-category startup restore switch for performance mode and GPU power boost.
+        /// Null preserves legacy behavior: enabled when the broad startup restore gate is enabled.
+        /// </summary>
+        public bool? StartupRestorePerformanceEnabled { get; set; }
+
+        /// <summary>
+        /// Optional per-category startup restore switch for keyboard/peripheral RGB.
+        /// Null preserves legacy behavior: enabled when the broad startup restore gate is enabled.
+        /// </summary>
+        public bool? StartupRestoreRgbEnabled { get; set; }
+
+        /// <summary>
+        /// Optional per-category startup restore switch for tuning values such as undervolt, TCC, and GPU OC.
+        /// Null preserves legacy behavior: enabled when the broad startup restore gate is enabled.
+        /// </summary>
+        public bool? StartupRestoreTuningEnabled { get; set; }
 
         /// <summary>
         /// Extra guardrail for models with reported firmware instability.
@@ -395,6 +420,21 @@ namespace OmenCore.Models
         /// Used to restore backlight state on startup.
         /// </summary>
         public bool BacklightWasEnabled { get; set; } = true;
+
+        /// <summary>Physical RGB/backlight surface observed after the latest user probe.</summary>
+        public string ObservedSurface { get; set; } = "Not recorded";
+
+        /// <summary>Safe probe color used for the latest observed-surface capture.</summary>
+        public string ObservedProbeColorHex { get; set; } = "#00FF66";
+
+        /// <summary>Keyboard lighting backend active when the latest observation was recorded.</summary>
+        public string ObservedBackend { get; set; } = "";
+
+        /// <summary>Backend apply status captured with the latest observation.</summary>
+        public string ObservedApplyStatus { get; set; } = "";
+
+        /// <summary>UTC time when the latest RGB observed-surface record was captured.</summary>
+        public DateTime? ObservedAtUtc { get; set; }
     }
     
     /// <summary>
@@ -506,7 +546,7 @@ namespace OmenCore.Models
         /// <summary>Show current fan/performance mode</summary>
         public bool ShowCurrentMode { get; set; } = true;
         
-        /// <summary>Show current FPS (estimated from GPU metrics)</summary>
+        /// <summary>Show current FPS from RTSS shared memory when available</summary>
         public bool ShowFps { get; set; } = false;
         
         /// <summary>Show current fan mode (Auto, Performance, Silent, Max)</summary>

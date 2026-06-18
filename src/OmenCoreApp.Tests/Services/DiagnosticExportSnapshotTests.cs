@@ -36,6 +36,38 @@ namespace OmenCoreApp.Tests.Services
             try { if (Directory.Exists(_tempDir)) Directory.Delete(_tempDir, recursive: true); } catch { }
         }
 
+        private sealed class ReadbackFanController : OmenCore.Hardware.IFanController
+        {
+            public bool IsAvailable => true;
+            public string Status => "Ready";
+            public string Backend => "WMI BIOS";
+            public bool ApplyPreset(FanPreset preset) => true;
+            public bool ApplyCustomCurve(System.Collections.Generic.IEnumerable<FanCurvePoint> curve) => true;
+            public bool SetFanSpeed(int percent) => true;
+            public bool SetFanSpeeds(int cpuPercent, int gpuPercent) => true;
+            public bool SetMaxFanSpeed(bool enabled) => true;
+            public bool SetPerformanceMode(string modeName) => true;
+            public bool RestoreAutoControl() => true;
+            public System.Collections.Generic.IEnumerable<FanTelemetry> ReadFanSpeeds() => new[]
+            {
+                new FanTelemetry
+                {
+                    Name = "CPU Fan",
+                    SpeedRpm = 1900,
+                    DutyCyclePercent = 42,
+                    RpmState = TelemetryDataState.Valid,
+                    RpmSource = RpmSource.WmiBios
+                }
+            };
+            public void ApplyMaxCooling() { }
+            public void ApplyAutoMode() { }
+            public void ApplyQuietMode() { }
+            public bool ResetEcToDefaults() => true;
+            public bool ApplyThrottlingMitigation() => true;
+            public bool VerifyMaxApplied(out string details) { details = "ok"; return true; }
+            public void Dispose() { }
+        }
+
         [Fact]
         public async Task MonitoringCadenceHoldFile_IsIncludedInExport()
         {
@@ -148,6 +180,310 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public async Task CoreControlReadinessFile_IsIncludedInExport()
+        {
+            var svc = new DiagnosticExportService(_logging, _tempDir);
+            var zipPath = await svc.CollectAndExportAsync();
+
+            zipPath.Should().NotBeNullOrEmpty();
+
+            if (File.Exists(zipPath))
+            {
+                using var archive = ZipFile.OpenRead(zipPath);
+                var entry = archive.Entries
+                    .FirstOrDefault(e => e.Name.Equals("core-control-readiness.txt", StringComparison.OrdinalIgnoreCase));
+                entry.Should().NotBeNull("core-control-readiness.txt must be present in the diagnostic bundle");
+            }
+            else
+            {
+                var txtPath = Path.Combine(zipPath, "core-control-readiness.txt");
+                File.Exists(txtPath).Should().BeTrue("core-control-readiness.txt must be written to the export folder");
+            }
+        }
+
+        [Fact]
+        public async Task OmenMonRebornParityFile_IsIncludedInExport()
+        {
+            var svc = new DiagnosticExportService(_logging, _tempDir);
+            var zipPath = await svc.CollectAndExportAsync();
+
+            zipPath.Should().NotBeNullOrEmpty();
+
+            if (File.Exists(zipPath))
+            {
+                using var archive = ZipFile.OpenRead(zipPath);
+                var entry = archive.Entries
+                    .FirstOrDefault(e => e.Name.Equals("omenmon-reborn-parity.txt", StringComparison.OrdinalIgnoreCase));
+                entry.Should().NotBeNull("omenmon-reborn-parity.txt must be present in the diagnostic bundle");
+            }
+            else
+            {
+                var txtPath = Path.Combine(zipPath, "omenmon-reborn-parity.txt");
+                File.Exists(txtPath).Should().BeTrue("omenmon-reborn-parity.txt must be written to the export folder");
+            }
+        }
+
+        [Fact]
+        public async Task FieldValidationScriptFile_IsIncludedInExport()
+        {
+            var svc = new DiagnosticExportService(_logging, _tempDir);
+            var zipPath = await svc.CollectAndExportAsync();
+
+            zipPath.Should().NotBeNullOrEmpty();
+
+            if (File.Exists(zipPath))
+            {
+                using var archive = ZipFile.OpenRead(zipPath);
+                var entry = archive.Entries
+                    .FirstOrDefault(e => e.Name.Equals("field-validation-script.txt", StringComparison.OrdinalIgnoreCase));
+                entry.Should().NotBeNull("field-validation-script.txt must be present in the diagnostic bundle");
+            }
+            else
+            {
+                var txtPath = Path.Combine(zipPath, "field-validation-script.txt");
+                File.Exists(txtPath).Should().BeTrue("field-validation-script.txt must be written to the export folder");
+            }
+        }
+
+        [Fact]
+        public async Task PriorityModelValidationCardsFile_IsIncludedInExport()
+        {
+            var svc = new DiagnosticExportService(_logging, _tempDir);
+            var zipPath = await svc.CollectAndExportAsync();
+
+            zipPath.Should().NotBeNullOrEmpty();
+
+            if (File.Exists(zipPath))
+            {
+                using var archive = ZipFile.OpenRead(zipPath);
+                var entry = archive.Entries
+                    .FirstOrDefault(e => e.Name.Equals("priority-model-validation-cards.txt", StringComparison.OrdinalIgnoreCase));
+                entry.Should().NotBeNull("priority-model-validation-cards.txt must be present in the diagnostic bundle");
+            }
+            else
+            {
+                var txtPath = Path.Combine(zipPath, "priority-model-validation-cards.txt");
+                File.Exists(txtPath).Should().BeTrue("priority-model-validation-cards.txt must be written to the export folder");
+            }
+        }
+
+        [Fact]
+        public async Task RcValidationMatrixFile_IsIncludedInExport()
+        {
+            var svc = new DiagnosticExportService(_logging, _tempDir);
+            var zipPath = await svc.CollectAndExportAsync();
+
+            zipPath.Should().NotBeNullOrEmpty();
+
+            if (File.Exists(zipPath))
+            {
+                using var archive = ZipFile.OpenRead(zipPath);
+                var entry = archive.Entries
+                    .FirstOrDefault(e => e.Name.Equals("rc-validation-matrix.txt", StringComparison.OrdinalIgnoreCase));
+                entry.Should().NotBeNull("rc-validation-matrix.txt must be present in the diagnostic bundle");
+            }
+            else
+            {
+                var txtPath = Path.Combine(zipPath, "rc-validation-matrix.txt");
+                File.Exists(txtPath).Should().BeTrue("rc-validation-matrix.txt must be written to the export folder");
+            }
+        }
+
+        [Fact]
+        public void BuildPriorityModelValidationCardsReport_ContainsPriorityBoardCards()
+        {
+            var svc = new DiagnosticExportService(_logging, _tempDir);
+            var report = svc.BuildPriorityModelValidationCardsReport();
+
+            report.Should().Contain("PRIORITY MODEL VALIDATION CARDS");
+            report.Should().Contain("8D41 / OMEN Max 16-ah0xxx");
+            report.Should().Contain("8D87 / OMEN Max follow-up");
+            report.Should().Contain("8BD4 / Victus 16-s0xxx");
+            report.Should().Contain("8C30 / Victus 15-fb1xxx");
+            report.Should().Contain("8DCD / Victus 15");
+            report.Should().Contain("878C / OMEN 15-ek0xxx");
+            report.Should().Contain("8600 / OMEN 15-dh0xxx");
+            report.Should().Contain("8BCD / Linux OMEN 16-xd0xxx");
+            report.Should().Contain("OMEN 17 db-1000");
+            report.Should().Contain("Victus 15/16 field cohort");
+            report.Should().Contain("WMI thermal-policy fallback applied");
+            report.Should().Contain("[Promotion Rule]");
+        }
+
+        [Fact]
+        public void BuildRcValidationMatrixReport_ContainsReleaseGateRows()
+        {
+            var svc = new DiagnosticExportService(_logging, _tempDir);
+            var report = svc.BuildRcValidationMatrixReport();
+
+            report.Should().Contain("RC VALIDATION MATRIX");
+            report.Should().Contain("8D41 / OMEN Max 16-ah0xxx");
+            report.Should().Contain("8D87 / OMEN Max follow-up");
+            report.Should().Contain("8BD4 / Victus 16-s0xxx");
+            report.Should().Contain("8C30 / Victus 15-fb1xxx");
+            report.Should().Contain("8DCD / Victus 15");
+            report.Should().Contain("878C / OMEN 15-ek0xxx");
+            report.Should().Contain("8600 / OMEN 15-dh0xxx");
+            report.Should().Contain("8BCD / Linux OMEN 16-xd0xxx");
+            report.Should().Contain("OMEN 17 db-1000");
+            report.Should().Contain("Victus 15/16 field cohort");
+            report.Should().Contain("Field validation pending");
+            report.Should().Contain("Keep v3.8.0 as RC/pre-release");
+        }
+
+        [Fact]
+        public void BuildFieldValidationScriptReport_ContainsReleaseGateSteps()
+        {
+            var svc = new DiagnosticExportService(_logging, _tempDir);
+            var report = svc.BuildFieldValidationScriptReport();
+
+            report.Should().Contain("FIELD VALIDATION SCRIPT");
+            report.Should().Contain("[Fan Validation]");
+            report.Should().Contain("Apply Max; hold for 10 minutes");
+            report.Should().Contain("test 40%, 60%, and 80%");
+            report.Should().Contain("[RGB / Surface Validation]");
+            report.Should().Contain("[Performance / Tuning Validation]");
+            report.Should().Contain("[Profile Cycling And Hotkeys]");
+            report.Should().Contain("[Startup Restore Validation]");
+            report.Should().Contain("[Evidence To Attach]");
+        }
+
+        [Fact]
+        public void BuildOmenMonRebornParityReport_ContainsParityMatrixAndSafetyPolicy()
+        {
+            var svc = new DiagnosticExportService(_logging, _tempDir);
+            var report = svc.BuildOmenMonRebornParityReport();
+
+            report.Should().Contain("OMENMON-REBORN PARITY SNAPSHOT");
+            report.Should().Contain("[Source Expectations]");
+            report.Should().Contain("[OmenCore Current Equivalents]");
+            report.Should().Contain("[Parity Matrix]");
+            report.Should().Contain("Probe report:");
+            report.Should().Contain("Auto-calibration wizard:");
+            report.Should().Contain("EC contention hardening:");
+            report.Should().Contain("[Safe Emulation Policy]");
+            report.Should().Contain("Emulate behavior and diagnostics, not GPL source code.");
+            report.Should().Contain("[Next Evidence To Collect]");
+        }
+
+        [Fact]
+        public async Task CoreControlReadinessFile_ContainsCoreControlSections_WhenServicesUnavailable()
+        {
+            var svc = new DiagnosticExportService(_logging, _tempDir);
+            var zipPath = await svc.CollectAndExportAsync();
+
+            string content = ReadFileFromExport(zipPath, "core-control-readiness.txt");
+
+            content.Should().Contain("CORE CONTROL READINESS");
+            content.Should().Contain("[Fans]");
+            content.Should().Contain("Status: service unavailable");
+            content.Should().Contain("[RGB]");
+            content.Should().Contain("HpKeyboardService: unavailable");
+            content.Should().Contain("[Tuning / OC / Undervolt]");
+            content.Should().Contain("ReadbackRule:");
+            content.Should().Contain("[Monitoring / Readback]");
+            content.Should().Contain("[Hotkeys / OMEN Key]");
+            content.Should().Contain("HotkeyService: unavailable");
+            content.Should().Contain("OmenKeyService: unavailable");
+            content.Should().Contain("[Suggested Next Validation Actions]");
+        }
+
+        [Fact]
+        public void BuildCoreControlReadinessReport_ContainsStartupRestoreAndValidationGuidance()
+        {
+            var config = DefaultConfiguration.Create();
+            config.EnableStartupHardwareRestore = true;
+            config.LastPerformanceModeName = "Performance";
+            config.LastGpuPowerBoostLevel = "Maximum";
+            config.LastCpuPl1Watts = 55;
+            config.LastCpuPl2Watts = 80;
+            config.LastTccOffset = 10;
+            config.Undervolt.ApplyOnStartup = true;
+            config.Undervolt.StartupPendingConfirmation = true;
+            config.GpuOc = new GpuOcSettings
+            {
+                ApplyOnStartup = true,
+                StartupPendingConfirmation = true
+            };
+            new ConfigurationService().Save(config);
+
+            var svc = new DiagnosticExportService(_logging, _tempDir);
+            var report = svc.BuildCoreControlReadinessReport();
+
+            report.Should().Contain("StartupHardwareRestoreEnabled: yes");
+            report.Should().Contain("StartupRestoreCategories: Fans=on; Performance=on; RGB=on; Tuning=on");
+            report.Should().Contain("SavedPerformanceMode: Performance");
+            report.Should().Contain("SavedGpuPowerBoostLevel: Maximum");
+            report.Should().Contain("SavedCpuPL1: 55 W");
+            report.Should().Contain("SavedCpuPL2: 80 W");
+            report.Should().Contain("SavedTccOffset: 10 C");
+            report.Should().Contain("UndervoltApplyOnStartup: yes");
+            report.Should().Contain("UndervoltRecoveryRequired: yes");
+            report.Should().Contain("GpuOcApplyOnStartup: yes");
+            report.Should().Contain("GpuOcRecoveryRequired: yes");
+            report.Should().Contain("RollbackBundleAvailable: yes");
+            report.Should().Contain("RollbackTargets: performance=Balanced; fan=Auto; gpuPower=Minimum");
+            report.Should().Contain("RollbackCpuPowerTarget: PL1=55 W; PL2=80 W");
+            report.Should().Contain("[Hotkeys / OMEN Key]");
+            report.Should().Contain("ConfigOmenKeyInterceptionEnabled:");
+            report.Should().Contain("ValidationRule: press the physical OMEN key");
+            report.Should().Contain("Startup restore: keep disabled until manual readback passes");
+        }
+
+        [Fact]
+        public void BuildCoreControlReadinessReport_IncludesLastFanCommandGatesAndReadback()
+        {
+            var capabilities = new OmenCore.Hardware.DeviceCapabilities
+            {
+                ProductId = "878C",
+                ModelName = "OMEN Laptop 15-ek0xxx",
+                Chassis = OmenCore.Hardware.ChassisType.Laptop,
+                ModelFamily = OmenCore.Hardware.OmenModelFamily.Legacy,
+                IsKnownModel = true,
+                ModelConfig = OmenCore.Hardware.ModelCapabilityDatabase.GetCapabilities("878C")
+            };
+            var fanService = new FanService(
+                new ReadbackFanController(),
+                new OmenCore.Hardware.ThermalSensorProvider(new OmenCore.Hardware.LibreHardwareMonitorImpl()),
+                _logging,
+                new NotificationService(_logging),
+                1000,
+                new ResumeRecoveryDiagnosticsService(),
+                capabilities: capabilities);
+
+            try
+            {
+                var telemetryField = typeof(FanService).GetField(
+                    "_fanTelemetry",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                var telemetry = telemetryField!.GetValue(fanService)
+                    .Should().BeAssignableTo<System.Collections.ObjectModel.ObservableCollection<FanTelemetry>>()
+                    .Subject;
+                telemetry.Add(new FanTelemetry
+                {
+                    Name = "CPU Fan",
+                    SpeedRpm = 1900,
+                    DutyCyclePercent = 42,
+                    RpmState = TelemetryDataState.Valid,
+                    RpmSource = RpmSource.WmiBios
+                });
+
+                fanService.ForceSetFanSpeed(60);
+
+                var svc = new DiagnosticExportService(_logging, _tempDir, fanService: fanService);
+                var report = svc.BuildCoreControlReadinessReport(fanService: fanService);
+
+                report.Should().Contain("LastCommandModel: OMEN Laptop 15-ek0xxx (878C)");
+                report.Should().Contain("LastCommandGates: writes=yes; curves=yes; manual=yes; desktopBlocked=no");
+                report.Should().Contain("LastCommandReadback: CPU Fan: 1900 RPM, duty 42%");
+            }
+            finally
+            {
+                fanService.Dispose();
+            }
+        }
+
+        [Fact]
         public async Task LaunchReadinessFile_ContainsExpectedUnavailableSections()
         {
             var svc = new DiagnosticExportService(_logging, _tempDir);
@@ -155,7 +491,7 @@ namespace OmenCoreApp.Tests.Services
 
             string content = ReadFileFromExport(zipPath, "launch-readiness.txt");
 
-            content.Should().Contain("3.7.1 LAUNCH READINESS SNAPSHOT");
+            content.Should().Contain("3.8.0 LAUNCH READINESS SNAPSHOT");
             content.Should().Contain("[Fan Recovery]");
             content.Should().Contain("Fan service unavailable.");
             content.Should().Contain("[Performance Mode Apply Trace]");
@@ -260,6 +596,31 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public async Task RgbControlPathFile_IncludesPersistedObservedSurface()
+        {
+            var configService = new ConfigurationService();
+            var config = DefaultConfiguration.Create();
+            config.KeyboardLighting.ObservedSurface = "Light bar changed";
+            config.KeyboardLighting.ObservedProbeColorHex = "#00FF66";
+            config.KeyboardLighting.ObservedBackend = "WMI BIOS";
+            config.KeyboardLighting.ObservedApplyStatus = "Accepted/unverified";
+            config.KeyboardLighting.ObservedAtUtc = new DateTime(2026, 6, 12, 10, 30, 0, DateTimeKind.Utc);
+            configService.Save(config);
+
+            var svc = new DiagnosticExportService(_logging, _tempDir);
+            var zipPath = await svc.CollectAndExportAsync();
+
+            string content = ReadFileFromExport(zipPath, "rgb-control-path.txt");
+
+            content.Should().Contain("[HP Keyboard Observed Surface]");
+            content.Should().Contain("ObservedSurface: Light bar changed");
+            content.Should().Contain("ObservedAtUtc: 2026-06-12T10:30:00.0000000Z");
+            content.Should().Contain("ObservedProbeColor: #00FF66");
+            content.Should().Contain("ObservedBackend: WMI BIOS");
+            content.Should().Contain("ObservedApplyStatus: Accepted/unverified");
+        }
+
+        [Fact]
         public async Task TuningSafetyFile_ContainsSavedSafetyStateWithoutHardwareProviders()
         {
             var config = DefaultConfiguration.Create();
@@ -309,6 +670,7 @@ namespace OmenCoreApp.Tests.Services
             content.Should().Contain("TUNING SAFETY SNAPSHOT");
             content.Should().Contain("Purpose: Export saved tuning safety state without waking System Control");
             content.Should().Contain("EnableStartupHardwareRestore: yes");
+            content.Should().Contain("StartupRestoreCategories: Fans=on; Performance=on; RGB=on; Tuning=on");
             content.Should().Contain("LastGpuPowerBoostLevel: Maximum");
             content.Should().Contain("LastCpuPl1Watts: 55 W");
             content.Should().Contain("RecoveryRequiredOnNextStartup: yes");
@@ -352,8 +714,11 @@ namespace OmenCoreApp.Tests.Services
 
             content.Should().Contain("DispatcherAmplificationClass:", "dispatcher amplification classification required");
             content.Should().Contain("ProjectionAmplificationClass:", "projection amplification classification required");
-            // Classes should be something like "Nominal", "Elevated", or "High"
-            (content.Contains("Nominal") || content.Contains("Elevated") || content.Contains("High"))
+            // Classes should use the current diagnostic vocabulary.
+            (content.Contains("Excellent") ||
+             content.Contains("Expected") ||
+             content.Contains("Elevated") ||
+             content.Contains("Critical"))
                 .Should().BeTrue("amplification should have a classification value");
         }
 

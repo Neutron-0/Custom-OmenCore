@@ -303,7 +303,9 @@ namespace OmenCore.ViewModels
                         _keyboardLightingService,
                         () => _rgbManager,
                         _ecOperationCoordinator,
-                        _performanceModeService);
+                        _performanceModeService,
+                        _hotkeyService,
+                        _omenKeyService);
                     
                     _settings = new SettingsViewModel(_logging, _configService, _systemInfoService, 
                         _fanCleaningService, _biosUpdateService, profileExportService, diagnosticsExportService,
@@ -2150,15 +2152,16 @@ namespace OmenCore.ViewModels
             {
                 // Brief delay to let hardware stabilize after boot
                 await Task.Delay(2000);
-                var startupHardwareRestoreEnabled = ShouldRunStartupHardwareRestore();
+                var startupPerformanceRestoreEnabled = ShouldRunStartupHardwareRestore(StartupRestoreCategory.Performance);
+                var startupFanRestoreEnabled = ShouldRunStartupHardwareRestore(StartupRestoreCategory.Fans);
                 
                 // Restore GPU Power Boost level
                 var savedGpuPb = _config.LastGpuPowerBoostLevel;
                 if (!string.IsNullOrEmpty(savedGpuPb) && _wmiBios != null)
                 {
-                    if (!startupHardwareRestoreEnabled)
+                    if (!startupPerformanceRestoreEnabled)
                     {
-                        _logging.Warn("Startup hardware restore is disabled - skipping automatic GPU Power Boost reapply");
+                        _logging.Warn("Startup performance restore is disabled - skipping automatic GPU Power Boost reapply");
                     }
                     else
                     {
@@ -2190,15 +2193,13 @@ namespace OmenCore.ViewModels
                     }
                 }
                 
-                // Restore fan preset. Custom/manual fan curves are the user's selected fan owner,
-                // so restore them even when the broader startup power-restore guard is off.
+                // Restore fan preset only when the fan category is explicitly enabled.
                 var savedFanPreset = _config.LastFanPresetName;
                 if (!string.IsNullOrEmpty(savedFanPreset) && _fanService != null)
                 {
-                    if (!startupHardwareRestoreEnabled &&
-                        !ShouldRestoreFanPresetOnStartup(ResolveStartupFanPreset(savedFanPreset), startupHardwareRestoreEnabled))
+                    if (!startupFanRestoreEnabled)
                     {
-                        _logging.Warn("Startup hardware restore is disabled - skipping automatic fan preset reapply");
+                        _logging.Warn("Startup fan restore is disabled - skipping automatic fan preset reapply");
                     }
                     else
                     {
@@ -2307,24 +2308,9 @@ namespace OmenCore.ViewModels
             return null;
         }
 
-        private static bool ShouldRestoreFanPresetOnStartup(FanPreset? preset, bool startupHardwareRestoreEnabled)
+        private bool ShouldRunStartupHardwareRestore(StartupRestoreCategory category)
         {
-            if (startupHardwareRestoreEnabled)
-            {
-                return true;
-            }
-
-            return preset is
-            {
-                IsBuiltIn: false,
-                Mode: FanMode.Manual,
-                Curve.Count: > 0
-            };
-        }
-
-        private bool ShouldRunStartupHardwareRestore()
-        {
-            if (!_config.EnableStartupHardwareRestore)
+            if (!StartupRestorePolicy.IsEnabled(_config, category))
             {
                 return false;
             }
@@ -2335,7 +2321,7 @@ namespace OmenCore.ViewModels
 
             if (guardedModel && !_config.AllowStartupRestoreOnOmen16OrVictus)
             {
-                _logging.Warn($"Startup hardware restore blocked on sensitive model '{model}'. Enable AllowStartupRestoreOnOmen16OrVictus to override.");
+                _logging.Warn($"Startup {category} restore blocked on sensitive model '{model}'. Enable AllowStartupRestoreOnOmen16OrVictus to override.");
                 return false;
             }
 
@@ -2403,8 +2389,15 @@ namespace OmenCore.ViewModels
             {
                 if (e.Trigger == ProfileTrigger.GameExit)
                 {
-                    _logging.Info("Game exited - restoring default settings");
-                    await RestoreDefaultSettingsAsync();
+                    if (e.ExitedProfile?.RestoreDefaultsOnExit == false)
+                    {
+                        _logging.Info($"Game profile '{e.ExitedProfile.Name}' exited - default restore skipped by profile policy");
+                    }
+                    else
+                    {
+                        _logging.Info("Game exited - restoring default settings");
+                        await RestoreDefaultSettingsAsync();
+                    }
                 }
                 else if (e.Profile != null)
                 {
@@ -2831,7 +2824,8 @@ namespace OmenCore.ViewModels
             SelectedPreset = FanPresets.FirstOrDefault();
 
             SyncCollection(PerformanceModes, _config.PerformanceModes);
-            SelectedPerformanceMode = PerformanceModes.FirstOrDefault();
+            SelectedPerformanceMode = ResolveInitialPerformanceModeForDisplay(PerformanceModes, _config.LastPerformanceModeName);
+            CurrentPerformanceMode = SelectedPerformanceMode?.Name ?? CurrentPerformanceMode;
 
             SyncCollection(LightingProfiles, _config.LightingProfiles);
             SelectedLightingProfile = LightingProfiles.FirstOrDefault();
@@ -2848,6 +2842,26 @@ namespace OmenCore.ViewModels
 
             SyncCollection(MacroProfiles, _config.MacroProfiles);
             SelectedMacroProfile = MacroProfiles.FirstOrDefault();
+        }
+
+        public static PerformanceMode? ResolveInitialPerformanceModeForDisplay(
+            IEnumerable<PerformanceMode> modes,
+            string? savedModeName)
+        {
+            var modeList = modes as IList<PerformanceMode> ?? modes.ToList();
+            if (!string.IsNullOrWhiteSpace(savedModeName))
+            {
+                var saved = modeList.FirstOrDefault(mode =>
+                    mode.Name.Equals(savedModeName, StringComparison.OrdinalIgnoreCase));
+                if (saved != null)
+                {
+                    return saved;
+                }
+            }
+
+            return modeList.FirstOrDefault(mode =>
+                       mode.Name.Equals("Balanced", StringComparison.OrdinalIgnoreCase))
+                   ?? modeList.FirstOrDefault();
         }
 
         private void LoadCurve(FanPreset preset)
@@ -3585,7 +3599,12 @@ namespace OmenCore.ViewModels
             {
                 var exportedPath = await ModelReportService.CreateModelDiagnosticBundleAsync(
                     _systemInfoService,
-                    new DiagnosticExportService(_logging, _logging.LogDirectory, ecOperationCoordinator: _ecOperationCoordinator),
+                    new DiagnosticExportService(
+                        _logging,
+                        _logging.LogDirectory,
+                        ecOperationCoordinator: _ecOperationCoordinator,
+                        hotkeyService: _hotkeyService,
+                        omenKeyService: _omenKeyService),
                     _autoUpdateService?.GetCurrentVersion()?.ToString() ?? "unknown");
 
                 if (!string.IsNullOrEmpty(exportedPath) && File.Exists(exportedPath))

@@ -116,6 +116,20 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public void VerificationFailureTip_DoesNotReferenceUnavailableOghBackendSwitch()
+        {
+            var method = typeof(FanVerificationService).GetMethod("GetVerificationFailureTip", BindingFlags.Static | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+
+            var tip = (string)method!.Invoke(null, null)!;
+
+            tip.Should().Contain("Restore OEM Auto");
+            tip.Should().Contain("export diagnostics");
+            tip.Should().NotContain("switching to OGH proxy backend");
+            tip.Should().NotContain("switch to OGH proxy backend");
+        }
+
+        [Fact]
         public void RestoreFanControlAfterCalibration_ReturnsFalse_WhenNoBackendAvailable()
         {
             var logging = new LoggingService();

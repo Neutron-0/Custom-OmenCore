@@ -147,11 +147,12 @@ namespace OmenCore.Services.KeyboardLighting
                     {
                         var expectedHasVisibleColor = zoneColors.Any(c => c.R > 0 || c.G > 0 || c.B > 0);
                         var readBackAllBlack = readBack != null && readBack.All(c => c.R == 0 && c.G == 0 && c.B == 0);
-                        result.FailureReason = expectedHasVisibleColor && readBackAllBlack
+                        var advisory = expectedHasVisibleColor && readBackAllBlack
                             ? "Color verification failed - readback is all black after a visible-color write"
                             : "Color verification failed - keyboard may not support this method";
-                        _logging.Warn($"[WmiBiosBackend] {result.FailureReason}");
-                        await RestoreOriginalColorsAsync(originalColors, result.FailureReason);
+                        result.FailureReason = advisory;
+                        result.VerificationAdvisory = advisory;
+                        _logging.Warn($"[WmiBiosBackend] {advisory}; WMI accepted the ColorTable write, so OmenCore is keeping the applied state instead of restoring stale readback data.");
                     }
                     else
                     {

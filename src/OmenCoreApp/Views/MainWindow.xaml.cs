@@ -361,7 +361,7 @@ namespace OmenCore.Views
 
         private void UpdateMaximizeButtonGlyph()
         {
-            MaximizeButton.Content = WindowState == WindowState.Maximized ? "❐" : "□";
+            MaximizeButton.Content = WindowState == WindowState.Maximized ? "[]" : "[ ]";
         }
 
         private void UpdateMaximizedBounds()
@@ -389,9 +389,9 @@ namespace OmenCore.Views
                 {
                     DragMove();
                 }
-                catch
+                catch (InvalidOperationException ex)
                 {
-                    // Ignore drag failures caused by transient input state races.
+                    App.Logging.Debug($"[MainWindow] Ignored transient title-bar drag failure: {ex.Message}");
                 }
             }
         }

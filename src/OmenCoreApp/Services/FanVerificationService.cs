@@ -359,8 +359,8 @@ namespace OmenCore.Services
                     // Previously this called SetFanMode(Default) which would kill any active
                     // fan curve, causing the curve to stop working permanently after the first
                     // save. The FanService curve engine handles recovery on its own.
-                    _logging.Warn($"⚠️ Fan {fanIndex} verification mismatch. This may indicate OGH interference, EC lag, or confirmation-counter delay in RPM telemetry. The curve engine will maintain target speeds. [TIP: Consider switching to OGH proxy backend if fans are unresponsive]");
-                    result.ErrorMessage += " [TIP: Consider switching to OGH proxy backend for this model]";
+                    _logging.Warn($"⚠️ Fan {fanIndex} verification mismatch. This may indicate OGH interference, EC lag, or confirmation-counter delay in RPM telemetry. The curve engine will maintain target speeds. [TIP: {GetVerificationFailureTip()}]");
+                    result.ErrorMessage += $" [TIP: {GetVerificationFailureTip()}]";
                 }
             }
             catch (Exception ex)
@@ -371,6 +371,11 @@ namespace OmenCore.Services
             
             result.Duration = DateTime.Now - startTime;
             return result;
+        }
+
+        private static string GetVerificationFailureTip()
+        {
+            return "Use Restore OEM Auto, then try Direct/Max fan control if available. If fans still do not respond, export diagnostics and include the ProductId, backend, requested %, RPM, and level readback.";
         }
 
         /// <summary>

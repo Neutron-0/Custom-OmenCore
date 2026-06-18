@@ -74,6 +74,12 @@ namespace OmenCore.Services.KeyboardLighting
         
         /// <summary>Failure reason if not successful.</summary>
         public string? FailureReason { get; set; }
+
+        /// <summary>Non-fatal readback warning when firmware accepted a write but verification was inconclusive.</summary>
+        public string? VerificationAdvisory { get; set; }
+
+        /// <summary>Firmware accepted the write, but OmenCore could not verify that the intended surface changed.</summary>
+        public bool AcceptedButUnverified => BackendReportedSuccess && !string.IsNullOrWhiteSpace(VerificationAdvisory);
         
         /// <summary>Time taken to apply (ms).</summary>
         public int DurationMs { get; set; }
@@ -82,7 +88,7 @@ namespace OmenCore.Services.KeyboardLighting
         public KeyboardMethod Method { get; set; }
         
         /// <summary>Overall success (backend success + verification if available).</summary>
-        public bool Success => BackendReportedSuccess && (!SupportsVerification || VerificationPassed);
+        public bool Success => BackendReportedSuccess && !AcceptedButUnverified && (!SupportsVerification || VerificationPassed);
     }
 
     /// <summary>

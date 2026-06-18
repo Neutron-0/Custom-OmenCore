@@ -119,6 +119,59 @@ namespace OmenCoreApp.Tests.ViewModels
         }
 
         [Fact]
+        public void ResolveInitialPerformanceModeForDisplay_UsesSavedMode()
+        {
+            var modes = new[]
+            {
+                new PerformanceMode { Name = "Quiet" },
+                new PerformanceMode { Name = "Balanced" },
+                new PerformanceMode { Name = "Performance" },
+                new PerformanceMode { Name = "Turbo" }
+            };
+
+            var selected = MainViewModel.ResolveInitialPerformanceModeForDisplay(modes, "Performance");
+
+            selected.Should().NotBeNull();
+            selected!.Name.Should().Be("Performance");
+        }
+
+        [Fact]
+        public void ResolveInitialPerformanceModeForDisplay_FallsBackToBalanced()
+        {
+            var modes = new[]
+            {
+                new PerformanceMode { Name = "Quiet" },
+                new PerformanceMode { Name = "Balanced" },
+                new PerformanceMode { Name = "Performance" }
+            };
+
+            var selected = MainViewModel.ResolveInitialPerformanceModeForDisplay(modes, "Missing");
+
+            selected.Should().NotBeNull();
+            selected!.Name.Should().Be("Balanced");
+        }
+
+        [Fact]
+        public void BuildPerformanceModesForUi_PreservesConfiguredPowerLimitsAndTurbo()
+        {
+            var config = new AppConfig();
+            config.PerformanceModes.AddRange(new[]
+            {
+                new PerformanceMode { Name = "Quiet", CpuPowerLimitWatts = 25, GpuPowerLimitWatts = 45 },
+                new PerformanceMode { Name = "Balanced", CpuPowerLimitWatts = 45, GpuPowerLimitWatts = 85 },
+                new PerformanceMode { Name = "Performance", CpuPowerLimitWatts = 65, GpuPowerLimitWatts = 115 },
+                new PerformanceMode { Name = "Turbo", CpuPowerLimitWatts = 80, GpuPowerLimitWatts = 140 }
+            });
+
+            var modes = SystemControlViewModel.BuildPerformanceModesForUi(config);
+
+            modes.Should().HaveCount(4);
+            modes.Single(mode => mode.Name == "Performance").CpuPowerLimitWatts.Should().Be(65);
+            modes.Single(mode => mode.Name == "Turbo").GpuPowerLimitWatts.Should().Be(140);
+            modes.Should().OnlyContain(mode => !string.IsNullOrWhiteSpace(mode.Description));
+        }
+
+        [Fact]
         public void SelectingTuningTab_StartsConflictMonitoringScan()
         {
             using var vm = new MainViewModel();
@@ -493,37 +546,23 @@ namespace OmenCoreApp.Tests.ViewModels
         }
 
         [Fact]
-        public void StartupFanRestore_AllowsSavedCustomCurve_WhenHardwareRestoreDisabled()
+        public void StartupFanRestore_RequiresGlobalAndFanCategoryOptIn()
         {
-            var helper = typeof(MainViewModel).GetMethod(
-                "ShouldRestoreFanPresetOnStartup",
-                BindingFlags.Static | BindingFlags.NonPublic);
-            helper.Should().NotBeNull();
-
-            var customCurve = new FanPreset
+            var config = new AppConfig
             {
-                Name = "Field curve",
-                IsBuiltIn = false,
-                Mode = FanMode.Manual,
-                Curve =
-                {
-                    new FanCurvePoint { TemperatureC = 40, FanPercent = 30 },
-                    new FanCurvePoint { TemperatureC = 80, FanPercent = 85 }
-                }
+                EnableStartupHardwareRestore = true,
+                StartupRestoreFansEnabled = false
             };
 
-            var builtInMax = new FanPreset
-            {
-                Name = "Max",
-                IsBuiltIn = true,
-                Mode = FanMode.Max
-            };
+            StartupRestorePolicy.IsEnabled(config, StartupRestoreCategory.Fans).Should().BeFalse(
+                because: "fan startup restore is now a category opt-in, including custom curves");
 
-            helper!.Invoke(null, new object?[] { customCurve, false }).Should().Be(true,
-                because: "saved custom curves must become the active fan owner again on startup");
-            helper.Invoke(null, new object?[] { builtInMax, false }).Should().Be(false,
-                because: "built-in hardware modes should still respect the startup restore safety guard");
-            helper.Invoke(null, new object?[] { builtInMax, true }).Should().Be(true);
+            config.StartupRestoreFansEnabled = true;
+            StartupRestorePolicy.IsEnabled(config, StartupRestoreCategory.Fans).Should().BeTrue();
+
+            config.EnableStartupHardwareRestore = false;
+            StartupRestorePolicy.IsEnabled(config, StartupRestoreCategory.Fans).Should().BeFalse(
+                because: "the broad safety gate remains the master switch");
         }
     }
 }

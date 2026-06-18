@@ -44,11 +44,31 @@ public static class LinuxCapabilityClassifier
         string? model,
         string? boardId)
     {
+        var isWmaaAbortProneBoard = IsWmaaAbortProneBoard(boardId);
         var hasManualFanControl = hasEcAccess || hasFan1Output || hasFan2Output || hasFan1Target || hasFan2Target;
         // hwmon pwm_enable gives coarse policy control (auto/full/manual mode), but not reliable
         // per-fan/manual target writes by itself.
         var hasProfileControl = hasThermalProfile || hasPlatformProfile || hasAcpiPlatformProfile || hasHwmonFanAccess;
         var hasTelemetry = hasTelemetryPaths || hasHpWmiPath || hasManualFanControl || hasProfileControl;
+
+        if (isWmaaAbortProneBoard && hasManualFanControl)
+        {
+            var reason = "Board 8BCD has field reports of ACPI WMAA/WHCM aborts where WMI-backed fan, RGB, and battery paths can report success without hardware effect. Treat visible manual/profile fan paths as degraded until an effective write/readback check proves control.";
+
+            if (!isRoot)
+            {
+                reason += " Run with sudo for write/readback validation.";
+            }
+
+            return new LinuxCapabilityAssessment
+            {
+                CapabilityClass = hasProfileControl ? LinuxCapabilityClass.ProfileOnly : LinuxCapabilityClass.TelemetryOnly,
+                SupportsManualFanControl = false,
+                SupportsProfileControl = hasProfileControl,
+                SupportsTelemetry = true,
+                Reason = reason
+            };
+        }
 
         if (hasManualFanControl)
         {
@@ -88,6 +108,11 @@ public static class LinuxCapabilityClassifier
                 reason += " Run with sudo to apply profile changes.";
             }
 
+            if (isWmaaAbortProneBoard)
+            {
+                reason += " Board 8BCD is currently treated as degraded profile control because field diagnostics show ACPI WMAA/WHCM aborts can make WMI-backed fan, RGB, and battery calls report success without hardware effect.";
+            }
+
             return new LinuxCapabilityAssessment
             {
                 CapabilityClass = LinuxCapabilityClass.ProfileOnly,
@@ -119,4 +144,7 @@ public static class LinuxCapabilityClassifier
             Reason = "No supported Linux control interface was detected. This is usually a kernel exposure gap, unsupported firmware path, or missing hp-wmi/ec_sys support for the current board."
         };
     }
+
+    private static bool IsWmaaAbortProneBoard(string? boardId) =>
+        string.Equals(boardId?.Trim(), "8BCD", StringComparison.OrdinalIgnoreCase);
 }

@@ -11,6 +11,7 @@ using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
 using OmenCore;
+using OmenCore.Models;
 using OmenCore.Services;
 using OmenCore.Utils;
 
@@ -26,6 +27,10 @@ namespace OmenCore.Controls
         private readonly PerformanceModeService? _performanceService;
         private readonly FanCalibrationStorageService? _calibrationService;
         private readonly FanService? _fanService;
+        private readonly KeyboardLightingService? _keyboardLightingService;
+        private readonly ConfigurationService? _configService;
+        private readonly HotkeyService? _hotkeyService;
+        private readonly OmenKeyService? _omenKeyService;
 
         private CancellationTokenSource? _exportCts;
         private string? _lastExportPath;
@@ -46,6 +51,10 @@ namespace OmenCore.Controls
 
             // Optional fan service for verification
             _fanService = serviceProvider.GetService(typeof(FanService)) as FanService;
+            _keyboardLightingService = serviceProvider.GetService(typeof(KeyboardLightingService)) as KeyboardLightingService;
+            _configService = serviceProvider.GetService(typeof(ConfigurationService)) as ConfigurationService;
+            _hotkeyService = serviceProvider.GetService(typeof(HotkeyService)) as HotkeyService;
+            _omenKeyService = serviceProvider.GetService(typeof(OmenKeyService)) as OmenKeyService;
         }
 
         private async void ExportButton_Click(object sender, RoutedEventArgs e)
@@ -172,6 +181,10 @@ namespace OmenCore.Controls
                     diagnosticData.Sections["PerformanceData"] = CollectPerformanceData();
                     result.Sections.Add("Performance Mode Data");
                 }
+
+                UpdateProgress("Collecting core control readiness...", 90);
+                diagnosticData.Sections["CoreControlReadiness"] = CollectCoreControlReadinessData();
+                result.Sections.Add("Core Control Readiness");
 
                 // Collect fan calibration
                 if (IncludeFanCalibrationCheck.IsChecked == true)
@@ -495,6 +508,230 @@ namespace OmenCore.Controls
             }
 
             return performanceData;
+        }
+
+        private CoreControlReadinessData CollectCoreControlReadinessData()
+        {
+            var data = new CoreControlReadinessData
+            {
+                CollectionTimestamp = DateTime.Now
+            };
+
+            try
+            {
+                data.Fan = CollectFanReadinessData();
+                data.Rgb = CollectRgbReadinessData();
+                data.Tuning = CollectTuningReadinessData();
+                data.Monitoring = CollectMonitoringReadinessData();
+                data.Hotkeys = CollectHotkeyReadinessData();
+                data.SuggestedValidationActions = BuildSuggestedValidationActions(data);
+            }
+            catch (Exception ex)
+            {
+                _logging.Warn($"Failed to collect core control readiness: {ex.Message}");
+                data.ErrorMessage = ex.Message;
+            }
+
+            return data;
+        }
+
+        private FanReadinessData CollectFanReadinessData()
+        {
+            var data = new FanReadinessData();
+
+            if (_fanService == null)
+            {
+                data.Status = "Fan service unavailable";
+                return data;
+            }
+
+            var history = _fanService.GetCommandHistorySnapshot();
+            var last = history.LastOrDefault();
+
+            data.Status = _fanService.FanWritesAvailable ? "Fan writes available" : "Fan writes unavailable";
+            data.Backend = _fanService.Backend;
+            data.WritesAvailable = _fanService.FanWritesAvailable;
+            data.ManualDirectAvailable = _fanService.ManualFanControlAvailable;
+            data.CurvesAvailable = _fanService.FanCurvesAvailable;
+            data.CurrentMode = _fanService.GetCurrentFanMode() ?? "Unknown";
+            data.ActivePreset = _fanService.ActivePresetName ?? "None";
+            data.CurveActive = _fanService.IsCurveActive;
+            data.HoldActive = _fanService.IsHoldActive;
+            data.DiagnosticModeActive = _fanService.IsDiagnosticModeActive;
+            data.ThermalProtectionActive = _fanService.IsThermalProtectionActive;
+            data.CommandHistoryCount = history.Count;
+
+            if (last != null)
+            {
+                data.LastCommand = $"{last.TimestampUtc:O} | {(last.Success ? "OK" : "FAIL")} | {last.Command} -> {last.Target}";
+                data.LastCommandDetail = last.Details;
+                data.LastCommandModel = $"{FormatDiagnosticValue(last.ModelName)} ({FormatDiagnosticValue(last.ProductId)})";
+                data.LastCommandGates = $"writes={FormatDiagnosticBool(last.FanWritesAvailable)}; curves={FormatDiagnosticBool(last.FanCurvesAvailable)}; manual={FormatDiagnosticBool(last.ManualFanControlAvailable)}; desktopBlocked={FormatDiagnosticBool(last.DesktopFanWritesBlocked)}";
+                data.LastCommandReadback = $"{FormatDiagnosticValue(last.TelemetrySummary)}; rawPrimaryRpm={FormatDiagnosticNullableInt(last.RawPrimaryFanRpm)}; reportedPrimaryDuty={FormatDiagnosticNullableInt(last.ReportedPrimaryFanDutyPercent)}";
+            }
+
+            return data;
+        }
+
+        private static string FormatDiagnosticBool(bool value) => value ? "yes" : "no";
+
+        private static string FormatDiagnosticValue(string? value) =>
+            string.IsNullOrWhiteSpace(value) ? "not set" : value.Trim();
+
+        private static string FormatDiagnosticDate(DateTime? value) =>
+            value.HasValue ? value.Value.ToUniversalTime().ToString("O") : "never";
+
+        private static string FormatDiagnosticNullableInt(int? value) =>
+            value.HasValue ? value.Value.ToString() : "not set";
+
+        private RgbReadinessData CollectRgbReadinessData()
+        {
+            var observed = _configService?.Config?.KeyboardLighting ?? new KeyboardLightingSettings();
+            if (_keyboardLightingService == null)
+            {
+                return new RgbReadinessData
+                {
+                    Status = "Keyboard lighting service unavailable",
+                    ObservedSurface = FormatDiagnosticValue(observed.ObservedSurface),
+                    ObservedAtUtc = FormatDiagnosticDate(observed.ObservedAtUtc),
+                    ObservedProbeColor = FormatDiagnosticValue(observed.ObservedProbeColorHex),
+                    ObservedBackend = FormatDiagnosticValue(observed.ObservedBackend),
+                    ObservedApplyStatus = FormatDiagnosticValue(observed.ObservedApplyStatus)
+                };
+            }
+
+            return new RgbReadinessData
+            {
+                Status = _keyboardLightingService.IsAvailable ? "Keyboard lighting backend available" : "Keyboard lighting unavailable",
+                HpKeyboardAvailable = _keyboardLightingService.IsAvailable,
+                HpKeyboardBackend = _keyboardLightingService.BackendType,
+                HpKeyboardPerKeyActive = _keyboardLightingService.IsPerKey,
+                HpKeyboardPerKeyCapableHardware = _keyboardLightingService.IsPerKeyCapableHardware,
+                LastApplySurface = _keyboardLightingService.LastApplySurface,
+                LastApplyStatus = _keyboardLightingService.LastApplyStatus,
+                ObservedSurface = FormatDiagnosticValue(observed.ObservedSurface),
+                ObservedAtUtc = FormatDiagnosticDate(observed.ObservedAtUtc),
+                ObservedProbeColor = FormatDiagnosticValue(observed.ObservedProbeColorHex),
+                ObservedBackend = FormatDiagnosticValue(observed.ObservedBackend),
+                ObservedApplyStatus = FormatDiagnosticValue(observed.ObservedApplyStatus),
+                ProbeGuidance = "Apply one safe static test color and record whether keyboard zones, per-key keys, light bar, or only backlight changed."
+            };
+        }
+
+        private TuningReadinessData CollectTuningReadinessData()
+        {
+            var data = new TuningReadinessData();
+
+            if (_performanceService == null)
+            {
+                data.Status = "Performance/tuning service unavailable";
+                return data;
+            }
+
+            try
+            {
+                var trace = _performanceService.GetApplyTraceSnapshot();
+                data.Status = "Performance mode service available";
+                data.CurrentMode = _performanceService.CurrentMode?.ToString() ?? "Unknown";
+                data.AvailableModes = _performanceService.GetAvailableModes()
+                    .Select(m => m.ToString())
+                    .ToArray();
+                data.ApplyTraceCount = trace.Count;
+                data.RecentApplyTrace = trace
+                    .TakeLast(5)
+                    .Select(entry => $"{entry.TimestampUtc:O} | requested={entry.RequestedModeName} | effective={entry.EffectiveModeName} | ecPowerApplied={entry.EcPowerLimitApplied} | wmiFallbackApplied={entry.WmiPolicyFallbackApplied} | fanAction={entry.FanPolicyAction}")
+                    .ToArray();
+                data.ReadbackRule = "Treat tuning as verified only when requested value, readback value, and locked/unsupported state are visible after apply.";
+            }
+            catch (Exception ex)
+            {
+                data.Status = "Performance/tuning readiness failed";
+                data.ErrorMessage = ex.Message;
+            }
+
+            return data;
+        }
+
+        private MonitoringReadinessData CollectMonitoringReadinessData()
+        {
+            if (_hardwareService == null)
+            {
+                return new MonitoringReadinessData
+                {
+                    Status = "Hardware monitoring service unavailable"
+                };
+            }
+
+            return new MonitoringReadinessData
+            {
+                Status = _hardwareService.HealthStatus.ToString(),
+                Source = _hardwareService.MonitoringSource,
+                LastSampleAgeSeconds = double.IsInfinity(_hardwareService.LastSampleAge.TotalSeconds)
+                    ? "never"
+                    : _hardwareService.LastSampleAge.TotalSeconds.ToString("F1"),
+                CadenceReason = _hardwareService.CurrentCadenceReason,
+                LowOverheadMode = _hardwareService.LowOverheadMode
+            };
+        }
+
+        private HotkeyReadinessData CollectHotkeyReadinessData()
+        {
+            var data = new HotkeyReadinessData();
+
+            if (_hotkeyService == null)
+            {
+                data.HotkeyStatus = "Hotkey service unavailable";
+            }
+            else
+            {
+                var hotkeys = _hotkeyService.GetDiagnosticSnapshot();
+                data.HotkeyStatus = hotkeys.Enabled ? "Hotkeys enabled" : "Hotkeys disabled";
+                data.WindowHandleReady = hotkeys.WindowHandleReady;
+                data.RegisteredHotkeyCount = hotkeys.RegisteredCount;
+                data.PendingHotkeyCount = hotkeys.PendingCount;
+                data.RegisteredHotkeys = hotkeys.RegisteredBindings
+                    .Select(binding => $"{binding.Action}: {binding.Chord}")
+                    .ToArray();
+                data.PendingHotkeys = hotkeys.PendingBindings
+                    .Select(binding => $"{binding.Action}: {binding.Chord}")
+                    .ToArray();
+            }
+
+            if (_omenKeyService == null)
+            {
+                data.OmenKeyStatus = "OMEN key service unavailable";
+            }
+            else
+            {
+                var omenKey = _omenKeyService.GetDiagnosticSnapshot();
+                data.OmenKeyStatus = omenKey.Enabled ? "OMEN key interception enabled" : "OMEN key interception disabled";
+                data.OmenKeyAction = omenKey.Action.ToString();
+                data.OmenKeyHookActive = omenKey.HookActive;
+                data.OmenKeyWmiWatcherActive = omenKey.WmiWatcherActive;
+                data.OmenKeyStrictMode = omenKey.StrictMode;
+                data.FirmwareFnPProfileCycleEnabled = omenKey.FirmwareFnPProfileCycleEnabled;
+                data.LastNeverInterceptKey = omenKey.LastNeverInterceptAgeMs.HasValue
+                    ? $"vk=0x{omenKey.LastNeverInterceptVkCode:X2}; scan=0x{omenKey.LastNeverInterceptScanCode:X4}; ageMs={omenKey.LastNeverInterceptAgeMs.Value:F0}"
+                    : "None";
+            }
+
+            data.ValidationGuidance = "Press the physical OMEN key and profile-cycle hotkey once, then verify the expected hook/WMI source appears in logs.";
+            return data;
+        }
+
+        private static string[] BuildSuggestedValidationActions(CoreControlReadinessData data)
+        {
+            var actions = new List<string>();
+
+            actions.Add(data.Fan.WritesAvailable
+                ? "Fan: Restore OEM Auto, then test Max, Direct 40/60/80%, Auto, and a curve ramp while watching RPM/level readback."
+                : "Fan: export model identity/backend status before enabling manual or curve controls.");
+            actions.Add("RGB: apply one safe obvious static color and record which physical surface changed.");
+            actions.Add("Tuning: apply one setting at a time and capture requested/readback/locked state after each apply.");
+            actions.Add("Hotkeys: test Ctrl+Shift profile/fan hotkeys plus the physical OMEN key and confirm hook/WMI source.");
+            actions.Add("Startup restore: keep disabled until manual readback passes for fan/performance/RGB/tuning on this model.");
+
+            return actions.ToArray();
         }
 
         private FanCalibrationData CollectFanCalibrationData()
@@ -833,6 +1070,94 @@ Add any other context about the problem here.
         public List<string> CalibratedModels { get; set; } = new();
         public bool HasCalibrations { get; set; }
         public string? ErrorMessage { get; set; }
+    }
+
+    public class CoreControlReadinessData
+    {
+        public DateTime CollectionTimestamp { get; set; }
+        public FanReadinessData Fan { get; set; } = new();
+        public RgbReadinessData Rgb { get; set; } = new();
+        public TuningReadinessData Tuning { get; set; } = new();
+        public MonitoringReadinessData Monitoring { get; set; } = new();
+        public HotkeyReadinessData Hotkeys { get; set; } = new();
+        public string[] SuggestedValidationActions { get; set; } = Array.Empty<string>();
+        public string? ErrorMessage { get; set; }
+    }
+
+    public class FanReadinessData
+    {
+        public string Status { get; set; } = "";
+        public string Backend { get; set; } = "";
+        public bool WritesAvailable { get; set; }
+        public bool ManualDirectAvailable { get; set; }
+        public bool CurvesAvailable { get; set; }
+        public string CurrentMode { get; set; } = "";
+        public string ActivePreset { get; set; } = "";
+        public bool CurveActive { get; set; }
+        public bool HoldActive { get; set; }
+        public bool DiagnosticModeActive { get; set; }
+        public bool ThermalProtectionActive { get; set; }
+        public int CommandHistoryCount { get; set; }
+        public string LastCommand { get; set; } = "None";
+        public string LastCommandDetail { get; set; } = "";
+        public string LastCommandModel { get; set; } = "not set";
+        public string LastCommandGates { get; set; } = "";
+        public string LastCommandReadback { get; set; } = "";
+    }
+
+    public class RgbReadinessData
+    {
+        public string Status { get; set; } = "";
+        public bool HpKeyboardAvailable { get; set; }
+        public string HpKeyboardBackend { get; set; } = "";
+        public bool HpKeyboardPerKeyActive { get; set; }
+        public bool HpKeyboardPerKeyCapableHardware { get; set; }
+        public string LastApplySurface { get; set; } = "";
+        public string LastApplyStatus { get; set; } = "";
+        public string ObservedSurface { get; set; } = "";
+        public string ObservedAtUtc { get; set; } = "";
+        public string ObservedProbeColor { get; set; } = "";
+        public string ObservedBackend { get; set; } = "";
+        public string ObservedApplyStatus { get; set; } = "";
+        public string ProbeGuidance { get; set; } = "";
+    }
+
+    public class TuningReadinessData
+    {
+        public string Status { get; set; } = "";
+        public string CurrentMode { get; set; } = "";
+        public string[] AvailableModes { get; set; } = Array.Empty<string>();
+        public int ApplyTraceCount { get; set; }
+        public string[] RecentApplyTrace { get; set; } = Array.Empty<string>();
+        public string ReadbackRule { get; set; } = "";
+        public string? ErrorMessage { get; set; }
+    }
+
+    public class MonitoringReadinessData
+    {
+        public string Status { get; set; } = "";
+        public string Source { get; set; } = "";
+        public string LastSampleAgeSeconds { get; set; } = "";
+        public string CadenceReason { get; set; } = "";
+        public bool LowOverheadMode { get; set; }
+    }
+
+    public class HotkeyReadinessData
+    {
+        public string HotkeyStatus { get; set; } = "";
+        public bool WindowHandleReady { get; set; }
+        public int RegisteredHotkeyCount { get; set; }
+        public int PendingHotkeyCount { get; set; }
+        public string[] RegisteredHotkeys { get; set; } = Array.Empty<string>();
+        public string[] PendingHotkeys { get; set; } = Array.Empty<string>();
+        public string OmenKeyStatus { get; set; } = "";
+        public string OmenKeyAction { get; set; } = "";
+        public bool OmenKeyHookActive { get; set; }
+        public bool OmenKeyWmiWatcherActive { get; set; }
+        public bool OmenKeyStrictMode { get; set; }
+        public bool FirmwareFnPProfileCycleEnabled { get; set; }
+        public string LastNeverInterceptKey { get; set; } = "";
+        public string ValidationGuidance { get; set; } = "";
     }
 
     public class FanVerificationData

@@ -302,6 +302,12 @@ namespace OmenCore.Services
                 lines.AppendLine(
                     $"  backend={entry.Backend}; mode={entry.FanMode}; preset={entry.ActivePresetName ?? "<none>"}; " +
                     $"curve={entry.CurveActive}; hold={entry.HoldActive}; curveOrHold={entry.CurveOrHoldActive}; diagnostic={entry.DiagnosticModeActive}; thermal={entry.ThermalProtectionActive}");
+                lines.AppendLine(
+                    $"  model={FormatCommandValue(entry.ModelName)} ({FormatCommandValue(entry.ProductId)}); " +
+                    $"writes={entry.FanWritesAvailable}; curves={entry.FanCurvesAvailable}; manual={entry.ManualFanControlAvailable}; desktopBlocked={entry.DesktopFanWritesBlocked}");
+                lines.AppendLine(
+                    $"  readback={FormatCommandValue(entry.TelemetrySummary)}; " +
+                    $"rawPrimaryRpm={FormatNullableCommandValue(entry.RawPrimaryFanRpm)}; reportedPrimaryDuty={FormatNullableCommandValue(entry.ReportedPrimaryFanDutyPercent)}");
                 if (!string.IsNullOrWhiteSpace(entry.Details))
                 {
                     lines.AppendLine($"  detail={entry.Details}");
@@ -341,6 +347,16 @@ namespace OmenCore.Services
         private void RecordFanCommand(string command, string target, bool success, string details = "")
         {
             var holdActive = IsHoldActive;
+            var productId = ResolveFanCommandProductId();
+            var modelName = ResolveFanCommandModelName();
+            var fanWritesAvailable = FanWritesAvailable;
+            var fanCurvesAvailable = FanCurvesAvailable;
+            var manualFanControlAvailable = ManualFanControlAvailable;
+            var desktopFanWritesBlocked = DesktopFanWritesBlocked;
+            var telemetrySummary = BuildFanCommandTelemetrySummary();
+            var rawPrimaryFanRpm = _lastRawPrimaryFanRpm >= 0 ? _lastRawPrimaryFanRpm : (int?)null;
+            var reportedPrimaryFanDutyPercent = _lastReportedPrimaryFanDutyPercent >= 0 ? _lastReportedPrimaryFanDutyPercent : (int?)null;
+
             if (_lastRecordedHoldActive.HasValue && _lastRecordedHoldActive.Value != holdActive)
             {
                 EnqueueFanCommandEntry(new FanCommandHistoryEntry
@@ -357,7 +373,16 @@ namespace OmenCore.Services
                     HoldActive = holdActive,
                     CurveOrHoldActive = IsCurveOrHoldActive,
                     DiagnosticModeActive = _diagnosticModeActive,
-                    ThermalProtectionActive = _thermalProtectionActive
+                    ThermalProtectionActive = _thermalProtectionActive,
+                    ProductId = productId,
+                    ModelName = modelName,
+                    FanWritesAvailable = fanWritesAvailable,
+                    FanCurvesAvailable = fanCurvesAvailable,
+                    ManualFanControlAvailable = manualFanControlAvailable,
+                    DesktopFanWritesBlocked = desktopFanWritesBlocked,
+                    TelemetrySummary = telemetrySummary,
+                    RawPrimaryFanRpm = rawPrimaryFanRpm,
+                    ReportedPrimaryFanDutyPercent = reportedPrimaryFanDutyPercent
                 });
             }
             _lastRecordedHoldActive = holdActive;
@@ -376,12 +401,75 @@ namespace OmenCore.Services
                 HoldActive = holdActive,
                 CurveOrHoldActive = IsCurveOrHoldActive,
                 DiagnosticModeActive = _diagnosticModeActive,
-                ThermalProtectionActive = _thermalProtectionActive
+                ThermalProtectionActive = _thermalProtectionActive,
+                ProductId = productId,
+                ModelName = modelName,
+                FanWritesAvailable = fanWritesAvailable,
+                FanCurvesAvailable = fanCurvesAvailable,
+                ManualFanControlAvailable = manualFanControlAvailable,
+                DesktopFanWritesBlocked = desktopFanWritesBlocked,
+                TelemetrySummary = telemetrySummary,
+                RawPrimaryFanRpm = rawPrimaryFanRpm,
+                ReportedPrimaryFanDutyPercent = reportedPrimaryFanDutyPercent
             };
 
             EnqueueFanCommandEntry(entry);
             NotifyFanActivityStateChangedIfNeeded();
         }
+
+        private string ResolveFanCommandProductId()
+        {
+            if (!string.IsNullOrWhiteSpace(_capabilities?.ProductId))
+            {
+                return _capabilities!.ProductId;
+            }
+
+            return _capabilities?.ModelConfig?.ProductId ?? "unknown";
+        }
+
+        private string ResolveFanCommandModelName()
+        {
+            if (!string.IsNullOrWhiteSpace(_capabilities?.ModelName))
+            {
+                return _capabilities!.ModelName;
+            }
+
+            return _capabilities?.ModelConfig?.ModelName ?? "unknown";
+        }
+
+        private string BuildFanCommandTelemetrySummary()
+        {
+            try
+            {
+                var snapshot = _fanTelemetry
+                    .Select((fan, index) =>
+                    {
+                        var name = string.IsNullOrWhiteSpace(fan.Name) ? $"Fan {index + 1}" : fan.Name;
+                        var rpmText = fan.RpmState == TelemetryDataState.Unavailable
+                            ? "RPM unavailable"
+                            : $"{fan.SpeedRpm} RPM";
+                        return $"{name}: {rpmText}, duty {fan.DutyCyclePercent}%, state {fan.RpmState}, source {fan.RpmSourceDisplay}";
+                    })
+                    .ToList();
+
+                if (snapshot.Count == 0)
+                {
+                    return "no fan telemetry snapshot";
+                }
+
+                return string.Join("; ", snapshot);
+            }
+            catch (Exception ex) when (ex is InvalidOperationException or NotSupportedException)
+            {
+                return $"fan telemetry snapshot unavailable ({ex.GetType().Name})";
+            }
+        }
+
+        private static string FormatCommandValue(string? value) =>
+            string.IsNullOrWhiteSpace(value) ? "<none>" : value;
+
+        private static string FormatNullableCommandValue(int? value) =>
+            value.HasValue ? value.Value.ToString() : "<none>";
 
         private void EnqueueFanCommandEntry(FanCommandHistoryEntry entry)
         {
@@ -3139,6 +3227,15 @@ namespace OmenCore.Services
         public bool CurveOrHoldActive { get; init; }
         public bool DiagnosticModeActive { get; init; }
         public bool ThermalProtectionActive { get; init; }
+        public string ProductId { get; init; } = "unknown";
+        public string ModelName { get; init; } = "unknown";
+        public bool FanWritesAvailable { get; init; }
+        public bool FanCurvesAvailable { get; init; }
+        public bool ManualFanControlAvailable { get; init; }
+        public bool DesktopFanWritesBlocked { get; init; }
+        public string TelemetrySummary { get; init; } = string.Empty;
+        public int? RawPrimaryFanRpm { get; init; }
+        public int? ReportedPrimaryFanDutyPercent { get; init; }
     }
 
     /// <summary>

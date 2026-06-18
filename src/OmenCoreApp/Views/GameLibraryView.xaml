@@ -120,10 +120,13 @@
                         <ColumnDefinition Width="Auto"/>
                         <ColumnDefinition Width="*"/>
                     </Grid.ColumnDefinitions>
-                    <TextBlock Text="🔍" 
-                               VerticalAlignment="Center" 
-                               Foreground="#666" 
-                               Margin="0,0,8,0"/>
+                    <Path Data="{StaticResource IconSearch}"
+                          Fill="#666"
+                          Width="14"
+                          Height="14"
+                          Stretch="Uniform"
+                          VerticalAlignment="Center"
+                          Margin="0,0,8,0"/>
                     <TextBox Grid.Column="1" 
                              Text="{Binding SearchFilter, UpdateSourceTrigger=PropertyChanged}"
                              Background="Transparent"
@@ -197,7 +200,7 @@
                 <StackPanel Visibility="{Binding IsScanning, Converter={StaticResource BoolToVisibilityConverter}}"
                             HorizontalAlignment="Center"
                             VerticalAlignment="Center">
-                    <TextBlock Text="🔍" FontSize="48" HorizontalAlignment="Center"/>
+                    <Path Data="{StaticResource IconSearch}" Fill="{StaticResource AccentBrush}" Width="48" Height="48" Stretch="Uniform" HorizontalAlignment="Center"/>
                     <TextBlock Text="Scanning game libraries..." 
                                Foreground="#888" 
                                FontSize="14"
@@ -211,8 +214,10 @@
                          BorderThickness="0"
                          ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                          ScrollViewer.VerticalScrollBarVisibility="Auto"
-                         ScrollViewer.CanContentScroll="False"
+                         ScrollViewer.CanContentScroll="True"
                          VirtualizingPanel.ScrollUnit="Pixel"
+                         VirtualizingPanel.IsVirtualizing="True"
+                         VirtualizingPanel.VirtualizationMode="Recycling"
                          Visibility="{Binding IsScanning, Converter={StaticResource InverseBoolToVisibility}}">
                     <ListBox.ItemsPanel>
                         <ItemsPanelTemplate>

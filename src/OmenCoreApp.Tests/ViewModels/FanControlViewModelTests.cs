@@ -108,6 +108,15 @@ namespace OmenCoreApp.Tests.ViewModels
             return field!.GetValue(vm).Should().BeOfType<FanService>().Subject;
         }
 
+        private static TestFanController GetTestFanController(OmenCore.ViewModels.FanControlViewModel vm)
+        {
+            var service = GetFanService(vm);
+            var field = typeof(FanService)
+                .GetField("_fanController", BindingFlags.NonPublic | BindingFlags.Instance);
+            field.Should().NotBeNull();
+            return field!.GetValue(service).Should().BeOfType<TestFanController>().Subject;
+        }
+
         private static void AddFanTelemetry(FanService fanService)
         {
             var field = typeof(FanService)
@@ -186,6 +195,46 @@ namespace OmenCoreApp.Tests.ViewModels
             vm.ActiveFanMode = "Constant";
             vm.ConstantFanPercent = 42;
             vm.FanOwnershipSummary.Should().Contain("42%");
+        }
+
+        [Fact]
+        public void DirectFanMode_ExposesConstantSliderState()
+        {
+            var vm = CreateViewModel();
+
+            vm.ManualFanControlAvailable.Should().BeTrue();
+            vm.ShowConstantControl.Should().BeFalse();
+            vm.CurrentFanModeName.Should().NotBe("Direct");
+
+            vm.IsConstantSelected = true;
+            vm.ConstantFanPercent = 65;
+
+            vm.ShowConstantControl.Should().BeTrue();
+            vm.CurrentFanModeName.Should().Be("Direct");
+            vm.DirectPresetSubtitle.Should().Be("65%");
+            vm.DirectFanControlTooltip.Should().Contain("fixed");
+            vm.FanProfileHeaderHint.Should().Contain("direct fan level");
+        }
+
+        [Fact]
+        public async Task DirectFanMode_SliderChange_DoesNotAutoApplyUntilCommandRuns()
+        {
+            var vm = CreateViewModel();
+            var controller = GetTestFanController(vm);
+
+            vm.IsConstantSelected = true;
+            vm.ConstantFanPercent = 65;
+
+            controller.SetCallCount.Should().Be(0, "moving the Direct slider should only update the requested value");
+
+            vm.ApplyConstantSpeedCommand.Execute(null);
+            for (var i = 0; i < 20 && controller.SetCallCount == 0; i++)
+            {
+                await Task.Delay(25);
+            }
+
+            controller.SetCallCount.Should().Be(1);
+            controller.LastSetPercent.Should().Be(65);
         }
 
         [Fact]

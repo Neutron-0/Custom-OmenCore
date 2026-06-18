@@ -4,7 +4,6 @@ using System.Linq;
 using System.Management;
 using System.Runtime.InteropServices;
 using System.Threading;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace OmenCore.Services
@@ -194,6 +193,30 @@ namespace OmenCore.Services
             _logging = logging;
             _configService = configService;
             LoadSettings();
+        }
+
+        public OmenKeyDiagnosticSnapshot GetDiagnosticSnapshot()
+        {
+            var lastNeverInterceptTicks = Interlocked.Read(ref _lastNeverInterceptKeyTicks);
+            double? lastNeverInterceptAgeMs = lastNeverInterceptTicks > 0
+                ? Math.Max(0, (DateTime.UtcNow.Ticks - lastNeverInterceptTicks) / (double)TimeSpan.TicksPerMillisecond)
+                : null;
+
+            var config = _configService?.Config;
+            return new OmenKeyDiagnosticSnapshot
+            {
+                Enabled = _isEnabled,
+                Action = _currentAction,
+                ExternalAppConfigured = !string.IsNullOrWhiteSpace(_externalAppPath),
+                HookActive = IsHookActive,
+                WmiWatcherActive = _wmiEventWatcher != null,
+                StrictMode = config?.StrictOmenKeyMode ?? true,
+                FirmwareFnPProfileCycleEnabled = config?.Features?.EnableFirmwareFnPProfileCycle == true,
+                SuppressInRdp = config?.Features?.SuppressHotkeysInRdp == true,
+                LastNeverInterceptVkCode = Volatile.Read(ref _lastNeverInterceptVkCode),
+                LastNeverInterceptScanCode = Volatile.Read(ref _lastNeverInterceptScanCode),
+                LastNeverInterceptAgeMs = lastNeverInterceptAgeMs
+            };
         }
 
         /// <summary>
@@ -1011,5 +1034,20 @@ namespace OmenCore.Services
         
         /// <summary>Suppress the key but do nothing</summary>
         DoNothing
+    }
+
+    public sealed class OmenKeyDiagnosticSnapshot
+    {
+        public bool Enabled { get; init; }
+        public OmenKeyAction Action { get; init; }
+        public bool ExternalAppConfigured { get; init; }
+        public bool HookActive { get; init; }
+        public bool WmiWatcherActive { get; init; }
+        public bool StrictMode { get; init; }
+        public bool FirmwareFnPProfileCycleEnabled { get; init; }
+        public bool SuppressInRdp { get; init; }
+        public int LastNeverInterceptVkCode { get; init; }
+        public int LastNeverInterceptScanCode { get; init; }
+        public double? LastNeverInterceptAgeMs { get; init; }
     }
 }

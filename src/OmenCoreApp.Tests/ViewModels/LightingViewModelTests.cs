@@ -79,6 +79,27 @@ namespace OmenCoreApp.Tests.ViewModels
             vm.KeyboardRestoreStatusText.Should().Contain("Settings");
         }
 
+        [Fact]
+        public void SaveRgbSurfaceObservationCommand_PersistsSelectedSurface()
+        {
+            Environment.SetEnvironmentVariable("OMENCORE_DISABLE_FILE_LOG", "1");
+            var logging = new LoggingService { Level = LogLevel.Info };
+            var configService = new ConfigurationService();
+            var vm = new LightingViewModel(null, null, logging, keyboardLightingService: null, configService: configService);
+
+            vm.SelectedObservedRgbSurface = "Light bar changed";
+
+            vm.SaveRgbSurfaceObservationCommand.Execute(null);
+
+            var saved = new ConfigurationService().Load().KeyboardLighting;
+            saved.ObservedSurface.Should().Be("Light bar changed");
+            saved.ObservedProbeColorHex.Should().Be("#00FF66");
+            saved.ObservedBackend.Should().Be("None");
+            saved.ObservedApplyStatus.Should().Contain("No keyboard lighting apply attempted");
+            saved.ObservedAtUtc.Should().NotBeNull();
+            vm.RgbSurfaceObservationStatusText.Should().Contain("Light bar changed");
+        }
+
         private class TestRgbProvider : IRgbProvider
         {
             public string ProviderName => "TestProvider";

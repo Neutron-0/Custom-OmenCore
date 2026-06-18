@@ -69,6 +69,12 @@ namespace OmenCore.Models
         public string? PeripheralLightingProfileName { get; set; }
 
         /// <summary>
+        /// Whether OmenCore should restore default fan/performance settings when this game exits.
+        /// Disable for launchers or workflows where another automation rule should keep control.
+        /// </summary>
+        public bool RestoreDefaultsOnExit { get; set; } = true;
+
+        /// <summary>
         /// Custom notes for this profile.
         /// </summary>
         public string? Notes { get; set; }
@@ -134,6 +140,7 @@ namespace OmenCore.Models
                 GpuMode = GpuMode,
                 KeyboardLightingProfileName = KeyboardLightingProfileName,
                 PeripheralLightingProfileName = PeripheralLightingProfileName,
+                RestoreDefaultsOnExit = RestoreDefaultsOnExit,
                 Notes = Notes,
                 Priority = Priority,
                 CreatedAt = DateTime.Now,
@@ -164,7 +171,16 @@ namespace OmenCore.Models
         /// </summary>
         public bool MatchesProcess(string processName, string? processPath = null)
         {
-            if (!IsEnabled) return false;
+            return GetProcessMatchScore(processName, processPath) > 0;
+        }
+
+        /// <summary>
+        /// Returns a match strength for profile conflict resolution.
+        /// 0 = no match, 1 = executable-name match, 2 = exact executable-path match.
+        /// </summary>
+        public int GetProcessMatchScore(string processName, string? processPath = null)
+        {
+            if (!IsEnabled) return 0;
 
             // Exact executable name match (case-insensitive)
             var normalizedProcess = NormalizeExecutableName(processName);
@@ -175,14 +191,21 @@ namespace OmenCore.Models
                 string.Equals(normalizedProcess, normalizedProfile, StringComparison.OrdinalIgnoreCase))
             {
                 // If path is specified, verify it matches too
-                if (!string.IsNullOrEmpty(ExecutablePath) && !string.IsNullOrEmpty(processPath))
+                if (!string.IsNullOrWhiteSpace(ExecutablePath))
                 {
-                    return string.Equals(processPath, ExecutablePath, StringComparison.OrdinalIgnoreCase);
+                    if (string.IsNullOrWhiteSpace(processPath))
+                    {
+                        return 0;
+                    }
+
+                    return string.Equals(processPath, ExecutablePath, StringComparison.OrdinalIgnoreCase)
+                        ? 2
+                        : 0;
                 }
-                return true;
+                return 1;
             }
 
-            return false;
+            return 0;
         }
     }
 }

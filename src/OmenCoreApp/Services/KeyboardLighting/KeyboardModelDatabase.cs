@@ -123,6 +123,19 @@ namespace OmenCore.Services.KeyboardLighting
 
             AddModel(new KeyboardModelConfig
             {
+                ProductId = "8600",
+                ModelName = "OMEN 15-dh0xxx (2019)",
+                ModelNamePattern = "15-dh0",
+                KeyboardType = KeyboardType.BacklightOnly,
+                PreferredMethod = KeyboardMethod.BacklightOnly,
+                FallbackMethods = Array.Empty<KeyboardMethod>(),
+                ModelYear = 2019,
+                UserVerified = false,
+                Notes = "Discord wafflist 2026-06-15 - OMEN by HP Laptop 15-dh0xxx / ProductId 8600. Conservative backlight-only keyboard identity added to avoid Unknown keyboard fallback; RGB zone capability not asserted until field validation."
+            });
+
+            AddModel(new KeyboardModelConfig
+            {
                 ProductId = "8787",
                 ModelName = "OMEN 15-en0038ur (2020) AMD",
                 ModelNamePattern = "15-en",
@@ -134,6 +147,21 @@ namespace OmenCore.Services.KeyboardLighting
                 ModelYear = 2020,
                 UserVerified = false,
                 Notes = "GitHub #120 - 4-zone WMI BIOS ColorTable works; RPM/fan diagnostics pending verification"
+            });
+
+            AddModel(new KeyboardModelConfig
+            {
+                ProductId = "878C",
+                ModelName = "OMEN 15-ek0xxx (2020) Intel",
+                ModelNamePattern = "15-ek0",
+                KeyboardType = KeyboardType.FourZoneTkl,
+                PreferredMethod = KeyboardMethod.ColorTable2020,
+                FallbackMethods = new[] { KeyboardMethod.EcDirect },
+                EcColorRegisters = new byte[] { 0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6, 0xB7, 0xB8, 0xB9, 0xBA, 0xBB, 0xBC },
+                EcBrightnessRegister = 0xBD,
+                ModelYear = 2020,
+                UserVerified = false,
+                Notes = "Discord Sky 2026-06-12 - ProductId 878C / OMEN Laptop 15-ek0xxx. Conservative 2020 OMEN 15 ColorTable keyboard profile pending RGB zone validation."
             });
             
             AddModel(new KeyboardModelConfig
@@ -439,7 +467,11 @@ namespace OmenCore.Services.KeyboardLighting
                 FallbackMethods = new[] { KeyboardMethod.NewWmi2023, KeyboardMethod.ColorTable2020 },
                 ModelYear = 2025,
                 UserVerified = false,
-                Notes = "Discord field log 2026-05-24 - OMEN MAX Gaming Laptop 16t-ah000 / ProductId 8D41. Per-key-capable MAX keyboard profile inferred; WMI ColorTable fallback remains available while HID per-key behavior is field-verified."
+                Notes = "Discord field log 2026-05-24 - OMEN MAX Gaming Laptop 16t-ah000 / ProductId 8D41. " +
+                    "HidPerKeyBackend (VID 0x03F0) is now active for this model; USB PID 0x054E is probable but requires " +
+                    "field confirmation from a live device log. If the per-key backend fails probe, WMI ColorTable " +
+                    "fallback applies zone colors to the light bar. Check startup log for '[HidPerKey] PID 0x????' " +
+                    "entries to identify the actual keyboard USB PID on this hardware."
             });
 
             // OMEN MAX 16 (2025) - ak0xxx family (GitHub #117)
@@ -453,7 +485,11 @@ namespace OmenCore.Services.KeyboardLighting
                 FallbackMethods = new[] { KeyboardMethod.NewWmi2023, KeyboardMethod.ColorTable2020 },
                 ModelYear = 2025,
                 UserVerified = false,
-                Notes = "GitHub #117 — OMEN MAX Gaming Laptop 16-ak0xxx (Product ID 8D87). Keyboard profile inferred from MAX 16 generation; verify per-key behavior on hardware."
+                Notes = "GitHub #117 — OMEN MAX Gaming Laptop 16-ak0xxx (Product ID 8D87). " +
+                    "HidPerKeyBackend (VID 0x03F0) is now active for this model; USB PID 0x054F is probable but requires " +
+                    "field confirmation. If per-key probe fails (unrecognized PID), WMI ColorTable fallback provides " +
+                    "light-bar zone control. Field report noted light bar responds but keyboard body does not — " +
+                    "this is expected until the correct USB PID is confirmed and per-key segment writes are verified."
             });
 
             // ═══════════════════════════════════════════════════════════════════════════════════
@@ -585,12 +621,25 @@ namespace OmenCore.Services.KeyboardLighting
                 ProductId = "8BD4",
                 ModelName = "HP Victus 16-s0xxx AMD",
                 ModelNamePattern = "16-s0",
-                KeyboardType = KeyboardType.BacklightOnly,
-                PreferredMethod = KeyboardMethod.BacklightOnly,
-                FallbackMethods = Array.Empty<KeyboardMethod>(),
+                KeyboardType = KeyboardType.FourZone,
+                PreferredMethod = KeyboardMethod.ColorTable2020,
+                FallbackMethods = new[] { KeyboardMethod.NewWmi2023 },
                 ModelYear = 2023,
                 UserVerified = false,
-                Notes = "RC1 field log - Victus 16-s0xxx (8BD4); conservative backlight-only default pending RGB verification"
+                Notes = "RC1 field log - Victus 16-s0xxx (8BD4); Discord 2026-06-08 / 7Z5Z2EA reports RGB should be controllable. Use WMI ColorTable as the basic keyboard RGB path; EC keyboard writes remain disabled."
+            });
+
+            AddModel(new KeyboardModelConfig
+            {
+                ProductId = "7Z5Z2EA",
+                ModelName = "HP Victus 16-s0035nt",
+                ModelNamePattern = "16-s0035",
+                KeyboardType = KeyboardType.FourZone,
+                PreferredMethod = KeyboardMethod.ColorTable2020,
+                FallbackMethods = new[] { KeyboardMethod.NewWmi2023 },
+                ModelYear = 2023,
+                UserVerified = false,
+                Notes = "Discord 2026-06-08 - Victus 16-S0035NT support product number. Try WMI ColorTable for basic keyboard RGB when this value appears in SKU/support-product fields."
             });
 
             // Additional Victus model reported by community (PN: 8A26)
@@ -638,6 +687,19 @@ namespace OmenCore.Services.KeyboardLighting
             });
 
             // ═══════════════════════════════════════════════════════════════════════════════════
+            AddModel(new KeyboardModelConfig
+            {
+                ProductId = "88EE",
+                ModelName = "HP Victus 16-e0194nw",
+                ModelNamePattern = "16-e0",
+                KeyboardType = KeyboardType.BacklightOnly,
+                PreferredMethod = KeyboardMethod.BacklightOnly,
+                FallbackMethods = Array.Empty<KeyboardMethod>(),
+                ModelYear = 2022,
+                UserVerified = false,
+                Notes = "GitHub #140 - HP Victus 16-e0194nw / ProductId 88EE. Exact conservative backlight-only keyboard identity added so reports no longer infer the 88EC sibling by model-name series."
+            });
+
             // Older OMEN Models (2018-2019) - Backlight only
             // ═══════════════════════════════════════════════════════════════════════════════════
             

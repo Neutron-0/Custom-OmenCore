@@ -35,6 +35,31 @@ namespace OmenCore.Controls
         private DateTime _lastChartRefreshUtc = DateTime.MinValue;
         private DateTime _lastAlertRefreshUtc = DateTime.MinValue;
         private bool _stateChangeSubscribed; // Guard against duplicate StateChanged subscriptions on repeated Loaded events
+        private static readonly SolidColorBrush ChartPowerBrush = CreateFrozenBrush(Color.FromRgb(214, 162, 26));
+        private static readonly SolidColorBrush ChartTempBrush = CreateFrozenBrush(Color.FromRgb(226, 89, 54));
+        private static readonly SolidColorBrush ChartCautionBrush = CreateFrozenBrush(Color.FromRgb(218, 126, 49));
+        private static readonly SolidColorBrush ChartBatteryBrush = CreateFrozenBrush(Color.FromRgb(73, 196, 92));
+        private static readonly SolidColorBrush ChartFanBrush = CreateFrozenBrush(Color.FromRgb(38, 198, 218));
+        private static readonly SolidColorBrush ChartGridBrush = CreateFrozenBrush(Color.FromRgb(60, 60, 70));
+        private static readonly SolidColorBrush ChartLabelBrush = CreateFrozenBrush(Color.FromRgb(130, 132, 148));
+        private static readonly SolidColorBrush ChartMutedTextBrush = CreateFrozenBrush(Color.FromRgb(150, 150, 160));
+        private static readonly SolidColorBrush ChartValueLabelBackgroundBrush = CreateFrozenBrush(Color.FromArgb(210, 34, 38, 52));
+        private static readonly SolidColorBrush ChartMarkerStrokeBrush = CreateFrozenBrush(Color.FromRgb(245, 247, 255));
+        private static readonly DoubleCollection ChartGridDash = CreateFrozenDash();
+
+        private static SolidColorBrush CreateFrozenBrush(Color color)
+        {
+            var brush = new SolidColorBrush(color);
+            brush.Freeze();
+            return brush;
+        }
+
+        private static DoubleCollection CreateFrozenDash()
+        {
+            var dash = new DoubleCollection { 4, 2 };
+            dash.Freeze();
+            return dash;
+        }
 
         private async Task RunOnUiAsync(Func<Task> action)
         {
@@ -220,7 +245,10 @@ namespace OmenCore.Controls
         private void HardwareMonitoringDashboard_Unloaded(object sender, RoutedEventArgs e)
         {
             if (Application.Current?.MainWindow is Window w)
+            {
                 w.StateChanged -= MainWindow_StateChanged;
+                _stateChangeSubscribed = false;
+            }
 
             _dashboardViewModel?.SetTelemetryProjectionEnabled(false);
             
@@ -670,24 +698,24 @@ namespace OmenCore.Controls
 
         private Brush GetTrendBrush(double trend)
         {
-            if (Math.Abs(trend) < 0.1) return Brushes.Gray;
-            return trend > 0 ? Brushes.OrangeRed : Brushes.LimeGreen;
+            if (Math.Abs(trend) < 0.1) return ChartMutedTextBrush;
+            return trend > 0 ? ChartTempBrush : ChartBatteryBrush;
         }
 
         private Brush GetTemperatureBrush(double temperature)
         {
-            if (temperature < 60) return Brushes.LimeGreen;
-            if (temperature < 75) return Brushes.Yellow;
-            if (temperature < 85) return Brushes.Orange;
-            return Brushes.OrangeRed;
+            if (temperature < 60) return ChartBatteryBrush;
+            if (temperature < 75) return ChartPowerBrush;
+            if (temperature < 85) return ChartCautionBrush;
+            return ChartTempBrush;
         }
 
         private Brush GetEfficiencyBrush(double efficiency)
         {
-            if (efficiency >= 85) return Brushes.LimeGreen;
-            if (efficiency >= 75) return Brushes.Yellow;
-            if (efficiency >= 65) return Brushes.Orange;
-            return Brushes.OrangeRed;
+            if (efficiency >= 85) return ChartBatteryBrush;
+            if (efficiency >= 75) return ChartPowerBrush;
+            if (efficiency >= 65) return ChartCautionBrush;
+            return ChartTempBrush;
         }
 
         private async Task CheckForAlertsAsync()
@@ -715,9 +743,9 @@ namespace OmenCore.Controls
 
         private string GetTrendIndicator(double trend)
         {
-            if (Math.Abs(trend) < 0.1) return "→ Stable";
-            if (trend > 0) return $"↗ +{trend:F1}W";
-            return $"↘ {trend:F1}W";
+            if (Math.Abs(trend) < 0.1) return "Stable";
+            if (trend > 0) return $"+{trend:F1}W";
+            return $"{trend:F1}W";
         }
 
         private string GetBatteryHealthStatus(double percentage)
@@ -765,10 +793,10 @@ namespace OmenCore.Controls
                 var fanData = (await _mainViewModel.HardwareMonitoringService.GetHistoricalDataAsync(ChartType.FanSpeeds, TimeSpan.FromHours(1))).ToList();
 
                 // Draw each chart
-                DrawChartOnCanvas(PowerChartCanvas, PowerChartStats, powerData, Brushes.Yellow, "W");
-                DrawChartOnCanvas(TempChartCanvas, TempChartStats, tempData, Brushes.OrangeRed, "°C");
-                DrawChartOnCanvas(BatteryChartCanvas, BatteryChartStats, batteryData, Brushes.LimeGreen, "%");
-                DrawChartOnCanvas(FanChartCanvas, FanChartStats, fanData, Brushes.Cyan, "RPM");
+                DrawChartOnCanvas(PowerChartCanvas, PowerChartStats, powerData, ChartPowerBrush, "W");
+                DrawChartOnCanvas(TempChartCanvas, TempChartStats, tempData, ChartTempBrush, "C");
+                DrawChartOnCanvas(BatteryChartCanvas, BatteryChartStats, batteryData, ChartBatteryBrush, "%");
+                DrawChartOnCanvas(FanChartCanvas, FanChartStats, fanData, ChartFanBrush, "RPM");
             }
             catch (Exception ex)
             {
@@ -776,7 +804,7 @@ namespace OmenCore.Controls
             }
         }
 
-        private void DrawChartOnCanvas(Canvas canvas, TextBlock statsBlock, List<HistoricalDataPoint> data, Brush lineColor, string unit)
+        private void DrawChartOnCanvas(Canvas canvas, TextBlock statsBlock, List<HistoricalDataPoint> data, SolidColorBrush lineColor, string unit)
         {
             canvas.Children.Clear();
 
@@ -784,15 +812,18 @@ namespace OmenCore.Controls
             {
                 var noData = new TextBlock
                 {
-                    Text = "⏱️ Collecting data...",
-                    Foreground = new SolidColorBrush(Color.FromRgb(150, 150, 150)),
+                    Text = "Collecting data...",
+                    Foreground = ChartMutedTextBrush,
                     FontSize = 14,
                     FontWeight = FontWeights.SemiBold
                 };
-                Canvas.SetLeft(noData, canvas.Width / 2 - 70);
-                Canvas.SetTop(noData, canvas.Height / 2 - 10);
+                var emptyStateHeight = canvas.Height > 0 ? canvas.Height : 150;
+                var emptyStateWidth = canvas.ActualWidth > 50 ? canvas.ActualWidth : 280;
+                Canvas.SetLeft(noData, Math.Max(12, emptyStateWidth / 2 - 60));
+                Canvas.SetTop(noData, emptyStateHeight / 2 - 10);
                 canvas.Children.Add(noData);
                 statsBlock.Text = "Waiting for historical data (displays after 2+ samples)";
+                statsBlock.Foreground = ChartMutedTextBrush;
                 return;
             }
 
@@ -811,18 +842,15 @@ namespace OmenCore.Controls
             valueRange = maxValue - minValue;
 
             // Draw grid lines with labels
-            var gridBrush = new SolidColorBrush(Color.FromRgb(60, 60, 70));
-            var labelBrush = new SolidColorBrush(Color.FromRgb(120, 120, 130));
-            
             for (int i = 0; i <= 4; i++)
             {
                 var y = (i * height / 4);
                 var line = new Line
                 {
                     X1 = 0, Y1 = y, X2 = width, Y2 = y,
-                    Stroke = gridBrush,
+                    Stroke = ChartGridBrush,
                     StrokeThickness = 0.5,
-                    StrokeDashArray = new DoubleCollection { 4, 2 }
+                    StrokeDashArray = ChartGridDash
                 };
                 canvas.Children.Add(line);
 
@@ -831,7 +859,7 @@ namespace OmenCore.Controls
                 var label = new TextBlock
                 {
                     Text = $"{value:F0}",
-                    Foreground = labelBrush,
+                    Foreground = ChartLabelBrush,
                     FontSize = 9,
                     FontWeight = FontWeights.SemiBold
                 };
@@ -843,8 +871,7 @@ namespace OmenCore.Controls
             // Draw filled area under the line first
             var polygon = new Polygon
             {
-                Fill = new SolidColorBrush(Color.FromArgb(30, ((SolidColorBrush)lineColor).Color.R,
-                    ((SolidColorBrush)lineColor).Color.G, ((SolidColorBrush)lineColor).Color.B)),
+                Fill = new SolidColorBrush(Color.FromArgb(34, lineColor.Color.R, lineColor.Color.G, lineColor.Color.B)),
                 Stroke = null
             };
             polygon.Points.Add(new Point(0, height));
@@ -857,10 +884,10 @@ namespace OmenCore.Controls
                 StrokeLineJoin = PenLineJoin.Round,
                 Effect = new System.Windows.Media.Effects.DropShadowEffect
                 {
-                    Color = ((SolidColorBrush)lineColor).Color,
-                    BlurRadius = 8,
+                    Color = lineColor.Color,
+                    BlurRadius = 7,
                     ShadowDepth = 0,
-                    Opacity = 0.6
+                    Opacity = 0.5
                 }
             };
 
@@ -886,7 +913,7 @@ namespace OmenCore.Controls
                     Width = 6,
                     Height = 6,
                     Fill = lineColor,
-                    Stroke = Brushes.White,
+                    Stroke = ChartMarkerStrokeBrush,
                     StrokeThickness = 2
                 };
                 Canvas.SetLeft(marker, lastPoint.X - 3);
@@ -898,10 +925,10 @@ namespace OmenCore.Controls
                 var valueLabel = new TextBlock
                 {
                     Text = $"{currentValue:F1} {unit}",
-                    Foreground = Brushes.White,
+                    Foreground = ChartMarkerStrokeBrush,
                     FontSize = 11,
                     FontWeight = FontWeights.Bold,
-                    Background = new SolidColorBrush(Color.FromArgb(180, 40, 40, 50)),
+                    Background = ChartValueLabelBackgroundBrush,
                     Padding = new Thickness(6, 2, 6, 2)
                 };
                 Canvas.SetLeft(valueLabel, Math.Min(width - 80, lastPoint.X + 10));
@@ -912,11 +939,10 @@ namespace OmenCore.Controls
             // Enhanced stats with more information
             var avgValue = data.Average(p => p.Value);
             var trend = data.Count > 10 ? data[data.Count - 1].Value - data[data.Count - 10].Value : 0;
-            var trendIcon = Math.Abs(trend) < 0.1 ? "→" : trend > 0 ? "↗" : "↘";
-            var trendColor = Math.Abs(trend) < 0.1 ? "gray" : trend > 0 ? "orange" : "lime";
+            var trendLabel = Math.Abs(trend) < 0.1 ? "flat" : trend > 0 ? "up" : "down";
             
-            statsBlock.Text = $"📊 {minValue:F1}-{maxValue:F1} {unit}  •  Avg: {avgValue:F1} {unit}  •  {data.Count} samples  •  Trend: {trendIcon} {trend:+0.0;-0.0;0.0} {unit}";
-            statsBlock.Foreground = new SolidColorBrush(Color.FromRgb(150, 150, 160));
+            statsBlock.Text = $"{minValue:F1}-{maxValue:F1} {unit} | Avg {avgValue:F1} {unit} | {data.Count} samples | Trend {trendLabel} {trend:+0.0;-0.0;0.0} {unit}";
+            statsBlock.Foreground = ChartMutedTextBrush;
         }
 
         private async void RefreshDataButton_Click(object sender, RoutedEventArgs e)
@@ -957,7 +983,7 @@ namespace OmenCore.Controls
             return chartType switch
             {
                 ChartType.PowerConsumption => "Power Consumption History",
-                ChartType.BatteryHealth => "Battery Health History",
+                ChartType.BatteryHealth => "Battery Charge History",
                 ChartType.Temperature => "Temperature History",
                 ChartType.FanSpeeds => "Fan Speeds History",
                 _ => "Historical Data"

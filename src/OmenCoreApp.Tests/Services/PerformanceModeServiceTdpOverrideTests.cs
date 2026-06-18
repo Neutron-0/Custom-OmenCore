@@ -465,6 +465,40 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public void Apply_With878CModelCapabilities_BlocksDirectEcPowerLimits_AndUsesWmiFallback()
+        {
+            var fan = new RecordingWmiFanController();
+            var ec = new RecordingEcAccess();
+            var powerLimits = new PowerLimitController(ec);
+            var caps = ModelCapabilityDatabase.GetCapabilities("878C");
+            var service = BuildService(fan, powerLimits, caps);
+
+            service.AllowDecoupledWmiThermalPolicyFallback.Should().BeTrue();
+
+            service.LinkFanToPerformanceMode = false;
+            service.Apply(new PerformanceMode
+            {
+                Name = "Performance",
+                CpuPowerLimitWatts = 65,
+                GpuPowerLimitWatts = 80
+            });
+
+            ec.WriteCount.Should().Be(0,
+                "878C direct EC power/fan writes are not field-validated and should not be used for Quick Profile routing");
+            fan.SetPerformanceModeCallCount.Should().Be(1,
+                "878C must actively send the OEM WMI thermal/performance policy so Performance is not reduced to a Windows power-plan-only change");
+            fan.LastPerformanceModeName.Should().Be("Performance");
+            service.EcPowerControlAvailable.Should().BeFalse();
+
+            var trace = service.GetApplyTraceSnapshot().Should().ContainSingle().Subject;
+            trace.ProductId.Should().Be("878C");
+            trace.EcPowerLimitAvailable.Should().BeFalse();
+            trace.EcPowerLimitSkipReason.Should().Contain("Direct EC writes disabled");
+            trace.WmiPolicyFallbackAttempted.Should().BeTrue();
+            trace.WmiPolicyFallbackApplied.Should().BeTrue();
+        }
+
+        [Fact]
         public void ModeApplied_WhenSubscriberThrows_StillNotifiesRemainingSubscribers()
         {
             var service = BuildService();

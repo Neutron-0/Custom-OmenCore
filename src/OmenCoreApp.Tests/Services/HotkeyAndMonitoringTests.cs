@@ -518,6 +518,41 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public async Task UpdateDashboardMetrics_DoesNotTreatBatteryChargeAsBatteryHealth()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var bridge = new AdaptiveBridgeStub();
+            var prefs = new MonitoringPreferences();
+            var svc = new HardwareMonitoringService(bridge, logging, prefs, new ResumeRecoveryDiagnosticsService());
+            var updateMethod = typeof(HardwareMonitoringService).GetMethod("UpdateDashboardMetrics", BindingFlags.Instance | BindingFlags.NonPublic);
+
+            updateMethod.Should().NotBeNull();
+
+            updateMethod!.Invoke(svc, new object[]
+            {
+                new MonitoringSample
+                {
+                    CpuTemperatureC = 50,
+                    GpuTemperatureC = 55,
+                    CpuLoadPercent = 20,
+                    GpuLoadPercent = 25,
+                    BatteryChargePercent = 68
+                }
+            });
+
+            var metrics = await svc.GetCurrentMetricsAsync();
+            var alerts = (await svc.GetActiveAlertsAsync()).ToList();
+            var batteryHistory = (await svc.GetHistoricalDataAsync(ChartType.BatteryHealth, TimeSpan.FromMinutes(5))).ToList();
+
+            metrics.BatteryChargePercentage.Should().Be(68);
+            metrics.BatteryHealthPercentage.Should().Be(-1, "charge percent is not a battery health estimate");
+            alerts.Should().NotContain(alert => alert.Title == "Battery Health Warning");
+            batteryHistory.Should().ContainSingle(point => point.Value == 68);
+        }
+
+        [Fact]
         public async Task GetHistoricalDataAsync_DownsamplesLargeChartQueries()
         {
             var logging = new LoggingService();

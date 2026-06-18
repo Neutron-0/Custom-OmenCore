@@ -31,6 +31,8 @@ namespace OmenCore.Services.Diagnostics
         private readonly Func<RgbManager?>? _rgbManagerProvider;
         private readonly RuntimeEcOperationCoordinator _ecOperationCoordinator;
         private readonly PerformanceModeService? _performanceModeService;
+        private readonly HotkeyService? _hotkeyService;
+        private readonly OmenKeyService? _omenKeyService;
 
         public DiagnosticExportService(
             LoggingService logging,
@@ -41,7 +43,9 @@ namespace OmenCore.Services.Diagnostics
             KeyboardLightingService? keyboardLightingService = null,
             Func<RgbManager?>? rgbManagerProvider = null,
             RuntimeEcOperationCoordinator? ecOperationCoordinator = null,
-            PerformanceModeService? performanceModeService = null)
+            PerformanceModeService? performanceModeService = null,
+            HotkeyService? hotkeyService = null,
+            OmenKeyService? omenKeyService = null)
         {
             _logging = logging;
             _logsDirectory = logsDirectory;
@@ -52,6 +56,8 @@ namespace OmenCore.Services.Diagnostics
             _rgbManagerProvider = rgbManagerProvider;
             _ecOperationCoordinator = ecOperationCoordinator ?? new RuntimeEcOperationCoordinator(logging);
             _performanceModeService = performanceModeService;
+            _hotkeyService = hotkeyService;
+            _omenKeyService = omenKeyService;
         }
 
         /// <summary>
@@ -87,6 +93,11 @@ namespace OmenCore.Services.Diagnostics
                     CollectBoundedPerformanceSnapshotsAsync(exportPath),
                     CollectBackgroundTimerSnapshotAsync(exportPath),
                     CollectLaunchReadinessSnapshotAsync(exportPath, effectiveMonitoringService, effectiveFanService),
+                    CollectCoreControlReadinessAsync(exportPath, effectiveMonitoringService, effectiveFanService, wmiController),
+                    CollectOmenMonRebornParityAsync(exportPath, effectiveMonitoringService, effectiveFanService),
+                    CollectFieldValidationScriptAsync(exportPath, effectiveMonitoringService, effectiveFanService),
+                    CollectPriorityModelValidationCardsAsync(exportPath, effectiveMonitoringService, effectiveFanService),
+                    CollectRcValidationMatrixAsync(exportPath),
                     CollectRgbControlPathAsync(exportPath),
                     CollectModelIdentityTraceAsync(exportPath),
                     CollectTuningSafetySnapshotAsync(exportPath),
@@ -405,9 +416,9 @@ namespace OmenCore.Services.Diagnostics
             try
             {
                 var sb = new StringBuilder();
-                sb.AppendLine("=== 3.7.1 LAUNCH READINESS SNAPSHOT ===");
+                sb.AppendLine("=== 3.8.0 LAUNCH READINESS SNAPSHOT ===");
                 sb.AppendLine($"CapturedUtc: {DateTime.UtcNow:O}");
-                sb.AppendLine("Purpose: summarize the 3.7.1 field-validation state for fan recovery, performance-mode routing, CPU authority, RGB support, and hardware-worker containment.");
+                sb.AppendLine("Purpose: summarize the 3.8.0 field-validation state for fan recovery, performance-mode routing, CPU authority, RGB support, and hardware-worker containment.");
                 sb.AppendLine();
 
                 sb.AppendLine("[Fan Recovery]");
@@ -477,13 +488,896 @@ namespace OmenCore.Services.Diagnostics
                 sb.AppendLine("Expected hybrid behavior: unstable AMD ADL-backed iGPU telemetry can be quarantined while NVIDIA, CPU, fan, memory, battery, and storage telemetry remain active.");
 
                 File.WriteAllText(Path.Combine(exportPath, "launch-readiness.txt"), sb.ToString());
-                _logging.Info("Collected 3.7.1 launch readiness snapshot");
+                _logging.Info("Collected 3.8.0 launch readiness snapshot");
                 await Task.CompletedTask;
             }
             catch (Exception ex)
             {
                 _logging.Warn($"Failed to collect launch readiness snapshot: {ex.Message}");
             }
+        }
+
+        private async Task CollectCoreControlReadinessAsync(
+            string exportPath,
+            HardwareMonitoringService? monitoringService,
+            FanService? fanService,
+            object? wmiController)
+        {
+            try
+            {
+                var report = BuildCoreControlReadinessReport(monitoringService, fanService, wmiController);
+                File.WriteAllText(Path.Combine(exportPath, "core-control-readiness.txt"), report);
+                _logging.Info("Collected core control readiness snapshot");
+                await Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                _logging.Warn($"Failed to collect core control readiness snapshot: {ex.Message}");
+            }
+        }
+
+        public string BuildCoreControlReadinessReport(
+            HardwareMonitoringService? monitoringService = null,
+            FanService? fanService = null,
+            object? wmiController = null)
+        {
+            var (config, source) = LoadConfigForDiagnostics();
+            var sb = new StringBuilder();
+
+            sb.AppendLine("=== CORE CONTROL READINESS ===");
+            sb.AppendLine($"CapturedUtc: {DateTime.UtcNow:O}");
+            sb.AppendLine("Purpose: summarize whether OmenCore can safely and truthfully control fans, RGB, overclocking, and undervolting on this session.");
+            sb.AppendLine($"Config source: {source}");
+            sb.AppendLine();
+
+            AppendFanReadiness(sb, fanService, wmiController, config);
+            AppendRgbReadiness(sb);
+            AppendTuningReadiness(sb, config);
+            AppendMonitoringReadiness(sb, monitoringService);
+            AppendHotkeyReadiness(sb, config);
+            AppendCoreControlNextActions(sb, fanService);
+
+            return sb.ToString();
+        }
+
+        private void AppendFanReadiness(StringBuilder sb, FanService? fanService, object? wmiController, AppConfig config)
+        {
+            sb.AppendLine("[Fans]");
+            if (fanService == null)
+            {
+                sb.AppendLine("Status: service unavailable");
+                sb.AppendLine("Readiness: blocked until fan service initializes");
+            }
+            else
+            {
+                var history = fanService.GetCommandHistorySnapshot();
+                var lastCommand = history.LastOrDefault();
+
+                sb.AppendLine($"Backend: {fanService.Backend}");
+                sb.AppendLine($"WritesAvailable: {FormatBool(fanService.FanWritesAvailable)}");
+                sb.AppendLine($"ManualDirectAvailable: {FormatBool(fanService.ManualFanControlAvailable)}");
+                sb.AppendLine($"CurvesAvailable: {FormatBool(fanService.FanCurvesAvailable)}");
+                sb.AppendLine($"CurrentMode: {fanService.GetCurrentFanMode() ?? "<unknown>"}");
+                sb.AppendLine($"ActivePreset: {FormatValue(fanService.ActivePresetName)}");
+                sb.AppendLine($"CurveActive: {FormatBool(fanService.IsCurveActive)}");
+                sb.AppendLine($"HoldActive: {FormatBool(fanService.IsHoldActive)}");
+                sb.AppendLine($"ThermalProtectionActive: {FormatBool(fanService.IsThermalProtectionActive)}");
+                sb.AppendLine($"DiagnosticModeActive: {FormatBool(fanService.IsDiagnosticModeActive)}");
+                sb.AppendLine($"SavedStartupFanPreset: {FormatValue(config.LastFanPresetName)}");
+                sb.AppendLine($"SavedIndependentCurvesEnabled: {FormatBool(config.IndependentFanCurvesEnabled)}");
+                sb.AppendLine($"FanCommandHistoryCount: {history.Count}");
+
+                if (lastCommand == null)
+                {
+                    sb.AppendLine("LastCommand: none recorded this session");
+                }
+                else
+                {
+                    sb.AppendLine($"LastCommand: {lastCommand.TimestampUtc:O} | {(lastCommand.Success ? "OK" : "FAIL")} | {lastCommand.Command} -> {lastCommand.Target}");
+                    sb.AppendLine($"LastCommandDetail: {FormatValue(lastCommand.Details)}");
+                    sb.AppendLine($"LastCommandState: backend={lastCommand.Backend}; mode={lastCommand.FanMode}; preset={lastCommand.ActivePresetName ?? "<none>"}; curve={lastCommand.CurveActive}; hold={lastCommand.HoldActive}; diagnostic={lastCommand.DiagnosticModeActive}; thermal={lastCommand.ThermalProtectionActive}");
+                    sb.AppendLine($"LastCommandModel: {FormatValue(lastCommand.ModelName)} ({FormatValue(lastCommand.ProductId)})");
+                    sb.AppendLine($"LastCommandGates: writes={FormatBool(lastCommand.FanWritesAvailable)}; curves={FormatBool(lastCommand.FanCurvesAvailable)}; manual={FormatBool(lastCommand.ManualFanControlAvailable)}; desktopBlocked={FormatBool(lastCommand.DesktopFanWritesBlocked)}");
+                    sb.AppendLine($"LastCommandReadback: {FormatValue(lastCommand.TelemetrySummary)}; rawPrimaryRpm={FormatNullableInt(lastCommand.RawPrimaryFanRpm)}; reportedPrimaryDuty={FormatNullableInt(lastCommand.ReportedPrimaryFanDutyPercent)}");
+                }
+            }
+
+            if (wmiController != null)
+            {
+                sb.AppendLine("WmiController:");
+                AppendReflectedProperty(sb, wmiController, "IsAvailable");
+                AppendReflectedProperty(sb, wmiController, "Status");
+                AppendReflectedProperty(sb, wmiController, "FanCount");
+                AppendReflectedProperty(sb, wmiController, "IsManualControlActive");
+                AppendReflectedProperty(sb, wmiController, "CommandsIneffective");
+                AppendReflectedProperty(sb, wmiController, "VerifyFailCount");
+                AppendReflectedProperty(sb, wmiController, "LastMaxModeExternalResetUtc");
+                AppendReflectedProperty(sb, wmiController, "LastMaxModeExternalResetDetails");
+            }
+
+            sb.AppendLine("RecoveryAction: use Restore OEM Auto before retesting Max/Direct/Curve if ownership or RPM readback looks wrong.");
+            sb.AppendLine();
+        }
+
+        private void AppendRgbReadiness(StringBuilder sb)
+        {
+            sb.AppendLine("[RGB]");
+            var (config, _) = LoadConfigForDiagnostics();
+            var observedRgb = config.KeyboardLighting ?? new KeyboardLightingSettings();
+            if (_keyboardLightingService == null)
+            {
+                sb.AppendLine("HpKeyboardService: unavailable");
+            }
+            else
+            {
+                sb.AppendLine($"HpKeyboardAvailable: {FormatBool(_keyboardLightingService.IsAvailable)}");
+                sb.AppendLine($"HpKeyboardBackend: {_keyboardLightingService.BackendType}");
+                sb.AppendLine($"HpKeyboardPerKeyActive: {FormatBool(_keyboardLightingService.IsPerKey)}");
+                sb.AppendLine($"HpKeyboardPerKeyCapableHardware: {FormatBool(_keyboardLightingService.IsPerKeyCapableHardware)}");
+                sb.AppendLine($"LastApplySurface: {_keyboardLightingService.LastApplySurface}");
+                sb.AppendLine($"LastApplyStatus: {_keyboardLightingService.LastApplyStatus}");
+                sb.AppendLine("ProbeGuidance: apply a safe obvious static color and record whether keyboard zones, per-key keys, light bar, or only backlight changed.");
+            }
+            AppendRgbObservedSurface(sb, observedRgb);
+
+            var rgbManager = SafeGetRgbManager();
+            if (rgbManager == null)
+            {
+                sb.AppendLine("ExternalProviders: RGB manager unavailable or lazy-not-initialized");
+            }
+            else
+            {
+                var status = rgbManager.GetStatus();
+                sb.AppendLine($"ExternalProviderCount: {status.TotalProviders}");
+                sb.AppendLine($"ExternalProvidersAvailable: {status.AvailableProviders}");
+                sb.AppendLine($"ExternalRgbDeviceCount: {status.TotalDevices}");
+                foreach (var provider in status.ProviderStatuses.OrderBy(p => p.ProviderName, StringComparer.OrdinalIgnoreCase))
+                {
+                    sb.AppendLine($"  {provider.ProviderName}: available={provider.IsAvailable}; connected={provider.IsConnected}; devices={provider.DeviceCount}; status={provider.ConnectionStatus}; detail={provider.StatusDetail}");
+                }
+            }
+
+            var conflicts = GetRunningRgbConflictProcesses();
+            sb.AppendLine($"KnownHpRgbConflictProcesses: {(conflicts.Count == 0 ? "none" : string.Join(", ", conflicts))}");
+            sb.AppendLine();
+        }
+
+        private void AppendTuningReadiness(StringBuilder sb, AppConfig config)
+        {
+            var undervolt = config.Undervolt ?? new UndervoltPreferences();
+            var gpuOc = config.GpuOc ?? new GpuOcSettings();
+
+            sb.AppendLine("[Tuning / OC / Undervolt]");
+            sb.AppendLine($"StartupHardwareRestoreEnabled: {FormatBool(config.EnableStartupHardwareRestore)}");
+            sb.AppendLine($"StartupRestoreCategories: {StartupRestorePolicy.BuildSummary(config)}");
+            sb.AppendLine($"StartupRestoreExtraGuardAllowed: {FormatBool(config.AllowStartupRestoreOnOmen16OrVictus)}");
+            sb.AppendLine($"SavedPerformanceMode: {FormatValue(config.LastPerformanceModeName)}");
+            sb.AppendLine($"SavedGpuPowerBoostLevel: {FormatValue(config.LastGpuPowerBoostLevel)}");
+            sb.AppendLine($"SavedCpuPL1: {FormatNullableWatts(config.LastCpuPl1Watts)}");
+            sb.AppendLine($"SavedCpuPL2: {FormatNullableWatts(config.LastCpuPl2Watts)}");
+            sb.AppendLine($"SavedTccOffset: {FormatNullableDegrees(config.LastTccOffset)}");
+            sb.AppendLine($"SavedGpuOcProfile: {FormatValue(config.LastGpuOcProfileName)}");
+            sb.AppendLine($"UndervoltApplyOnStartup: {FormatBool(undervolt.ApplyOnStartup)}");
+            sb.AppendLine($"UndervoltPendingConfirmation: {FormatBool(undervolt.StartupPendingConfirmation)}");
+            sb.AppendLine($"UndervoltRecoveryRequired: {FormatBool(TuningStartupRecoveryGuard.ShouldSafeReset(undervolt))}");
+            sb.AppendLine($"GpuOcApplyOnStartup: {FormatBool(gpuOc.ApplyOnStartup)}");
+            sb.AppendLine($"GpuOcPendingConfirmation: {FormatBool(gpuOc.StartupPendingConfirmation)}");
+            sb.AppendLine($"GpuOcRecoveryRequired: {FormatBool(TuningStartupRecoveryGuard.ShouldSafeReset(gpuOc))}");
+            sb.AppendLine($"RollbackBundleAvailable: yes");
+            sb.AppendLine($"RollbackTargets: performance={TuningRollbackCoordinator.SafePerformanceMode}; fan={TuningRollbackCoordinator.SafeFanPresetName}; gpuPower={TuningRollbackCoordinator.SafeGpuPowerBoostLevel}; tcc={TuningRollbackCoordinator.SafeTccOffset} C; undervolt=0 mV; gpuOc=0 MHz/100%; amdStapm={TuningRollbackCoordinator.SafeAmdStapmWatts} W; amdTemp={TuningRollbackCoordinator.SafeAmdTempLimitC} C");
+            sb.AppendLine($"RollbackCpuPowerTarget: PL1={FormatNullableWatts(config.LastCpuPl1Watts)}; PL2={FormatNullableWatts(config.LastCpuPl2Watts)}; if startup-read values are unavailable, saved PL restore is cleared");
+
+            sb.AppendLine("PerformanceApplyTrace:");
+            if (_performanceModeService == null)
+            {
+                sb.AppendLine("  Performance mode service unavailable.");
+            }
+            else
+            {
+                var trace = _performanceModeService.GetApplyTraceSnapshot();
+                sb.AppendLine($"  TraceCount: {trace.Count}");
+                foreach (var entry in trace.TakeLast(5))
+                {
+                    sb.AppendLine($"  {entry.TimestampUtc:O} | requested={entry.RequestedModeName} | effective={entry.EffectiveModeName} | ecPowerApplied={entry.EcPowerLimitApplied} | wmiFallbackApplied={entry.WmiPolicyFallbackApplied} | fanAction={entry.FanPolicyAction}");
+                }
+            }
+
+            sb.AppendLine("ReadbackRule: every tuning apply should show requested value, readback value, and locked/unsupported reason before being considered verified.");
+            sb.AppendLine();
+        }
+
+        private static void AppendMonitoringReadiness(StringBuilder sb, HardwareMonitoringService? monitoringService)
+        {
+            sb.AppendLine("[Monitoring / Readback]");
+            if (monitoringService == null)
+            {
+                sb.AppendLine("MonitoringService: unavailable");
+            }
+            else
+            {
+                sb.AppendLine($"Source: {monitoringService.MonitoringSource}");
+                sb.AppendLine($"Health: {monitoringService.HealthStatus}");
+                sb.AppendLine($"LastSampleAgeSeconds: {FormatMaybeInfiniteSeconds(monitoringService.LastSampleAge)}");
+                sb.AppendLine($"CadenceReason: {monitoringService.CurrentCadenceReason}");
+                sb.AppendLine($"LowOverheadMode: {FormatBool(monitoringService.LowOverheadMode)}");
+            }
+            sb.AppendLine();
+        }
+
+        private void AppendHotkeyReadiness(StringBuilder sb, AppConfig config)
+        {
+            sb.AppendLine("[Hotkeys / OMEN Key]");
+            sb.AppendLine($"ConfigHotkeysEnabled: {FormatBool(config.Monitoring?.HotkeysEnabled ?? true)}");
+            sb.AppendLine($"ConfigWindowFocusedHotkeys: {FormatBool(config.Monitoring?.WindowFocusedHotkeys ?? true)}");
+            sb.AppendLine($"ConfigOmenKeyInterceptionEnabled: {FormatBool(config.Features?.OmenKeyInterceptionEnabled ?? config.OmenKeyEnabled)}");
+            sb.AppendLine($"ConfigOmenKeyAction: {FormatValue(config.Features?.OmenKeyAction ?? config.OmenKeyAction)}");
+            sb.AppendLine($"ConfigStrictOmenKeyMode: {FormatBool(config.StrictOmenKeyMode)}");
+            sb.AppendLine($"ConfigFirmwareFnPProfileCycle: {FormatBool(config.Features?.EnableFirmwareFnPProfileCycle == true)}");
+            sb.AppendLine($"ConfigSuppressHotkeysInRdp: {FormatBool(config.Features?.SuppressHotkeysInRdp == true)}");
+
+            if (_hotkeyService == null)
+            {
+                sb.AppendLine("HotkeyService: unavailable");
+            }
+            else
+            {
+                var hotkeys = _hotkeyService.GetDiagnosticSnapshot();
+                sb.AppendLine($"HotkeyServiceEnabled: {FormatBool(hotkeys.Enabled)}");
+                sb.AppendLine($"HotkeyWindowHandleReady: {FormatBool(hotkeys.WindowHandleReady)}");
+                sb.AppendLine($"RegisteredHotkeyCount: {hotkeys.RegisteredCount}");
+                sb.AppendLine($"PendingHotkeyCount: {hotkeys.PendingCount}");
+                AppendHotkeyBindings(sb, "RegisteredHotkeys", hotkeys.RegisteredBindings);
+                AppendHotkeyBindings(sb, "PendingHotkeys", hotkeys.PendingBindings);
+            }
+
+            if (_omenKeyService == null)
+            {
+                sb.AppendLine("OmenKeyService: unavailable");
+            }
+            else
+            {
+                var omenKey = _omenKeyService.GetDiagnosticSnapshot();
+                sb.AppendLine($"OmenKeyEnabled: {FormatBool(omenKey.Enabled)}");
+                sb.AppendLine($"OmenKeyAction: {omenKey.Action}");
+                sb.AppendLine($"OmenKeyExternalAppConfigured: {FormatBool(omenKey.ExternalAppConfigured)}");
+                sb.AppendLine($"OmenKeyHookActive: {FormatBool(omenKey.HookActive)}");
+                sb.AppendLine($"OmenKeyWmiWatcherActive: {FormatBool(omenKey.WmiWatcherActive)}");
+                sb.AppendLine($"OmenKeyStrictMode: {FormatBool(omenKey.StrictMode)}");
+                sb.AppendLine($"OmenKeyFirmwareFnPProfileCycleEnabled: {FormatBool(omenKey.FirmwareFnPProfileCycleEnabled)}");
+                sb.AppendLine($"OmenKeySuppressInRdp: {FormatBool(omenKey.SuppressInRdp)}");
+                if (omenKey.LastNeverInterceptAgeMs.HasValue)
+                {
+                    sb.AppendLine($"LastNeverInterceptKey: vk=0x{omenKey.LastNeverInterceptVkCode:X2}; scan=0x{omenKey.LastNeverInterceptScanCode:X4}; ageMs={omenKey.LastNeverInterceptAgeMs.Value:F0}");
+                }
+                else
+                {
+                    sb.AppendLine("LastNeverInterceptKey: none recorded");
+                }
+            }
+
+            sb.AppendLine("ValidationRule: press the physical OMEN key and profile-cycle hotkey once, then verify logs show the expected hook/WMI source and no never-intercept suppression.");
+            sb.AppendLine();
+        }
+
+        private static void AppendHotkeyBindings(StringBuilder sb, string label, HotkeyDiagnosticBinding[] bindings)
+        {
+            if (bindings.Length == 0)
+            {
+                sb.AppendLine($"{label}: none");
+                return;
+            }
+
+            sb.AppendLine($"{label}:");
+            foreach (var binding in bindings)
+            {
+                var id = binding.Id > 0 ? binding.Id.ToString() : "pending";
+                sb.AppendLine($"  {binding.Action}: {binding.Chord}; id={id}; enabled={FormatBool(binding.IsEnabled)}");
+            }
+        }
+
+        private static void AppendCoreControlNextActions(StringBuilder sb, FanService? fanService)
+        {
+            sb.AppendLine("[Suggested Next Validation Actions]");
+            if (fanService?.FanWritesAvailable == true)
+            {
+                sb.AppendLine("- Fan: Restore OEM Auto, then test Max, Direct 40/60/80%, Auto, and a curve ramp while watching RPM/level readback.");
+            }
+            else
+            {
+                sb.AppendLine("- Fan: export model identity and backend status before enabling any manual/curve controls.");
+            }
+            sb.AppendLine("- RGB: apply a safe obvious static color and record which physical surface changed.");
+            sb.AppendLine("- Tuning: apply one setting at a time and capture requested/readback/locked state after each apply.");
+            sb.AppendLine("- Hotkeys: test Ctrl+Shift profile/fan hotkeys plus the physical OMEN key, then confirm hook/WMI source in diagnostics.");
+            sb.AppendLine("- Startup restore: keep disabled until manual readback passes for fan/performance/RGB/tuning on this model.");
+        }
+
+        private async Task CollectOmenMonRebornParityAsync(
+            string exportPath,
+            HardwareMonitoringService? monitoringService,
+            FanService? fanService)
+        {
+            try
+            {
+                var report = BuildOmenMonRebornParityReport(monitoringService, fanService);
+                File.WriteAllText(Path.Combine(exportPath, "omenmon-reborn-parity.txt"), report);
+                _logging.Info("Collected OmenMon-Reborn parity snapshot");
+                await Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                _logging.Warn($"Failed to collect OmenMon-Reborn parity snapshot: {ex.Message}");
+            }
+        }
+
+        public string BuildOmenMonRebornParityReport(
+            HardwareMonitoringService? monitoringService = null,
+            FanService? fanService = null)
+        {
+            var (config, source) = LoadConfigForDiagnostics();
+            var systemInfo = SafeGetSystemInfo();
+            var identity = ModelIdentityResolutionService.Build(systemInfo, capabilities: null, logging: _logging);
+            var calibration = new FanCalibrationStorageService(_logging);
+            var normalizedModelId = FanCalibrationStorageService.NormalizeModelId(
+                identity.CapabilityProductId != "Unknown"
+                    ? identity.CapabilityProductId
+                    : identity.RawWmiModel);
+            var hasCalibration = calibration.HasCalibration(normalizedModelId);
+
+            var sb = new StringBuilder();
+            sb.AppendLine("=== OMENMON-REBORN PARITY SNAPSHOT ===");
+            sb.AppendLine($"CapturedUtc: {DateTime.UtcNow:O}");
+            sb.AppendLine("Purpose: map user expectations from OmenMon-Reborn onto OmenCore's current safe-control surface without importing GPL implementation code.");
+            sb.AppendLine($"Config source: {source}");
+            sb.AppendLine();
+
+            sb.AppendLine("[Source Expectations]");
+            sb.AppendLine("- Lightweight background operation with command/probe-style diagnostics.");
+            sb.AppendLine("- Dynamic model truthfulness instead of unsafe hardcoded EC layouts.");
+            sb.AppendLine("- Read-only unknown-model probing before any writes.");
+            sb.AppendLine("- Fan calibration evidence for RPM/register/layout promotion.");
+            sb.AppendLine("- EC contention hardening and clean failed-read handling.");
+            sb.AppendLine("- Fan, RGB/backlight, OMEN key, and compact tray workflows.");
+            sb.AppendLine();
+
+            sb.AppendLine("[OmenCore Current Equivalents]");
+            sb.AppendLine($"ModelIdentity: {identity.Summary}");
+            sb.AppendLine($"IdentityConfidence: {identity.Confidence}; source={identity.ResolutionSource}; userVerified={FormatBool(identity.IsUserVerified)}");
+            sb.AppendLine($"CapabilityProductId: {identity.CapabilityProductId}");
+            sb.AppendLine($"ModelWarning: {FormatValue(identity.WarningText)}");
+            sb.AppendLine($"FanBackend: {fanService?.Backend ?? "unavailable"}");
+            sb.AppendLine($"FanWritesAvailable: {FormatBool(fanService?.FanWritesAvailable == true)}");
+            sb.AppendLine($"ManualDirectAvailable: {FormatBool(fanService?.ManualFanControlAvailable == true)}");
+            sb.AppendLine($"FanCurvesAvailable: {FormatBool(fanService?.FanCurvesAvailable == true)}");
+            sb.AppendLine($"MonitoringSource: {monitoringService?.MonitoringSource ?? "unavailable"}");
+            sb.AppendLine($"MonitoringHealth: {monitoringService?.HealthStatus.ToString() ?? "unavailable"}");
+            sb.AppendLine($"LowOverheadMode: {FormatBool(monitoringService?.LowOverheadMode == true)}");
+            sb.AppendLine($"StartupHardwareRestoreEnabled: {FormatBool(config.EnableStartupHardwareRestore)}");
+            sb.AppendLine($"FanCalibrationModelKey: {normalizedModelId}");
+            sb.AppendLine($"FanCalibrationAvailable: {FormatBool(hasCalibration)}");
+            sb.AppendLine("EcCoordination: runtime EC operation coordinator serializes OmenCore EC sections; PawnIO backend uses Global\\Access_EC for cross-process EC access.");
+            sb.AppendLine();
+
+            sb.AppendLine("[Parity Matrix]");
+            AppendParityRow(sb, "Probe report", "Implemented",
+                "Diagnostic export includes identity-resolution-trace.txt, core-control-readiness.txt, launch-readiness.txt, rgb-control-path.txt, tuning-safety.txt, and this parity file.");
+            AppendParityRow(sb, "Lightweight background mode", "Partial",
+                "Low-overhead monitoring/tray cadence exists; a dedicated fan-only profile is still planned.");
+            AppendParityRow(sb, "Dynamic model database", identity.IsKnownModel ? "Implemented" : "Partial",
+                identity.IsKnownModel
+                    ? "Exact or inferred model capability resolution exists for this session."
+                    : "Unknown/fallback identity is visible, but OmenCore will not promote unsafe write paths without evidence.");
+            AppendParityRow(sb, "Unknown-model read-only fallback", "Partial",
+                "OmenCore exports identity and readiness data; full EC layout auto-detection remains evidence-gated.");
+            AppendParityRow(sb, "Auto-calibration wizard", hasCalibration ? "Implemented" : "Partial",
+                hasCalibration
+                    ? "A stored fan calibration profile exists for the normalized model key."
+                    : "Fan calibration storage exists, but this session has no stored calibration profile for the normalized model key.");
+            AppendParityRow(sb, "EC contention hardening", "Implemented",
+                "Shared runtime EC coordinator and PawnIO Global\\Access_EC mutex are present; direct read-path garbage handling remains backend-specific.");
+            AppendParityRow(sb, "Fan direct/profile control", fanService?.FanWritesAvailable == true ? "Implemented" : "Degraded",
+                fanService?.FanWritesAvailable == true
+                    ? "Fan writes are available through the active backend."
+                    : "Fan service or write path is unavailable in this diagnostic context.");
+            AppendParityRow(sb, "RGB/backlight surface clarity", _keyboardLightingService != null ? "Partial" : "Degraded",
+                _keyboardLightingService != null
+                    ? $"HP keyboard backend={_keyboardLightingService.BackendType}; lastSurface={_keyboardLightingService.LastApplySurface}; lastStatus={_keyboardLightingService.LastApplyStatus}"
+                    : "Keyboard lighting service unavailable in this diagnostic context.");
+            AppendParityRow(sb, "OMEN key and profile cycling", _hotkeyService != null || _omenKeyService != null ? "Implemented" : "Partial",
+                "Core-control readiness exports registered/pending hotkeys and OMEN-key hook/WMI watcher state when services are available.");
+            sb.AppendLine();
+
+            sb.AppendLine("[Safe Emulation Policy]");
+            sb.AppendLine("- Emulate behavior and diagnostics, not GPL source code.");
+            sb.AppendLine("- Keep unknown EC layouts read-only until a monotonic RPM/readback/calibration report proves the mapping.");
+            sb.AppendLine("- Prefer WMI/firmware APIs for MAX-series and other safety-gated boards.");
+            sb.AppendLine("- Do not promote a model from degraded to verified without ProductId, backend, requested value, readback value, and recovery result.");
+            sb.AppendLine();
+
+            sb.AppendLine("[Next Evidence To Collect]");
+            sb.AppendLine("- Export this bundle after testing Auto, Max, Direct 40/60/80%, curve ramp, and Restore OEM Auto.");
+            sb.AppendLine("- Attach core-control-readiness.txt plus fan command history for fan issues.");
+            sb.AppendLine("- Attach rgb-control-path.txt after applying one obvious static color for RGB/backlight issues.");
+            sb.AppendLine("- For unknown/fallback models, include identity-resolution-trace.txt and any fan calibration output before requesting write-path promotion.");
+
+            return sb.ToString();
+        }
+
+        private static void AppendParityRow(StringBuilder sb, string feature, string status, string notes)
+        {
+            sb.AppendLine($"- {feature}: {status} - {notes}");
+        }
+
+        private SystemInfo SafeGetSystemInfo()
+        {
+            try
+            {
+                return new SystemInfoService(_logging).GetSystemInfo();
+            }
+            catch (Exception ex)
+            {
+                _logging.Warn($"Failed to collect system info for OmenMon-Reborn parity report: {ex.Message}");
+                return new SystemInfo();
+            }
+        }
+
+        private async Task CollectFieldValidationScriptAsync(
+            string exportPath,
+            HardwareMonitoringService? monitoringService,
+            FanService? fanService)
+        {
+            try
+            {
+                var report = BuildFieldValidationScriptReport(monitoringService, fanService);
+                File.WriteAllText(Path.Combine(exportPath, "field-validation-script.txt"), report);
+                _logging.Info("Collected field validation script");
+                await Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                _logging.Warn($"Failed to collect field validation script: {ex.Message}");
+            }
+        }
+
+        public string BuildFieldValidationScriptReport(
+            HardwareMonitoringService? monitoringService = null,
+            FanService? fanService = null)
+        {
+            var (config, source) = LoadConfigForDiagnostics();
+            var systemInfo = SafeGetSystemInfo();
+            var identity = ModelIdentityResolutionService.Build(systemInfo, capabilities: null, logging: _logging);
+            var priorityBoard = ClassifyPriorityBoard(identity.CapabilityProductId, identity.RawBaseboardProduct, identity.RawWmiModel);
+
+            var sb = new StringBuilder();
+            sb.AppendLine("=== FIELD VALIDATION SCRIPT ===");
+            sb.AppendLine($"CapturedUtc: {DateTime.UtcNow:O}");
+            sb.AppendLine("Purpose: repeatable v3.8.0 release-gate smoke script for fan control, RGB, performance mode, profile cycling, hotkeys, and startup restore.");
+            sb.AppendLine($"Config source: {source}");
+            sb.AppendLine();
+
+            sb.AppendLine("[System Under Test]");
+            sb.AppendLine($"ResolvedModel: {identity.Summary}");
+            sb.AppendLine($"ProductId: {identity.CapabilityProductId}");
+            sb.AppendLine($"PriorityBoard: {priorityBoard}");
+            sb.AppendLine($"IdentityConfidence: {identity.Confidence}; source={identity.ResolutionSource}; userVerified={FormatBool(identity.IsUserVerified)}");
+            sb.AppendLine($"FanBackend: {fanService?.Backend ?? "unavailable"}");
+            sb.AppendLine($"FanWritesAvailable: {FormatBool(fanService?.FanWritesAvailable == true)}");
+            sb.AppendLine($"DirectFanAvailable: {FormatBool(fanService?.ManualFanControlAvailable == true)}");
+            sb.AppendLine($"FanCurvesAvailable: {FormatBool(fanService?.FanCurvesAvailable == true)}");
+            sb.AppendLine($"MonitoringSource: {monitoringService?.MonitoringSource ?? "unavailable"}");
+            sb.AppendLine($"MonitoringHealth: {monitoringService?.HealthStatus.ToString() ?? "unavailable"}");
+            sb.AppendLine($"StartupRestoreEnabled: {FormatBool(config.EnableStartupHardwareRestore)}");
+            sb.AppendLine();
+
+            sb.AppendLine("[Before You Start]");
+            sb.AppendLine("1. Keep AC power connected and close HP OMEN Gaming Hub, OMEN Light Studio, OpenRGB, and other RGB/fan tools.");
+            sb.AppendLine("2. Open OmenCore and wait 30 seconds on Dashboard so monitoring source/health can settle.");
+            sb.AppendLine("3. Export diagnostics once before changing controls; keep that as the baseline bundle.");
+            sb.AppendLine("4. If any fan command behaves strangely, click Restore OEM Auto before the next test.");
+            sb.AppendLine();
+
+            sb.AppendLine("[Fan Validation]");
+            sb.AppendLine("1. Restore OEM Auto; record current mode, fan RPM, and fan level readback after 30 seconds.");
+            sb.AppendLine("2. Apply Max; hold for 10 minutes or the longest safe practical window, recording whether RPM/level drops or firmware reclaims control.");
+            sb.AppendLine("3. If Direct is available, test 40%, 60%, and 80%; wait 30 seconds after each Apply and record requested %, RPM, fan level, and any verification warning.");
+            sb.AppendLine("4. If custom curves are available, apply a simple ramp and confirm the UI reports curve ownership without hiding stale/unavailable telemetry.");
+            sb.AppendLine("5. Restore OEM Auto again and confirm fans return to BIOS/OEM behavior.");
+            sb.AppendLine();
+
+            sb.AppendLine("[RGB / Surface Validation]");
+            sb.AppendLine("1. Apply one obvious static color such as red to HP keyboard lighting.");
+            sb.AppendLine("2. Record which physical surface changed: per-key keyboard, four-zone keyboard, single backlight, light bar, external device, or nothing.");
+            sb.AppendLine("3. Apply a second obvious color such as blue and confirm whether the same surface changes.");
+            sb.AppendLine("4. Export diagnostics and include rgb-control-path.txt plus core-control-readiness.txt.");
+            sb.AppendLine();
+
+            sb.AppendLine("[Performance / Tuning Validation]");
+            sb.AppendLine("1. Record current mode, CPU package power, PL1/PL2 where available, GPU power boost state, and any locked/unsupported text.");
+            sb.AppendLine("2. Apply Quiet/Balanced/Performance/Max modes that are exposed for this model; after each, record requested mode, effective mode, readback, and WMI fallback state.");
+            sb.AppendLine("3. Do not enable startup restore for fan/performance/RGB/tuning until manual readback passes on this model.");
+            sb.AppendLine();
+
+            sb.AppendLine("[Profile Cycling And Hotkeys]");
+            sb.AppendLine("1. Test Ctrl+Shift+F for fan mode cycling and Ctrl+Shift+E for General profile cycling.");
+            sb.AppendLine("2. Test Ctrl+Shift+P for performance mode cycling and Win+F12 as the window-open fallback.");
+            sb.AppendLine("3. Press the physical OMEN key once; record whether OmenCore handles it, HP software handles it, or nothing happens.");
+            sb.AppendLine("4. Export diagnostics and include the Hotkeys / OMEN Key section from core-control-readiness.txt.");
+            sb.AppendLine();
+
+            sb.AppendLine("[Startup Restore Validation]");
+            sb.AppendLine("1. Leave startup restore disabled until fan, performance, RGB, and tuning readbacks are manually verified.");
+            sb.AppendLine("2. Enable only one startup-restore category at a time where the UI allows category-specific restore.");
+            sb.AppendLine("3. Restart Windows, wait 60 seconds after login, then record applied state, readback state, and any recovery warning.");
+            sb.AppendLine("4. Use the safe restore/Restore OEM Auto path immediately if fans, power, RGB, or tuning state looks wrong.");
+            sb.AppendLine();
+
+            sb.AppendLine("[Evidence To Attach]");
+            sb.AppendLine("- core-control-readiness.txt");
+            sb.AppendLine("- field-validation-script.txt");
+            sb.AppendLine("- omenmon-reborn-parity.txt");
+            sb.AppendLine("- rgb-control-path.txt for lighting reports");
+            sb.AppendLine("- wmi-command-history.txt and tuning-fan-focus.txt for fan/performance reports");
+            sb.AppendLine("- identity-resolution-trace.txt for unknown, fallback, or unverified models");
+
+            return sb.ToString();
+        }
+
+        private static string ClassifyPriorityBoard(string productId, string baseboardProduct, string model)
+        {
+            var raw = $"{productId} {baseboardProduct} {model}";
+            var priority = new[] { "8D41", "8D87", "8BD4", "8C30", "8DCD", "878C", "8600", "8BCD" };
+            var match = priority.FirstOrDefault(id => raw.Contains(id, StringComparison.OrdinalIgnoreCase));
+            if (match != null)
+            {
+                return match;
+            }
+
+            if (raw.Contains("OMEN 17", StringComparison.OrdinalIgnoreCase) ||
+                raw.Contains("db-1000", StringComparison.OrdinalIgnoreCase))
+            {
+                return "OMEN 17 db-1000";
+            }
+
+            if (raw.Contains("Victus", StringComparison.OrdinalIgnoreCase))
+            {
+                return "Victus 15/16 field cohort";
+            }
+
+            return "Not in v3.8.0 priority board list";
+        }
+
+        private async Task CollectPriorityModelValidationCardsAsync(
+            string exportPath,
+            HardwareMonitoringService? monitoringService,
+            FanService? fanService)
+        {
+            try
+            {
+                var report = BuildPriorityModelValidationCardsReport(monitoringService, fanService);
+                File.WriteAllText(Path.Combine(exportPath, "priority-model-validation-cards.txt"), report);
+                _logging.Info("Collected priority model validation cards");
+                await Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                _logging.Warn($"Failed to collect priority model validation cards: {ex.Message}");
+            }
+        }
+
+        public string BuildPriorityModelValidationCardsReport(
+            HardwareMonitoringService? monitoringService = null,
+            FanService? fanService = null)
+        {
+            var (config, source) = LoadConfigForDiagnostics();
+            var systemInfo = SafeGetSystemInfo();
+            var identity = ModelIdentityResolutionService.Build(systemInfo, capabilities: null, logging: _logging);
+            var priorityBoard = ClassifyPriorityBoard(identity.CapabilityProductId, identity.RawBaseboardProduct, identity.RawWmiModel);
+
+            var sb = new StringBuilder();
+            sb.AppendLine("=== PRIORITY MODEL VALIDATION CARDS ===");
+            sb.AppendLine($"CapturedUtc: {DateTime.UtcNow:O}");
+            sb.AppendLine("Purpose: model-family validation cards for the v3.8.0 RC gate. Use the matching card first, then the generic field-validation-script.txt.");
+            sb.AppendLine($"Config source: {source}");
+            sb.AppendLine();
+
+            sb.AppendLine("[Detected Context]");
+            sb.AppendLine($"ResolvedModel: {identity.Summary}");
+            sb.AppendLine($"ProductId: {identity.CapabilityProductId}");
+            sb.AppendLine($"PriorityBoard: {priorityBoard}");
+            sb.AppendLine($"FanBackend: {fanService?.Backend ?? "unavailable"}");
+            sb.AppendLine($"FanWritesAvailable: {FormatBool(fanService?.FanWritesAvailable == true)}");
+            sb.AppendLine($"DirectFanAvailable: {FormatBool(fanService?.ManualFanControlAvailable == true)}");
+            sb.AppendLine($"FanCurvesAvailable: {FormatBool(fanService?.FanCurvesAvailable == true)}");
+            sb.AppendLine($"MonitoringSource: {monitoringService?.MonitoringSource ?? "unavailable"}");
+            sb.AppendLine($"StartupRestoreEnabled: {FormatBool(config.EnableStartupHardwareRestore)}");
+            sb.AppendLine();
+
+            AppendModelValidationCard(
+                sb,
+                "8D41 / OMEN Max 16-ah0xxx",
+                priorityBoard == "8D41",
+                "Validate WMI-only Max fan hold after first-low-sample reassertion.",
+                new[]
+                {
+                    "Confirm Direct EC/legacy fan writes remain disabled; backend should be WMI-only.",
+                    "Run Max for 10 minutes under load and record every visible RPM/level drop.",
+                    "Restore OEM Auto and confirm fan ownership releases cleanly.",
+                    "Attach wmi-command-history.txt, core-control-readiness.txt, and field-validation-script.txt."
+                });
+
+            AppendModelValidationCard(
+                sb,
+                "8D87 / OMEN Max follow-up",
+                priorityBoard == "8D87",
+                "Validate long-session Max/Direct obedience and RGB surface routing.",
+                new[]
+                {
+                    "Run Max for at least 10 minutes and note whether fans become less obedient after initial success.",
+                    "If Direct is visible, test 40/60/80% and compare requested level to RPM/level readback.",
+                    "Apply one obvious RGB color and record keyboard vs light-bar behavior.",
+                    "Attach rgb-control-path.txt, wmi-command-history.txt, and core-control-readiness.txt."
+                });
+
+            AppendModelValidationCard(
+                sb,
+                "8BD4 / Victus 16-s0xxx",
+                priorityBoard == "8BD4",
+                "Validate conservative WMI V1 handoff without manual-zero floor clear.",
+                new[]
+                {
+                    "Test Auto -> Max -> Auto and confirm fans do not stick at 0/200 RPM or high RPM.",
+                    "Run a custom curve or high Direct request if available, then Restore OEM Auto.",
+                    "Capture a long-session gaming report if fans previously stuck at max or stopped reacting.",
+                    "Attach fan command history, fan verification output, and core-control-readiness.txt."
+                });
+
+            AppendModelValidationCard(
+                sb,
+                "8DCD / Victus 15",
+                priorityBoard == "8DCD",
+                "Validate WMI thermal-policy fallback for Performance mode before adding watt overrides.",
+                new[]
+                {
+                    "Record Balanced and Performance CPU package power under the same load.",
+                    "Capture before/after PL1/PL2 readback where available.",
+                    "Confirm whether Performance still EC-limits around 40W.",
+                    "Attach tuning-fan-focus.txt, core-control-readiness.txt, and any performance apply trace."
+                });
+
+            AppendModelValidationCard(
+                sb,
+                "8C30 / Victus 15-fb1xxx",
+                priorityBoard == "8C30",
+                "Validate Performance/Balanced/Quiet mode separation before adding any 8C30 watt overrides.",
+                new[]
+                {
+                    "Record Quiet, Balanced, and Performance CPU package power under the same repeatable load.",
+                    "Confirm performance apply trace shows direct EC power writes skipped and WMI thermal-policy fallback attempted/applied.",
+                    "Capture fan RPM/level response for each mode; this board is single-fan and WMI-policy-first.",
+                    "Attach tuning-fan-focus.txt, core-control-readiness.txt, wmi-command-history.txt, and identity-resolution-trace.txt."
+                });
+
+            AppendModelValidationCard(
+                sb,
+                "878C / OMEN 15-ek0xxx",
+                priorityBoard == "878C",
+                "Validate exact WMI profile routing for Quick Profiles that previously left fans low at 99C.",
+                new[]
+                {
+                    "Record RPM and CPU/GPU temperatures before and after Performance, Balanced, Quiet, Auto, Gaming/Extreme, and Custom Max.",
+                    "Confirm Performance-mode apply trace shows WMI thermal-policy fallback applied and direct EC power writes skipped.",
+                    "Capture PL1/PL2/GPU power readback under the same load before adding any wattage override.",
+                    "Attach core-control-readiness.txt, wmi-command-history.txt, tuning-fan-focus.txt, and identity-resolution-trace.txt."
+                });
+
+            AppendModelValidationCard(
+                sb,
+                "8600 / OMEN 15-dh0xxx",
+                priorityBoard == "8600",
+                "Validate exact legacy identity, WMI policy routing, and telemetry recovery after missing-PawnIO reports.",
+                new[]
+                {
+                    "Install PawnIO from the v3.8.0+ installer path, reboot, then record whether CPU temperature unsticks from ~28C and CPU power/fan RPM leave 0.",
+                    "Test Quiet, Balanced, Performance, Auto, and Max under the same load; record fan noise/RPM/readback and temperatures before/after each mode.",
+                    "Confirm performance apply trace shows direct EC power writes skipped and WMI thermal-policy fallback attempted/applied.",
+                    "Attach core-control-readiness.txt, launch-readiness.txt, wmi-command-history.txt, tuning-fan-focus.txt, and identity-resolution-trace.txt from both Windows and Linux if available."
+                });
+
+            AppendModelValidationCard(
+                sb,
+                "8BCD / Linux OMEN 16-xd0xxx",
+                priorityBoard == "8BCD",
+                "Validate degraded WMI-control reporting and preserve working telemetry/EC paths.",
+                new[]
+                {
+                    "Run Linux diagnose with kernel logs showing or disproving WMAA/WHCM aborts.",
+                    "Test fan profile writes and record whether RPM changes or only status text changes.",
+                    "Record battery power_supply discovery and keyboard RGB behavior separately.",
+                    "Attach journalctl -k -b, hp-wmi/hwmon listings, diagnose output, and sysfs battery paths."
+                });
+
+            AppendModelValidationCard(
+                sb,
+                "OMEN 17 db-1000",
+                priorityBoard == "OMEN 17 db-1000",
+                "Validate battery-charge wording, Direct fan usability, and visual readability.",
+                new[]
+                {
+                    "Confirm battery warning no longer treats 68% charge as battery health.",
+                    "Test Direct 40/60/80% if visible and record requested percent versus RPM.",
+                    "Review dashboard warning badge readability in light/dark contexts.",
+                    "Attach core-control-readiness.txt and screenshots only if UI wording still misleads."
+                });
+
+            AppendModelValidationCard(
+                sb,
+                "Victus 15/16 field cohort",
+                priorityBoard == "Victus 15/16 field cohort",
+                "Validate OMEN key interception, profile cycling, fan profile truthfulness, and RGB surface clarity.",
+                new[]
+                {
+                    "Test Ctrl+Shift profile hotkeys, Win+F12 fallback, and the physical OMEN key.",
+                    "Apply fan Auto/Performance/Max and record whether profile status matches actual RPM changes.",
+                    "Apply one obvious RGB color and record whether keyboard, backlight, light bar, or nothing changes.",
+                    "Attach Hotkeys / OMEN Key readiness, rgb-control-path.txt, and fan command history."
+                });
+
+            sb.AppendLine("[Promotion Rule]");
+            sb.AppendLine("A model path can move from experimental/degraded to verified only when the matching card has a clean pass with ProductId, backend, requested value, readback value, and recovery/Restore Auto result.");
+
+            return sb.ToString();
+        }
+
+        private async Task CollectRcValidationMatrixAsync(string exportPath)
+        {
+            try
+            {
+                var report = BuildRcValidationMatrixReport();
+                File.WriteAllText(Path.Combine(exportPath, "rc-validation-matrix.txt"), report);
+                _logging.Info("Collected RC validation matrix");
+                await Task.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                _logging.Warn($"Failed to collect RC validation matrix: {ex.Message}");
+            }
+        }
+
+        public string BuildRcValidationMatrixReport()
+        {
+            var systemInfo = SafeGetSystemInfo();
+            var identity = ModelIdentityResolutionService.Build(systemInfo, capabilities: null, logging: _logging);
+            var priorityBoard = ClassifyPriorityBoard(identity.CapabilityProductId, identity.RawBaseboardProduct, identity.RawWmiModel);
+
+            var sb = new StringBuilder();
+            sb.AppendLine("=== RC VALIDATION MATRIX ===");
+            sb.AppendLine($"CapturedUtc: {DateTime.UtcNow:O}");
+            sb.AppendLine("Purpose: track v3.8.0 release-gate evidence by priority model cohort. Rows marked field-pending must not be advertised as verified until a clean tester pass is attached.");
+            sb.AppendLine();
+
+            sb.AppendLine("[Detected Context]");
+            sb.AppendLine($"ResolvedModel: {identity.Summary}");
+            sb.AppendLine($"ProductId: {identity.CapabilityProductId}");
+            sb.AppendLine($"PriorityBoard: {priorityBoard}");
+            sb.AppendLine();
+
+            sb.AppendLine("[Matrix]");
+            sb.AppendLine("selected | cohort | local status | field status | promotion evidence");
+            AppendRcValidationMatrixRow(
+                sb,
+                priorityBoard,
+                "8D41",
+                "8D41 / OMEN Max 16-ah0xxx",
+                "Fix implemented: WMI-only one-sample Max reassertion and readiness diagnostics.",
+                "Field validation pending",
+                "10 minute Max hold under load, Restore OEM Auto recovery, wmi-command-history.txt, core-control-readiness.txt.");
+            AppendRcValidationMatrixRow(
+                sb,
+                priorityBoard,
+                "8D87",
+                "8D87 / OMEN Max follow-up",
+                "Fix implemented: WMI-only one-sample Max reassertion and OMEN MAX RGB diagnostics.",
+                "Field validation pending",
+                "Long-session Max/Direct obedience, RGB surface observation, HID PID evidence if per-key fails.");
+            AppendRcValidationMatrixRow(
+                sb,
+                priorityBoard,
+                "8BD4",
+                "8BD4 / Victus 16-s0xxx",
+                "Fix implemented: conservative WMI V1 handoff, zero-floor clear disabled, RGB ColorTable path enabled.",
+                "Field validation pending",
+                "Auto -> Max -> Auto, custom curve/Direct where visible, long-session report, RGB surface observation.");
+            AppendRcValidationMatrixRow(
+                sb,
+                priorityBoard,
+                "8DCD",
+                "8DCD / Victus 15",
+                "Fix implemented: exact conservative profile with WMI thermal-policy fallback.",
+                "Field validation pending",
+                "Balanced vs Performance CPU package power, PL1/PL2 readback, performance apply trace.");
+            AppendRcValidationMatrixRow(
+                sb,
+                priorityBoard,
+                "8C30",
+                "8C30 / Victus 15-fb1xxx",
+                "Fix implemented: exact WMI-policy-first profile with direct EC/CPU power-limit UI disabled and explicit Quiet/Balanced/Performance modes.",
+                "Field validation pending",
+                "Quiet vs Balanced vs Performance package power, fan RPM/level response, WMI policy fallback trace.");
+            AppendRcValidationMatrixRow(
+                sb,
+                priorityBoard,
+                "878C",
+                "878C / OMEN 15-ek0xxx",
+                "Fix implemented: exact legacy WMI profile with direct EC writes disabled and WMI thermal-policy fallback.",
+                "Field validation pending",
+                "Performance/Balanced/Quiet/Auto/Gaming/Extreme RPM response, PL readback, fan command history.");
+            AppendRcValidationMatrixRow(
+                sb,
+                priorityBoard,
+                "8600",
+                "8600 / OMEN 15-dh0xxx",
+                "Fix implemented: exact conservative legacy profile, Unknown keyboard fallback removed, WMI thermal-policy fallback enabled, direct EC/RPM/PL readback held back.",
+                "Field validation pending",
+                "PawnIO install + reboot telemetry recovery, Quiet/Balanced/Performance/Auto/Max response, Windows/Linux diagnostics.");
+            AppendRcValidationMatrixRow(
+                sb,
+                priorityBoard,
+                "8BCD",
+                "8BCD / Linux OMEN 16-xd0xxx",
+                "Partial: degraded-control detection and battery/sysfs fallback added; broken WMI writes are not claimed fixed.",
+                "Field validation pending",
+                "Kernel WMAA/WHCM evidence, effective fan/RGB write readback, battery power_supply discovery.");
+            AppendRcValidationMatrixRow(
+                sb,
+                priorityBoard,
+                "OMEN 17 db-1000",
+                "OMEN 17 db-1000",
+                "Fix implemented: battery charge/health wording and Direct fan UI first pass.",
+                "Field validation pending",
+                "No false battery-health alert at partial charge, Direct 40/60/80 RPM response, readability check.");
+            AppendRcValidationMatrixRow(
+                sb,
+                priorityBoard,
+                "Victus 15/16 field cohort",
+                "Victus 15/16 field cohort",
+                "Diagnostics implemented: OMEN-key/hotkey readiness, RGB surface clarity, fan truthfulness guidance.",
+                "Field validation pending",
+                "Profile hotkeys, physical OMEN key source, fan profile truthfulness, RGB surface behavior.");
+
+            sb.AppendLine();
+            sb.AppendLine("[Release Rule]");
+            sb.AppendLine("Keep v3.8.0 as RC/pre-release until priority fan/performance/hotkey/RGB rows either have clean field passes or release notes explicitly mark the path experimental/degraded.");
+
+            return sb.ToString();
+        }
+
+        private static void AppendRcValidationMatrixRow(
+            StringBuilder sb,
+            string selectedBoard,
+            string boardKey,
+            string cohort,
+            string localStatus,
+            string fieldStatus,
+            string promotionEvidence)
+        {
+            var selected = string.Equals(selectedBoard, boardKey, StringComparison.OrdinalIgnoreCase) ? "*" : "-";
+            sb.AppendLine($"{selected} | {cohort} | {localStatus} | {fieldStatus} | {promotionEvidence}");
+        }
+
+        private static void AppendModelValidationCard(
+            StringBuilder sb,
+            string title,
+            bool selected,
+            string goal,
+            string[] steps)
+        {
+            sb.AppendLine($"[{(selected ? "SELECTED" : "REFERENCE")} - {title}]");
+            sb.AppendLine($"Goal: {goal}");
+            foreach (var step in steps)
+            {
+                sb.AppendLine($"- {step}");
+            }
+            sb.AppendLine();
         }
 
         private async Task CollectRgbControlPathAsync(string exportPath)
@@ -513,9 +1407,13 @@ namespace OmenCore.Services.Diagnostics
         private void AppendKeyboardLightingControlPath(StringBuilder sb)
         {
             sb.AppendLine("[HP Keyboard]");
+            var (config, source) = LoadConfigForDiagnostics();
+            var observedRgb = config.KeyboardLighting ?? new KeyboardLightingSettings();
+            sb.AppendLine($"ConfigSource: {source}");
             if (_keyboardLightingService == null)
             {
                 sb.AppendLine("Keyboard lighting service unavailable.");
+                AppendRgbObservedSurface(sb, observedRgb);
                 sb.AppendLine();
                 return;
             }
@@ -528,7 +1426,20 @@ namespace OmenCore.Services.Diagnostics
             {
                 sb.AppendLine("PerKeyLaunchStatus: HID per-key backend/editor pending; zone/light-bar fallback remains the supported path in this build.");
             }
+            sb.AppendLine($"LastApplySurface: {_keyboardLightingService.LastApplySurface}");
+            sb.AppendLine($"LastApplyStatus: {_keyboardLightingService.LastApplyStatus}");
+            AppendRgbObservedSurface(sb, observedRgb);
             sb.AppendLine();
+        }
+
+        private static void AppendRgbObservedSurface(StringBuilder sb, KeyboardLightingSettings settings)
+        {
+            sb.AppendLine("[HP Keyboard Observed Surface]");
+            sb.AppendLine($"ObservedSurface: {FormatValue(settings.ObservedSurface)}");
+            sb.AppendLine($"ObservedAtUtc: {FormatDate(settings.ObservedAtUtc)}");
+            sb.AppendLine($"ObservedProbeColor: {FormatValue(settings.ObservedProbeColorHex)}");
+            sb.AppendLine($"ObservedBackend: {FormatValue(settings.ObservedBackend)}");
+            sb.AppendLine($"ObservedApplyStatus: {FormatValue(settings.ObservedApplyStatus)}");
         }
 
         private void AppendRgbProviderControlPath(StringBuilder sb)
@@ -1185,6 +2096,7 @@ namespace OmenCore.Services.Diagnostics
 
                 sb.AppendLine("[Startup Hardware Restore]");
                 sb.AppendLine($"EnableStartupHardwareRestore: {FormatBool(config.EnableStartupHardwareRestore)}");
+                sb.AppendLine($"StartupRestoreCategories: {StartupRestorePolicy.BuildSummary(config)}");
                 sb.AppendLine($"AllowStartupRestoreOnOmen16OrVictus: {FormatBool(config.AllowStartupRestoreOnOmen16OrVictus)}");
                 sb.AppendLine($"LastPerformanceModeName: {FormatValue(config.LastPerformanceModeName)}");
                 sb.AppendLine($"LastGpuPowerBoostLevel: {FormatValue(config.LastGpuPowerBoostLevel)}");
@@ -1797,6 +2709,9 @@ namespace OmenCore.Services.Diagnostics
 
         private static string FormatNullableDegrees(int? value) =>
             value.HasValue ? $"{value.Value} C" : "not set";
+
+        private static string FormatNullableInt(int? value) =>
+            value.HasValue ? value.Value.ToString() : "not set";
 
         private static string FormatNullableMillivolts(int? value) =>
             value.HasValue ? $"{value.Value:+0;-0;0} mV" : "not set";

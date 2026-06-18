@@ -230,8 +230,12 @@
                     <ColumnDefinition Width="12"/>
                     <ColumnDefinition Width="*" SharedSizeGroup="MetricValue"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock Grid.Column="0" Text="{Binding FpsLabel}" FontSize="14" Foreground="#00FF88" FontFamily="Segoe UI" FontWeight="Bold" ToolTip="FPS (via RTSS) or GPU Activity when RTSS not available"/>
-                <TextBlock Grid.Column="2" Text="{Binding FpsDisplay}" FontSize="18" Foreground="#00FF88" FontFamily="Segoe UI" FontWeight="Bold" HorizontalAlignment="Right"/>
+                <TextBlock Grid.Column="0" Text="{Binding FpsLabel}" FontSize="14" Foreground="{Binding FpsAccentBrush}" FontFamily="Segoe UI" FontWeight="Bold" ToolTip="FPS via RTSS"/>
+                <StackPanel Grid.Column="2" HorizontalAlignment="Right">
+                    <TextBlock Text="{Binding FpsDisplay}" FontSize="18" Foreground="{Binding FpsAccentBrush}" FontFamily="Segoe UI" FontWeight="Bold" HorizontalAlignment="Right"/>
+                    <TextBlock Text="{Binding FpsDetailDisplay}" FontSize="10" Foreground="#AAAAAA" FontFamily="Segoe UI" FontWeight="Medium" HorizontalAlignment="Right"
+                               Visibility="{Binding ShowFpsDetail, Converter={StaticResource BoolToVisibility}}"/>
+                </StackPanel>
             </Grid>
             
             <!-- Frametime -->

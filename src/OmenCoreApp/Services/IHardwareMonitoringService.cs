@@ -20,6 +20,7 @@ namespace OmenCore.Services
     {
         public double PowerConsumption { get; set; }
         public double PowerConsumptionTrend { get; set; }
+        public double BatteryChargePercentage { get; set; }
         public double BatteryHealthPercentage { get; set; }
         public int BatteryCycles { get; set; }
         public double EstimatedBatteryLifeYears { get; set; }

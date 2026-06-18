@@ -58,9 +58,9 @@
                         
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,4,0">
-                        <Button Content="—" Click="MinimizeButton_Click" Style="{StaticResource WindowControlButton}" ToolTip="Minimize" FontSize="12" />
-                        <Button x:Name="MaximizeButton" Content="☐" Click="MaximizeButton_Click" Style="{StaticResource WindowControlButton}" ToolTip="Maximize" FontSize="12" />
-                        <Button Content="✕" Click="CloseButton_Click" Style="{StaticResource WindowCloseButton}" ToolTip="Close" FontSize="12" />
+                        <Button Content="-" Click="MinimizeButton_Click" Style="{StaticResource WindowControlButton}" ToolTip="Minimize" FontSize="12" />
+                        <Button x:Name="MaximizeButton" Content="[ ]" Click="MaximizeButton_Click" Style="{StaticResource WindowControlButton}" ToolTip="Maximize" FontSize="12" />
+                        <Button Content="x" Click="CloseButton_Click" Style="{StaticResource WindowCloseButton}" ToolTip="Close" FontSize="12" />
                     </StackPanel>
                 </Grid>
             </Border>

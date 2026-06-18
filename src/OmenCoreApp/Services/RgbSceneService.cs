@@ -163,6 +163,33 @@ namespace OmenCore.Services
                 Speed = 50,
                 Brightness = 100
             });
+
+            _scenes.Add(new RgbScene
+            {
+                Id = "heat-wave",
+                Name = "Heat Wave",
+                Description = "Wave lighting for providers that support directional effects",
+                Icon = "W",
+                Effect = RgbSceneEffect.Wave,
+                PrimaryColor = "#FF4500",
+                SecondaryColor = "#FFD000",
+                Speed = 65,
+                Brightness = 100
+            });
+
+            _scenes.Add(new RgbScene
+            {
+                Id = "calm-pulse",
+                Name = "Calm Pulse",
+                Description = "Soft breathing blue lighting",
+                Icon = "P",
+                Effect = RgbSceneEffect.Breathing,
+                PrimaryColor = "#00A8FF",
+                SecondaryColor = "#004C99",
+                Speed = 35,
+                Brightness = 70,
+                TriggerOnPerformanceMode = "Quiet"
+            });
             
             // Cool Blue
             _scenes.Add(new RgbScene
@@ -467,8 +494,11 @@ namespace OmenCore.Services
                         break;
                         
                     case RgbSceneEffect.Spectrum:
-                    case RgbSceneEffect.Wave:
                         await _rgbManager.SyncSpectrumEffectAsync();
+                        break;
+
+                    case RgbSceneEffect.Wave:
+                        await _rgbManager.ApplyEffectToAllAsync("effect:wave");
                         break;
                         
                     case RgbSceneEffect.Off:
@@ -656,7 +686,17 @@ namespace OmenCore.Services
 
         private bool IsBuiltInScene(string sceneId)
         {
-            return sceneId is "omen-red" or "gaming" or "night" or "work" or "rainbow" or "cool-blue" or "ambient" or "off";
+            return sceneId is "omen-red"
+                or "gaming"
+                or "night"
+                or "work"
+                or "rainbow"
+                or "heat-wave"
+                or "calm-pulse"
+                or "cool-blue"
+                or "ambient"
+                or "audio-reactive"
+                or "off";
         }
 
         /// <summary>

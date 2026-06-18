@@ -532,6 +532,29 @@ public static class DiagnoseCommand
             .Take(4)
             .ToList();
 
+        var hpWmiWmaaAbortLines = lines
+            .Where(line =>
+                (line.Contains("WMAA", StringComparison.OrdinalIgnoreCase) ||
+                 line.Contains("WHCM", StringComparison.OrdinalIgnoreCase)) &&
+                (line.Contains("AE_ABORT", StringComparison.OrdinalIgnoreCase) ||
+                 line.Contains("Method parse/execution failed", StringComparison.OrdinalIgnoreCase) ||
+                 line.Contains("CreateField", StringComparison.OrdinalIgnoreCase) ||
+                 line.Contains("Abort", StringComparison.OrdinalIgnoreCase)))
+            .Take(4)
+            .ToList();
+
+        if (hpWmiWmaaAbortLines.Count > 0)
+        {
+            hints.Add(new LinuxKernelIssueHint
+            {
+                Id = "hp-wmi-wmaa-whcm-abort",
+                Severity = "Warning",
+                Summary = "Kernel logs show HP WMI ACPI WMAA/WHCM aborts; WMI-backed controls may be degraded even when sysfs paths exist.",
+                Evidence = string.Join(" | ", hpWmiWmaaAbortLines),
+                Recommendation = "Treat fan profile, keyboard RGB, and HP WMI battery status as degraded until an RPM/readback check proves hardware effect. Attach `journalctl -k -b`, `sudo omencore-cli diagnose --report`, hp-wmi/hwmon listings, and ACPI tables for upstream hp-wmi triage."
+            });
+        }
+
         if (hpWmiWq00Lines.Count > 0)
         {
             hints.Add(new LinuxKernelIssueHint
@@ -811,12 +834,12 @@ public static class DiagnoseCommand
         if (info.KernelIssueHints.Count > 0)
         {
             Console.WriteLine(midBorder);
-            Console.WriteLine($"â•‘  {"Kernel Hints:",-86}â•‘");
+            Console.WriteLine($"║  {"Kernel Hints:",-86}║");
             foreach (var hint in info.KernelIssueHints.Take(4))
             {
                 foreach (var line in WrapText($"{hint.Severity}: {hint.Summary}", innerWidth - 7))
                 {
-                    Console.WriteLine($"â•‘   - {line,-(innerWidth - 5)}â•‘");
+                    Console.WriteLine($"║   - {line,-(innerWidth - 5)}║");
                 }
             }
         }

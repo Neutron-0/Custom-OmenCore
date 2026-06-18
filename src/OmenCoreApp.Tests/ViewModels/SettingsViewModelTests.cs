@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Xml.Linq;
 using FluentAssertions;
 using OmenCore.Hardware;
 using OmenCore.Models;
@@ -32,6 +33,49 @@ namespace OmenCoreApp.Tests.ViewModels
                 if (Directory.Exists(_tempDir)) Directory.Delete(_tempDir, true);
             }
             catch { }
+        }
+
+        [Fact]
+        public void StartupTaskXml_UsesUnquotedCommandPath()
+        {
+            const string exePath = @"C:\Program Files\OmenCore\OmenCore.exe";
+            var method = typeof(SettingsViewModel).GetMethod("BuildStartupTaskXml", BindingFlags.Static | BindingFlags.NonPublic);
+            method.Should().NotBeNull();
+
+            var xml = (string)method!.Invoke(null, new object[] { exePath })!;
+            var document = XDocument.Parse(xml);
+            var ns = document.Root!.Name.Namespace;
+            var command = document.Root!
+                .Element(ns + "Actions")!
+                .Element(ns + "Exec")!
+                .Element(ns + "Command")!
+                .Value;
+            var workingDirectory = document.Root!
+                .Element(ns + "Actions")!
+                .Element(ns + "Exec")!
+                .Element(ns + "WorkingDirectory")!
+                .Value;
+
+            command.Should().Be(exePath);
+            command.Should().NotStartWith("\"");
+            command.Should().NotEndWith("\"");
+            workingDirectory.Should().Be(@"C:\Program Files\OmenCore");
+        }
+
+        [Fact]
+        public void StartupTaskXmlValidation_RejectsQuotedCommandPath()
+        {
+            const string exePath = @"C:\Program Files\OmenCore\OmenCore.exe";
+            var buildMethod = typeof(SettingsViewModel).GetMethod("BuildStartupTaskXml", BindingFlags.Static | BindingFlags.NonPublic);
+            var validateMethod = typeof(SettingsViewModel).GetMethod("IsStartupTaskXmlValid", BindingFlags.Static | BindingFlags.NonPublic);
+            buildMethod.Should().NotBeNull();
+            validateMethod.Should().NotBeNull();
+
+            var validXml = (string)buildMethod!.Invoke(null, new object[] { exePath })!;
+            var invalidXml = validXml.Replace($"<Command>{exePath}</Command>", $"<Command>\"{exePath}\"</Command>");
+
+            ((bool)validateMethod!.Invoke(null, new object?[] { validXml, exePath })!).Should().BeTrue();
+            ((bool)validateMethod.Invoke(null, new object?[] { invalidXml, exePath })!).Should().BeFalse();
         }
 
         [Fact]
@@ -115,6 +159,35 @@ namespace OmenCoreApp.Tests.ViewModels
             cfgReload.Config.Monitoring.LowOverheadMode.Should().BeTrue();
             cfgReload.Config.Monitoring.PollingProfile.Should().Be("Low overhead");
             cfgReload.Config.Monitoring.PollIntervalMs.Should().Be(2000);
+        }
+
+        [Fact]
+        public void StartupRestoreCategoryToggles_PersistToConfig()
+        {
+            var logging = new OmenCore.Services.LoggingService();
+            var cfgService = new ConfigurationService();
+            var sysInfo = new OmenCore.Services.SystemInfoService(logging);
+            var fanCleaning = new OmenCore.Services.FanCleaningService(logging, null, sysInfo);
+            var bios = new OmenCore.Services.BiosUpdateService(logging);
+            var profileExport = new OmenCore.Services.ProfileExportService(logging, cfgService);
+            var diagnosticsExport = new DiagnosticExportService(logging, System.IO.Path.GetTempPath());
+
+            var vm = new SettingsViewModel(logging, cfgService, sysInfo, fanCleaning, bios, profileExport, diagnosticsExport)
+            {
+                EnableStartupHardwareRestore = true,
+                StartupRestoreFansEnabled = true,
+                StartupRestorePerformanceEnabled = false,
+                StartupRestoreRgbEnabled = true,
+                StartupRestoreTuningEnabled = false
+            };
+
+            var cfgReload = new ConfigurationService();
+            cfgReload.Config.EnableStartupHardwareRestore.Should().BeTrue();
+            cfgReload.Config.StartupRestoreFansEnabled.Should().BeTrue();
+            cfgReload.Config.StartupRestorePerformanceEnabled.Should().BeFalse();
+            cfgReload.Config.StartupRestoreRgbEnabled.Should().BeTrue();
+            cfgReload.Config.StartupRestoreTuningEnabled.Should().BeFalse();
+            vm.StartupHardwareRestoreStatus.Should().Contain("Fans=on; Performance=off; RGB=on; Tuning=off");
         }
 
         [Fact]

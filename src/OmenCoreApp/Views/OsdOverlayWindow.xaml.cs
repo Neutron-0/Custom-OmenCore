@@ -35,6 +35,10 @@ namespace OmenCore.Views
         private const string OsdNetworkTimerRegistryName = "OsdOverlayNetworkRefresh";
         private const int OsdStatsTimerIntervalMs = 1000;
         private const int OsdNetworkTimerIntervalMs = 5000;
+        private static readonly Brush FpsGoodBrush = CreateFrozenBrush(0, 255, 136);
+        private static readonly Brush FpsWarningBrush = CreateFrozenBrush(255, 213, 0);
+        private static readonly Brush FpsCriticalBrush = CreateFrozenBrush(255, 68, 68);
+        private static readonly Brush FpsUnavailableBrush = CreateFrozenBrush(170, 170, 170);
         
         [DllImport("user32.dll")]
         private static extern int GetWindowLong(IntPtr hwnd, int index);
@@ -106,6 +110,8 @@ namespace OmenCore.Views
         private double _fps;
         private string _fpsLabel = "FPS";
         private string _fpsDisplay = "--";
+        private string _fpsDetailDisplay = "";
+        private Brush _fpsAccentBrush = FpsGoodBrush;
         private string _frametimeDisplay = "0.0ms";
         private string _fanMode = "Auto";
         private string _performanceMode = "Balanced";
@@ -150,6 +156,8 @@ namespace OmenCore.Views
         public double Fps { get => _fps; set { _fps = value; OnPropertyChanged(); } }
         public string FpsLabel { get => _fpsLabel; set { _fpsLabel = value; OnPropertyChanged(); } }
         public string FpsDisplay { get => _fpsDisplay; set { _fpsDisplay = value; OnPropertyChanged(); } }
+        public string FpsDetailDisplay { get => _fpsDetailDisplay; set { _fpsDetailDisplay = value; OnPropertyChanged(); OnPropertyChanged(nameof(ShowFpsDetail)); } }
+        public Brush FpsAccentBrush { get => _fpsAccentBrush; set { _fpsAccentBrush = value; OnPropertyChanged(); } }
         public string FrametimeDisplay { get => _frametimeDisplay; set { _frametimeDisplay = value; OnPropertyChanged(); } }
         public string FanMode { get => _fanMode; set { _fanMode = value; OnPropertyChanged(); } }
         public string PerformanceMode { get => _performanceMode; set { _performanceMode = value; OnPropertyChanged(); OnPropertyChanged(nameof(ShowCurrentModeRow)); } }
@@ -206,7 +214,7 @@ namespace OmenCore.Views
         public bool ShowFanSpeed { get => _showFanSpeed; set { _showFanSpeed = value; OnPropertyChanged(); } }
         public bool ShowRamUsage { get => _showRamUsage; set { _showRamUsage = value; OnPropertyChanged(); } }
         public bool ShowCurrentMode { get => _showCurrentMode; set { _showCurrentMode = value; OnPropertyChanged(); OnPropertyChanged(nameof(ShowCurrentModeRow)); } }
-        public bool ShowFps { get => _showFps; set { _showFps = value; OnPropertyChanged(); OnPropertyChanged(nameof(ShowSeparator2)); } }
+        public bool ShowFps { get => _showFps; set { _showFps = value; OnPropertyChanged(); OnPropertyChanged(nameof(ShowSeparator2)); OnPropertyChanged(nameof(ShowFpsDetail)); } }
         public bool ShowFanMode { get => _showFanMode; set { _showFanMode = value; OnPropertyChanged(); OnPropertyChanged(nameof(ShowSeparator1)); } }
         public bool ShowPerformanceMode { get => _showPerformanceMode; set { _showPerformanceMode = value; OnPropertyChanged(); OnPropertyChanged(nameof(ShowCurrentModeRow)); OnPropertyChanged(nameof(ShowSeparator1)); } }
         public bool ShowFrametime { get => _showFrametime; set { _showFrametime = value; OnPropertyChanged(); OnPropertyChanged(nameof(ShowSeparator2)); } }
@@ -247,6 +255,7 @@ namespace OmenCore.Views
         public bool ShowRamUsageRow => _showSystemGroup && _showRamUsage;
         public bool ShowBatteryRow => _showSystemGroup && _showBattery;
         public bool ShowFpsRow => _showPerformanceGroup && _showFps;
+        public bool ShowFpsDetail => ShowFpsRow && !string.IsNullOrWhiteSpace(_fpsDetailDisplay);
         public bool ShowFrametimeRow => _showPerformanceGroup && _showFrametime;
         public bool ShowNetworkLatencyRow => _showNetworkGroup && _showNetworkLatency;
         public bool ShowNetworkUploadRow => _showNetworkGroup && _showNetworkUpload;
@@ -711,29 +720,18 @@ namespace OmenCore.Views
                     // FPS / GPU Activity display
                     if (_showFps || _showFrametime)
                     {
-                        // Try RTSS for real FPS data first
-                        bool hasRtssData = false;
-                        if (_rtssService != null && _rtssService.IsAvailable && _rtssService.CurrentFps > 0)
+                        OsdFpsDisplaySnapshot fpsSnapshot;
+                        if (_rtssService != null && _rtssService.IsAvailable)
                         {
-                            hasRtssData = true;
-                            Fps = _rtssService.CurrentFps;
-                            FpsLabel = "FPS";
-                            FpsDisplay = $"{_rtssService.CurrentFps:F0}";
-                            
-                            if (_showFrametime && _rtssService.FrametimeMs > 0)
-                            {
-                                Frametime = _rtssService.FrametimeMs;
-                                FrametimeDisplay = $"{_rtssService.FrametimeMs:F1}ms";
-                            }
-                            else
-                            {
-                                // Calculate frametime from FPS
-                                Frametime = _rtssService.CurrentFps > 0 ? 1000.0 / _rtssService.CurrentFps : 0;
-                                FrametimeDisplay = $"{Frametime:F1}ms";
-                            }
+                            fpsSnapshot = OsdFpsDisplayFormatter.FromRtss(
+                                _rtssService.CurrentFps,
+                                _rtssService.AverageFps,
+                                _rtssService.MinFps,
+                                _rtssService.OnePercentLow,
+                                _rtssService.FrametimeMs,
+                                _rtssService.CurrentProcess);
                         }
-                        
-                        if (!hasRtssData)
+                        else
                         {
                             // Retry RTSS connection periodically
                             if (_rtssService != null && !_rtssService.IsAvailable && !_rtssInitialized)
@@ -744,15 +742,14 @@ namespace OmenCore.Views
                                     _rtssInitialized = true;
                                 }
                             }
-                            
-                            // RTSS unavailable - show N/A instead of misleading GPU%
-                            // Users expect FPS when they enable "Show FPS", not GPU utilization
-                            Fps = 0;
-                            FpsLabel = "FPS";
-                            FpsDisplay = "N/A";
-                            Frametime = 0;
-                            FrametimeDisplay = "--";
+
+                            fpsSnapshot = OsdFpsDisplayFormatter.Unavailable(
+                                _rtssService == null
+                                    ? "RTSS disabled"
+                                    : "RTSS unavailable");
                         }
+
+                        ApplyFpsSnapshot(fpsSnapshot);
                     }
                     
                     // Throttling detection
@@ -1042,6 +1039,35 @@ namespace OmenCore.Views
                 CpuTempColor = new SolidColorBrush(Color.FromRgb(255, 149, 0)); // Orange (75-85°C)
             else
                 CpuTempColor = new SolidColorBrush(Color.FromRgb(255, 68, 68)); // Red (>85°C)
+        }
+
+        private void ApplyFpsSnapshot(OsdFpsDisplaySnapshot snapshot)
+        {
+            Fps = snapshot.Fps;
+            FpsLabel = snapshot.Label;
+            FpsDisplay = snapshot.Display;
+            FpsDetailDisplay = snapshot.Detail;
+            FpsAccentBrush = GetFpsBrush(snapshot.State);
+            Frametime = snapshot.FrametimeMs;
+            FrametimeDisplay = snapshot.FrametimeDisplay;
+        }
+
+        private static Brush GetFpsBrush(OsdFpsDisplayState state)
+        {
+            return state switch
+            {
+                OsdFpsDisplayState.Good => FpsGoodBrush,
+                OsdFpsDisplayState.Warning => FpsWarningBrush,
+                OsdFpsDisplayState.Critical => FpsCriticalBrush,
+                _ => FpsUnavailableBrush
+            };
+        }
+
+        private static Brush CreateFrozenBrush(byte r, byte g, byte b)
+        {
+            var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
+            brush.Freeze();
+            return brush;
         }
         
         /// <summary>

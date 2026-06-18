@@ -27,13 +27,17 @@ namespace OmenCoreApp.Tests.Hardware
         [InlineData("8C76", OmenModelFamily.OMEN16)]
         [InlineData("8A3E", OmenModelFamily.Victus)]
         [InlineData("8C30", OmenModelFamily.Victus)]
+        [InlineData("8DCD", OmenModelFamily.Victus)]
         [InlineData("8A26", OmenModelFamily.Victus)]
         [InlineData("8C58", OmenModelFamily.Transcend)]
         [InlineData("8E41", OmenModelFamily.Transcend)]
         [InlineData("8D87", OmenModelFamily.OMEN2024Plus)]
         [InlineData("8574", OmenModelFamily.Legacy)]
+        [InlineData("8600", OmenModelFamily.Legacy)]
         [InlineData("8787", OmenModelFamily.Legacy)]
+        [InlineData("878C", OmenModelFamily.Legacy)]
         [InlineData("88D2", OmenModelFamily.Legacy)]
+        [InlineData("88EE", OmenModelFamily.Victus)]
         public void GetCapabilities_Returns_NewlyAdded_ModelEntries(string productId, OmenModelFamily expectedFamily)
         {
             var caps = ModelCapabilityDatabase.GetCapabilities(productId);
@@ -67,6 +71,8 @@ namespace OmenCoreApp.Tests.Hardware
             caps.ModelName.Should().Contain("OMEN MAX 16");
             caps.SupportsFanControlWmi.Should().BeTrue();
             caps.SupportsFanControlEc.Should().BeFalse();
+            caps.MaxModeDropChecksBeforeReapply.Should().Be(1,
+                "8D87 field chat reports fans become disobedient after a while, so MAX-series Max hold should reassert on first low telemetry sample");
             caps.HasPerKeyRgb.Should().BeTrue();
             caps.UserVerified.Should().BeFalse();
         }
@@ -83,6 +89,8 @@ namespace OmenCoreApp.Tests.Hardware
             caps.SupportsFanCurves.Should().BeFalse();
             caps.AllowDecoupledWmiThermalPolicyFallback.Should().BeTrue(
                 "8D41 cannot safely use legacy EC power/fan writes, so Quick Profiles need the OEM WMI thermal-policy path when direct limits are unavailable");
+            caps.MaxModeDropChecksBeforeReapply.Should().Be(1,
+                "8D41 v3.7.1 logs show firmware reclaiming Max mode repeatedly, so Max hold must reassert on the first low telemetry sample");
             caps.HasPerKeyRgb.Should().BeTrue();
             caps.UserVerified.Should().BeTrue();
         }
@@ -103,6 +111,27 @@ namespace OmenCoreApp.Tests.Hardware
         }
 
         [Fact]
+        public void GetPreferredCapabilities_878C_Omen15Ek0xxx_UsesWmiThermalPolicyFallback()
+        {
+            var caps = ModelCapabilityDatabase.GetPreferredCapabilities("878C", "OMEN Laptop 15-ek0xxx");
+
+            caps.Should().NotBeNull();
+            caps!.ProductId.Should().Be("878C");
+            caps.ModelName.Should().Contain("15-ek0");
+            caps.Family.Should().Be(OmenModelFamily.Legacy);
+            caps.SupportsFanControlWmi.Should().BeTrue();
+            caps.SupportsFanControlEc.Should().BeFalse("878C profiles must avoid unverified direct EC writes and use the OEM WMI policy path");
+            caps.SupportsIndependentFanCurves.Should().BeFalse("independent curve ownership is not validated by the field report");
+            caps.SupportsRpmReadback.Should().BeTrue("the field screenshots show fan RPM telemetry around 1900 RPM");
+            caps.MaxFanLevel.Should().Be(55);
+            caps.AllowDecoupledWmiThermalPolicyFallback.Should().BeTrue(
+                "Quick Profile Performance/Balanced/Quiet left fans low at 99C, so exact 878C routing must send the OEM WMI thermal policy when EC power limits are unavailable");
+            caps.PerformanceCpuPl1Watts.Should().BeNull("the report does not include PL1/PL2 readback proving the correct wattage envelope");
+            caps.PerformanceCpuPl2Watts.Should().BeNull("the report does not include PL1/PL2 readback proving the correct wattage envelope");
+            caps.Notes.Should().Contain("Sky");
+        }
+
+        [Fact]
         public void GetCapabilities_8574_Omen15Dc1xxx_UsesConservativeEcFirstProfile()
         {
             var caps = ModelCapabilityDatabase.GetCapabilities("8574");
@@ -118,6 +147,26 @@ namespace OmenCoreApp.Tests.Hardware
             caps.SupportsTccOffset.Should().BeFalse();
             caps.SupportsPowerLimits.Should().BeFalse();
             caps.UserVerified.Should().BeFalse();
+        }
+
+        [Fact]
+        public void GetPreferredCapabilities_8600_Omen15Dh0xxx_UsesConservativeWmiPolicyProfile()
+        {
+            var caps = ModelCapabilityDatabase.GetPreferredCapabilities("8600", "OMEN by HP Laptop 15-dh0xxx");
+
+            caps.Should().NotBeNull();
+            caps!.ProductId.Should().Be("8600");
+            caps.ModelName.Should().Contain("15-dh0");
+            caps.Family.Should().Be(OmenModelFamily.Legacy);
+            caps.SupportsFanControlWmi.Should().BeTrue();
+            caps.SupportsFanControlEc.Should().BeFalse("8600 direct EC writes are not validated and the field report had no PawnIO driver");
+            caps.SupportsIndependentFanCurves.Should().BeFalse("independent curve ownership is not validated by the field report");
+            caps.SupportsRpmReadback.Should().BeFalse("the field report shows 0 RPM for both fans, so RPM readback should not be trusted yet");
+            caps.MaxFanLevel.Should().Be(55);
+            caps.AllowDecoupledWmiThermalPolicyFallback.Should().BeTrue(
+                "fan modes barely worked except Max, so Quick Profiles should still attempt the OEM WMI thermal policy path");
+            caps.SupportsPowerLimits.Should().BeFalse("missing PawnIO and 0W CPU power means direct CPU PL controls should remain hidden until readback proves support");
+            caps.Notes.Should().Contain("wafflist");
         }
 
         [Fact]
@@ -203,11 +252,11 @@ namespace OmenCoreApp.Tests.Hardware
             caps.SupportsFanControlWmi.Should().BeTrue();
             caps.SupportsFanCurves.Should().BeTrue();
             caps.FanZoneCount.Should().Be(2);
-            caps.HasFourZoneRgb.Should().BeFalse();
+            caps.HasFourZoneRgb.Should().BeTrue("Victus 16-s0xxx / 7Z5Z2EA reports point to a WMI ColorTable RGB keyboard path");
             caps.SupportsGpuPowerBoost.Should().BeFalse();
             caps.SupportsUndervolt.Should().BeFalse();
-            caps.AllowV1AutoModeFloorClear.Should().BeTrue("8BD4 WMI V1 auto handoff must clear stale fan floors after long gaming sessions");
-            caps.Notes.Should().Contain("2026-06-03");
+            caps.AllowV1AutoModeFloorClear.Should().BeFalse("8BD4 v3.7.1 logs show zero-duty / non-reactive fan symptoms after SetFanLevel(0,0)");
+            caps.Notes.Should().Contain("2026-06-07");
         }
 
         [Fact]
@@ -263,7 +312,9 @@ namespace OmenCoreApp.Tests.Hardware
             caps.SupportsFanControlEc.Should().BeFalse();
             caps.SupportsFanCurves.Should().BeTrue();
             caps.AllowDecoupledWmiThermalPolicyFallback.Should().BeTrue();
-            caps.Notes.Should().Contain("GitHub #135 diagnostics");
+            caps.SupportsPowerLimits.Should().BeFalse("issue #139 has no PL1/PL2 readback, so the CPU power-limit UI must stay hidden for this exact Victus board");
+            caps.PerformanceModes.Should().Equal("Quiet", "Balanced", "Performance");
+            caps.Notes.Should().Contain("GitHub #135/#139");
         }
 
         [Fact]
@@ -278,7 +329,29 @@ namespace OmenCoreApp.Tests.Hardware
             caps.SupportsFanControlEc.Should().BeFalse();
             caps.SupportsFanCurves.Should().BeTrue();
             caps.AllowDecoupledWmiThermalPolicyFallback.Should().BeTrue();
-            caps.Notes.Should().Contain("GitHub #135 diagnostics");
+            caps.SupportsPowerLimits.Should().BeFalse("Performance/Balanced/Quiet are currently WMI policy routes, not proven CPU PL routes on 8C30");
+            caps.PerformanceModes.Should().Equal("Quiet", "Balanced", "Performance");
+            caps.PerformanceCpuPl1Watts.Should().BeNull("issue #139 reports no visible wattage delta but does not provide a safe target PL1");
+            caps.PerformanceCpuPl2Watts.Should().BeNull("issue #139 does not provide a safe target PL2");
+            caps.Notes.Should().Contain("GitHub #135/#139");
+        }
+
+        [Fact]
+        public void GetPreferredCapabilities_8DCD_Victus15_UsesConservativeWmiThermalPolicyFallback()
+        {
+            var caps = ModelCapabilityDatabase.GetPreferredCapabilities("8DCD", "Victus by HP Gaming Laptop 15");
+
+            caps.Should().NotBeNull();
+            caps!.ProductId.Should().Be("8DCD");
+            caps.Family.Should().Be(OmenModelFamily.Victus);
+            caps.SupportsFanControlWmi.Should().BeTrue();
+            caps.SupportsFanControlEc.Should().BeFalse();
+            caps.SupportsIndependentFanCurves.Should().BeFalse();
+            caps.AllowDecoupledWmiThermalPolicyFallback.Should().BeTrue(
+                "GitHub #138 reports Performance mode remaining EC-limited, so this exact board should use the OEM WMI thermal-policy fallback until wattage readback is validated");
+            caps.PerformanceCpuPl1Watts.Should().BeNull("issue #138 does not include diagnostics proving the correct PL1");
+            caps.PerformanceCpuPl2Watts.Should().BeNull("issue #138 does not include diagnostics proving the correct PL2");
+            caps.Notes.Should().Contain("GitHub #138");
         }
 
         [Fact]
@@ -356,6 +429,23 @@ namespace OmenCoreApp.Tests.Hardware
             caps.SupportsGpuPowerBoost.Should().BeFalse("no power boost proof yet");
             caps.SupportsUndervolt.Should().BeFalse("no undervolt proof yet");
             caps.HasKeyboardBacklight.Should().BeTrue("keyboard backlight expected");
+        }
+
+        [Fact]
+        public void GetPreferredCapabilities_88EE_ResolvesToExactVictusE0194nwMapping()
+        {
+            var caps = ModelCapabilityDatabase.GetPreferredCapabilities("88EE", "Victus by HP Laptop 16-e0xxx");
+
+            caps.Should().NotBeNull();
+            caps!.ProductId.Should().Be("88EE", "GitHub #140 reports Baseboard ProductId 88EE");
+            caps.ModelName.Should().Contain("e0194nw");
+            caps.ModelNamePattern.Should().Be("16-e0");
+            caps.Family.Should().Be(OmenModelFamily.Victus);
+            caps.SupportsFanControlWmi.Should().BeTrue();
+            caps.SupportsFanControlEc.Should().BeFalse();
+            caps.SupportsFanCurves.Should().BeFalse();
+            caps.HasFourZoneRgb.Should().BeFalse("conservative until the exact 88EE keyboard/RGB hardware is field-verified");
+            caps.Notes.Should().Contain("GitHub #140");
         }
 
         [Fact]

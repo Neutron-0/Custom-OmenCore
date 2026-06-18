@@ -209,7 +209,11 @@ public static class FanCommand
                     // Intermediate speeds: use ACPI profile as closest match
                     Console.ForegroundColor = ConsoleColor.Yellow;
                     Console.WriteLine($"⚠ Your model ({ec.DetectedModel}) does not support precise fan speed control.");
-                    Console.WriteLine($"  The OMEN Max 2025 uses BIOS-managed fan profiles instead of direct speed control.");
+                    Console.WriteLine($"  This backend exposes BIOS-managed fan policy, not verified direct duty control.");
+                    if (string.Equals(ec.DetectedBoardId, "8BCD", StringComparison.OrdinalIgnoreCase))
+                    {
+                        Console.WriteLine("  Board 8BCD reports have shown ACPI WMAA aborts; if RPM does not change, collect `journalctl -k -b` and use profile status as degraded.");
+                    }
                     Console.ResetColor();
                     
                     success = pct <= 30

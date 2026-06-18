@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.Reflection;
 using OmenCore.Linux.Commands;
 using OmenCore.Linux.Config;
+using OmenCore.Linux.Hardware;
 
 namespace OmenCore.Linux;
 
@@ -109,7 +110,9 @@ class Program
                 }
             }
         }
-        catch { }
+        catch (Exception ex) when (IsRecoverableSysfsException(ex))
+        {
+        }
         
         return Environment.OSVersion.ToString();
     }
@@ -152,8 +155,8 @@ class Program
     
     private static async Task ShowBatteryStatusAsync()
     {
-        const string batteryPath = "/sys/class/power_supply/BAT0";
-        const string acPath = "/sys/class/power_supply/AC0";
+        var battery = new LinuxBatteryController();
+        var batteryPath = DiscoverPowerSupplyPath("battery");
         
         Console.WriteLine();
         Console.WriteLine("╔══════════════════════════════════════════════════════╗");
@@ -165,40 +168,31 @@ class Program
         int energyNow = 0;
         int energyFull = 0;
         int powerNow = 0;
-        bool onAc = false;
+        bool onAc = !battery.IsOnBattery();
         
         try
         {
-            // Read capacity
-            var capacityFile = Path.Combine(batteryPath, "capacity");
-            if (File.Exists(capacityFile))
-                capacity = int.Parse(await File.ReadAllTextAsync(capacityFile));
-            
-            // Read status
-            var statusFile = Path.Combine(batteryPath, "status");
-            if (File.Exists(statusFile))
-                status = (await File.ReadAllTextAsync(statusFile)).Trim();
-            
-            // Read energy values
-            var energyNowFile = Path.Combine(batteryPath, "energy_now");
-            if (File.Exists(energyNowFile))
-                energyNow = int.Parse(await File.ReadAllTextAsync(energyNowFile));
-            
-            var energyFullFile = Path.Combine(batteryPath, "energy_full");
-            if (File.Exists(energyFullFile))
-                energyFull = int.Parse(await File.ReadAllTextAsync(energyFullFile));
-            
-            // Read power draw
-            var powerNowFile = Path.Combine(batteryPath, "power_now");
-            if (File.Exists(powerNowFile))
-                powerNow = int.Parse(await File.ReadAllTextAsync(powerNowFile));
-            
-            // Check AC adapter
-            var acOnlineFile = Path.Combine(acPath, "online");
-            if (File.Exists(acOnlineFile))
-                onAc = (await File.ReadAllTextAsync(acOnlineFile)).Trim() == "1";
+            capacity = battery.GetBatteryPercentage() ?? 0;
+            status = battery.GetBatteryStatus() ?? "Unknown";
+
+            if (!string.IsNullOrWhiteSpace(batteryPath))
+            {
+                energyNow = await ReadIntFromFirstExistingAsync(
+                    Path.Combine(batteryPath, "energy_now"),
+                    Path.Combine(batteryPath, "charge_now"));
+
+                energyFull = await ReadIntFromFirstExistingAsync(
+                    Path.Combine(batteryPath, "energy_full"),
+                    Path.Combine(batteryPath, "charge_full"));
+
+                powerNow = await ReadIntFromFirstExistingAsync(
+                    Path.Combine(batteryPath, "power_now"),
+                    Path.Combine(batteryPath, "current_now"));
+            }
         }
-        catch { }
+        catch (Exception ex) when (IsRecoverableSysfsException(ex))
+        {
+        }
         
         var bar = GetProgressBar(capacity, 100, 30);
         var color = capacity > 60 ? ConsoleColor.Green : capacity > 20 ? ConsoleColor.Yellow : ConsoleColor.Red;
@@ -229,6 +223,56 @@ class Program
         
         await Task.CompletedTask;
     }
+
+    private static string? DiscoverPowerSupplyPath(string expectedType)
+    {
+        const string powerSupplyPath = "/sys/class/power_supply";
+        if (!Directory.Exists(powerSupplyPath))
+            return null;
+
+        foreach (var dir in Directory.GetDirectories(powerSupplyPath))
+        {
+            try
+            {
+                var typePath = Path.Combine(dir, "type");
+                if (!File.Exists(typePath))
+                    continue;
+
+                var type = File.ReadAllText(typePath).Trim();
+                if (type.Equals(expectedType, StringComparison.OrdinalIgnoreCase))
+                    return dir;
+            }
+            catch (Exception ex) when (IsRecoverableSysfsException(ex))
+            {
+            }
+        }
+
+        return null;
+    }
+
+    private static async Task<int> ReadIntFromFirstExistingAsync(params string[] paths)
+    {
+        foreach (var path in paths)
+        {
+            if (!File.Exists(path))
+                continue;
+
+            try
+            {
+                var text = await File.ReadAllTextAsync(path);
+                if (int.TryParse(text.Trim(), out var value))
+                    return value;
+            }
+            catch (Exception ex) when (IsRecoverableSysfsException(ex))
+            {
+            }
+        }
+
+        return 0;
+    }
+
+    private static bool IsRecoverableSysfsException(Exception ex) =>
+        ex is IOException or UnauthorizedAccessException or FormatException;
     
     private static async Task SetBatteryProfileAsync(string profileName)
     {

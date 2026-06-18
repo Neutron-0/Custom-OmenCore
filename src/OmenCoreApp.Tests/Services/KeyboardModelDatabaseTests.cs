@@ -150,8 +150,21 @@ namespace OmenCoreApp.Tests.Services
             cfg.Should().NotBeNull();
             cfg!.ProductId.Should().Be("8BD4");
             cfg.ModelName.Should().Contain("16-s0");
-            cfg.PreferredMethod.Should().Be(KeyboardMethod.BacklightOnly);
-            cfg.KeyboardType.Should().Be(KeyboardType.BacklightOnly);
+            cfg.PreferredMethod.Should().Be(KeyboardMethod.ColorTable2020);
+            cfg.KeyboardType.Should().Be(KeyboardType.FourZone);
+            cfg.UserVerified.Should().BeFalse();
+            cfg.Notes.Should().Contain("7Z5Z2EA");
+        }
+
+        [Fact]
+        public void GetConfig_ReturnsColorTableConfig_For_Victus16S0035NtSku()
+        {
+            var cfg = KeyboardModelDatabase.GetConfig("7Z5Z2EA");
+
+            cfg.Should().NotBeNull();
+            cfg!.ModelName.Should().Contain("16-s0035nt");
+            cfg.PreferredMethod.Should().Be(KeyboardMethod.ColorTable2020);
+            cfg.KeyboardType.Should().Be(KeyboardType.FourZone);
             cfg.UserVerified.Should().BeFalse();
         }
 
@@ -205,6 +218,20 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public void GetConfig_ReturnsConfig_For_ProductId_878C()
+        {
+            var cfg = KeyboardModelDatabase.GetConfig("878C");
+
+            cfg.Should().NotBeNull();
+            cfg!.ModelName.Should().Contain("15-ek0");
+            cfg.ModelNamePattern.Should().Be("15-ek0");
+            cfg.PreferredMethod.Should().Be(KeyboardMethod.ColorTable2020);
+            cfg.KeyboardType.Should().Be(KeyboardType.FourZoneTkl);
+            cfg.UserVerified.Should().BeFalse();
+            cfg.Notes.Should().Contain("Sky");
+        }
+
+        [Fact]
         public void GetConfig_ReturnsConfig_For_ProductId_8574()
         {
             var cfg = KeyboardModelDatabase.GetConfig("8574");
@@ -216,6 +243,21 @@ namespace OmenCoreApp.Tests.Services
             cfg.PreferredMethod.Should().Be(KeyboardMethod.BacklightOnly);
             cfg.FallbackMethods.Should().BeEmpty();
             cfg.UserVerified.Should().BeFalse();
+        }
+
+        [Fact]
+        public void GetConfig_ReturnsConfig_For_ProductId_8600()
+        {
+            var cfg = KeyboardModelDatabase.GetConfig("8600");
+
+            cfg.Should().NotBeNull();
+            cfg!.ModelName.Should().Contain("15-dh0");
+            cfg.ModelNamePattern.Should().Be("15-dh0");
+            cfg.KeyboardType.Should().Be(KeyboardType.BacklightOnly);
+            cfg.PreferredMethod.Should().Be(KeyboardMethod.BacklightOnly);
+            cfg.FallbackMethods.Should().BeEmpty();
+            cfg.UserVerified.Should().BeFalse();
+            cfg.Notes.Should().Contain("wafflist");
         }
 
         [Fact]
@@ -246,6 +288,22 @@ namespace OmenCoreApp.Tests.Services
             cfg.FallbackMethods.Should().BeEmpty("no fallbacks for explicit mapping");
             cfg.UserVerified.Should().BeFalse();
             cfg.Notes.Should().Contain("Issue #128");
+        }
+
+        [Fact]
+        public void GetConfig_ReturnsConfig_For_ProductId_88EE()
+        {
+            var cfg = KeyboardModelDatabase.GetConfig("88EE");
+
+            cfg.Should().NotBeNull("88EE must have an exact keyboard entry for GitHub #140");
+            cfg!.ProductId.Should().Be("88EE");
+            cfg.ModelName.Should().Contain("e0194nw");
+            cfg.ModelNamePattern.Should().Be("16-e0");
+            cfg.KeyboardType.Should().Be(KeyboardType.BacklightOnly);
+            cfg.PreferredMethod.Should().Be(KeyboardMethod.BacklightOnly);
+            cfg.FallbackMethods.Should().BeEmpty();
+            cfg.UserVerified.Should().BeFalse();
+            cfg.Notes.Should().Contain("GitHub #140");
         }
     }
 }

@@ -1,6 +1,6 @@
 #define MyAppName "OmenCore"
 #ifndef MyAppVersion
-  #define MyAppVersion "3.7.1"
+  #define MyAppVersion "3.8.0"
 #endif
 #ifndef MyPublishDir
   #define MyPublishDir "..\\publish\\win-x64"
@@ -60,8 +60,8 @@ Name: "{autodesktop}\\{#MyAppName}"; Filename: "{app}\\{#MyAppExeName}"; Tasks: 
 ; This avoids double-startup issues and ensures elevated privileges for hardware access
 
 [Run]
-; Install PawnIO driver if bundled (note: PawnIO uses -silent not /SILENT)
-Filename: "{tmp}\PawnIO_setup.exe"; Parameters: "-silent"; StatusMsg: "Installing PawnIO driver (Secure Boot compatible)..."; Flags: waituntilterminated runhidden; Tasks: installpawnio; Check: not IsPawnIOInstalled
+; Install PawnIO driver if bundled (PawnIO requires an explicit operation verb plus dash-style silent flag)
+Filename: "{tmp}\PawnIO_setup.exe"; Parameters: "-install -silent"; StatusMsg: "Installing PawnIO driver (Secure Boot compatible)..."; Flags: waituntilterminated runhidden; Tasks: installpawnio; Check: not IsPawnIOInstalled
 ; Create scheduled task for autostart if user selected it (runs with elevated privileges)
 Filename: "schtasks"; Parameters: "/create /tn ""OmenCore"" /tr ""\""{app}\\{#MyAppExeName}\"" --minimized"" /sc onlogon /rl highest /f"; Flags: runhidden; Tasks: autostart
 ; Launch OmenCore with elevation (shellexec verb=runas)

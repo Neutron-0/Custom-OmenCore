@@ -965,6 +965,7 @@ namespace OmenCore.ViewModels
         private TuningConflictReport? _lastTuningConflictReport;
         private bool _startupRecoveryNoticeVisible;
         private string _startupRecoveryNoticeText = string.Empty;
+        private string _tuningRollbackStatusText = "Safe rollback has not been run this session.";
 
         public string TuningConflictBannerText => _lastTuningConflictReport?.BannerText ?? string.Empty;
         public bool TuningConflictBannerVisible => _lastTuningConflictReport?.HasConflicts == true;
@@ -979,7 +980,21 @@ namespace OmenCore.ViewModels
             {
                 var startupRecovery = StartupRecoveryNoticeVisible ? "Startup recovery applied" : "No startup recovery event";
                 var gpuBackend = GpuNvapiAvailable ? "NVAPI online" : "NVAPI unavailable";
-                return $"{startupRecovery} | GPU backend: {gpuBackend}";
+                return $"{startupRecovery} | GPU backend: {gpuBackend} | Rollback: {TuningRollbackStatusText}";
+            }
+        }
+
+        public string TuningRollbackStatusText
+        {
+            get => _tuningRollbackStatusText;
+            private set
+            {
+                if (_tuningRollbackStatusText != value)
+                {
+                    _tuningRollbackStatusText = value;
+                    OnPropertyChanged();
+                    OnPropertyChanged(nameof(TuningDiagnosticsCompactDetail));
+                }
             }
         }
 
@@ -2159,6 +2174,11 @@ namespace OmenCore.ViewModels
         }
 
         // CPU Power Limits (PL1/PL2)
+        // Baseline values captured from hardware on first successful InitializeCpuPowerLimits
+        // call; used by ResetCpuPowerLimits so it restores actual BIOS defaults, not guesses.
+        private int _initialPl1Watts;
+        private int _initialPl2Watts;
+
         private int _cpuPl1Watts = 45;
         public int CpuPl1Watts
         {
@@ -2450,6 +2470,7 @@ namespace OmenCore.ViewModels
         public ICommand ApplyCpuPowerLimitsCommand { get; }
         public ICommand ResetCpuPowerLimitsCommand { get; }
         public ICommand RefreshCpuPowerLimitsCommand { get; }
+        public ICommand ApplySafeTuningRollbackCommand { get; }
         public ICommand DismissFanPerformanceInfoBannerCommand { get; }
 
         public SystemControlViewModel(
@@ -2540,7 +2561,9 @@ namespace OmenCore.ViewModels
             // AMD GPU OC commands
             ApplyAmdGpuOcCommand = new RelayCommand(_ => ApplyAmdGpuOc(), _ => _amdGpuService?.IsAvailable == true);
             ResetAmdGpuCommand = new RelayCommand(_ => ResetAmdGpuOc(), _ => _amdGpuService?.IsAvailable == true);
-            SaveGpuOcProfileCommand = new RelayCommand(_ => SaveGpuOcProfile(), _ => GpuOcAvailable && !string.IsNullOrWhiteSpace(NewGpuOcProfileName));
+            // Allow profile save for power-limit-only models (GpuPowerLimitAvailable) as well
+            // as full OC models (GpuOcAvailable) — both paths can persist named profiles
+            SaveGpuOcProfileCommand = new RelayCommand(_ => SaveGpuOcProfile(), _ => (GpuOcAvailable || GpuPowerLimitAvailable) && !string.IsNullOrWhiteSpace(NewGpuOcProfileName));
             DeleteGpuOcProfileCommand = new RelayCommand(_ => DeleteGpuOcProfile(), _ => SelectedGpuOcProfile != null);
             ApplyTccOffsetCommand = new RelayCommand(_ => ApplyTccOffset(), _ => TccStatus.IsSupported);
             ResetTccOffsetCommand = new RelayCommand(_ => ResetTccOffset(), _ => TccStatus.IsSupported);
@@ -2549,6 +2572,7 @@ namespace OmenCore.ViewModels
             ApplyCpuPowerLimitsCommand = new RelayCommand(_ => ApplyCpuPowerLimits(), _ => CpuPowerLimitsAvailable && !CpuPowerLimitsLocked);
             ResetCpuPowerLimitsCommand = new RelayCommand(_ => ResetCpuPowerLimits(), _ => CpuPowerLimitsAvailable && !CpuPowerLimitsLocked);
             RefreshCpuPowerLimitsCommand = new RelayCommand(_ => RefreshCpuPowerLimits());
+            ApplySafeTuningRollbackCommand = new AsyncRelayCommand(_ => ApplySafeTuningRollbackAsync());
             DismissFanPerformanceInfoBannerCommand = new RelayCommand(_ => DismissFanPerformanceInfoBanner());
             
             // Detect AMD CPU
@@ -2570,25 +2594,42 @@ namespace OmenCore.ViewModels
             // Load saved GPU OC profiles
             LoadGpuOcProfiles();
 
-            // Initialize performance modes with descriptions
-            PerformanceModes.Add(new PerformanceMode { Name = "Quiet", Description = "Power saving mode - reduced fan noise, lower power limits. Best for quiet environments and light tasks." });
-            PerformanceModes.Add(new PerformanceMode { Name = "Balanced", Description = "Default mode - balanced performance and power consumption. Good for everyday use." });
-            PerformanceModes.Add(new PerformanceMode { Name = "Performance", Description = "High performance mode - maximum CPU/GPU power, fans ramp up faster. Best for gaming and heavy workloads." });
+            foreach (var mode in BuildPerformanceModesForUi(_configService.Config))
+            {
+                PerformanceModes.Add(mode);
+            }
             
             // Restore last selected performance mode from config, or default to Balanced
             var savedModeName = _configService.Config.LastPerformanceModeName;
-            var savedMode = !string.IsNullOrEmpty(savedModeName) 
-                ? PerformanceModes.FirstOrDefault(m => m.Name == savedModeName) 
-                : PerformanceModes.FirstOrDefault(m => m.Name == "Balanced");
-            SelectedPerformanceMode = savedMode ?? PerformanceModes.FirstOrDefault();
+            var savedMode = !string.IsNullOrWhiteSpace(savedModeName)
+                ? PerformanceModes.FirstOrDefault(m => m.Name.Equals(savedModeName, StringComparison.OrdinalIgnoreCase))
+                : null;
+            savedMode ??= PerformanceModes.FirstOrDefault(m => m.Name.Equals("Balanced", StringComparison.OrdinalIgnoreCase));
 
-            bool startupHardwareRestoreEnabled = ShouldRunStartupHardwareRestore();
+            // Assign directly to the backing field instead of going through the public setter.
+            // The setter calls SavePerformanceModeToConfig on every assignment, which would
+            // silently overwrite the user's saved choice with "Balanced" whenever the saved
+            // mode name can't be resolved (e.g. name mismatch after a locale change or if the
+            // mode was removed). Config persistence should only happen on explicit user action
+            // (ApplyPerformanceModeCommand / SelectPerformanceModeCommand).
+            _selectedPerformanceMode = savedMode ?? PerformanceModes.FirstOrDefault();
+            OnPropertyChanged(nameof(SelectedPerformanceMode));
+            OnPropertyChanged(nameof(CurrentPerformanceModeName));
+            OnPropertyChanged(nameof(CurrentPerformanceModeIndicator));
+            OnPropertyChanged(nameof(PerformanceModeVisualState));
+            OnPropertyChanged(nameof(PerformanceModeVisualLabel));
+            OnPropertyChanged(nameof(IsQuietMode));
+            OnPropertyChanged(nameof(IsBalancedMode));
+            OnPropertyChanged(nameof(IsPerformanceMode));
+
+            bool startupPerformanceRestoreEnabled = ShouldRunStartupHardwareRestore(StartupRestoreCategory.Performance);
+            bool startupTuningRestoreEnabled = ShouldRunStartupHardwareRestore(StartupRestoreCategory.Tuning);
             
             if (savedMode != null)
             {
                 _logging.Info($"Restored last performance mode: {savedModeName}");
 
-                if (startupHardwareRestoreEnabled)
+                if (startupPerformanceRestoreEnabled)
                 {
                     // Actually apply the saved performance mode on startup
                     // Schedule with delay to ensure BIOS is ready
@@ -2604,7 +2645,7 @@ namespace OmenCore.ViewModels
                 }
                 else
                 {
-                    _logging.Warn("Startup hardware restore is disabled - skipping automatic Performance Mode reapply");
+                    _logging.Warn("Startup performance restore is disabled - skipping automatic Performance Mode reapply");
                 }
             }
             
@@ -2615,7 +2656,7 @@ namespace OmenCore.ViewModels
                 _gpuPowerBoostLevel = savedGpuBoostLevel;
                 _logging.Info($"Restored last GPU Power Boost level from config: {savedGpuBoostLevel}");
 
-                if (startupHardwareRestoreEnabled)
+                if (startupPerformanceRestoreEnabled)
                 {
                     // Reapply the saved GPU Power Boost level on startup with proper retry logic
                     // This fixes the issue where GPU TGP resets to Minimum after reboot
@@ -2631,7 +2672,7 @@ namespace OmenCore.ViewModels
                 }
                 else
                 {
-                    _logging.Warn("Startup hardware restore is disabled - skipping automatic GPU Power Boost reapply");
+                    _logging.Warn("Startup performance restore is disabled - skipping automatic GPU Power Boost reapply");
                 }
             }
 
@@ -2665,7 +2706,7 @@ namespace OmenCore.ViewModels
             RespectExternalUndervolt = undervoltPrefs.RespectExternalControllers;
 
             // Startup reapply for CPU undervolt — only when ApplyOnStartup was set by Test Apply -> Keep.
-            if (undervoltPrefs.ApplyOnStartup && startupHardwareRestoreEnabled && (defaultOffset.CoreMv != 0 || defaultOffset.CacheMv != 0))
+            if (undervoltPrefs.ApplyOnStartup && startupTuningRestoreEnabled && (defaultOffset.CoreMv != 0 || defaultOffset.CacheMv != 0))
             {
                 var coreToRestore = defaultOffset.CoreMv;
                 var cacheToRestore = defaultOffset.CacheMv;
@@ -2720,9 +2761,9 @@ namespace OmenCore.ViewModels
                 var savedOffset = _configService.Config.LastTccOffset;
                 if (savedOffset.HasValue && savedOffset.Value > 0)
                 {
-                    if (!ShouldRunStartupHardwareRestore())
+                    if (!ShouldRunStartupHardwareRestore(StartupRestoreCategory.Tuning))
                     {
-                        _logging.Warn("Startup hardware restore is disabled - skipping automatic TCC offset reapply");
+                        _logging.Warn("Startup tuning restore is disabled - skipping automatic TCC offset reapply");
                     }
                     else if (currentOffset != savedOffset.Value)
                     {
@@ -2759,8 +2800,8 @@ namespace OmenCore.ViewModels
         {
             PerCoreOffsets.Clear();
             
-            // Assume up to 16 cores for now (can be made dynamic later)
-            const int maxCores = 16;
+            // 24 covers Raptor Lake HX (8P+16E) and Arrow Lake HX; bump if larger dies ship
+            const int maxCores = 24;
             
             for (int i = 0; i < maxCores; i++)
             {
@@ -2873,8 +2914,9 @@ namespace OmenCore.ViewModels
                     
                     if (attempt < maxRetries)
                     {
-                        // Exponential backoff with jitter
-                        var jitter = new Random().Next(0, 500);
+                        // Exponential backoff with jitter — use Random.Shared to avoid
+                        // identical sequences when multiple instances are created on the same tick
+                        var jitter = Random.Shared.Next(0, 500);
                         var nextDelay = Math.Min(currentDelay * 2 + jitter, maxDelayMs);
                         _logging.Info($"Retrying {settingName} in {nextDelay}ms...");
                         await Task.Delay(nextDelay);
@@ -2886,10 +2928,10 @@ namespace OmenCore.ViewModels
             _logging.Warn($"× {settingName} restoration failed after {maxRetries} attempts");
         }
 
-        private bool ShouldRunStartupHardwareRestore()
+        private bool ShouldRunStartupHardwareRestore(StartupRestoreCategory category)
         {
             var config = _configService.Config;
-            if (!config.EnableStartupHardwareRestore)
+            if (!StartupRestorePolicy.IsEnabled(config, category))
             {
                 return false;
             }
@@ -2900,7 +2942,7 @@ namespace OmenCore.ViewModels
 
             if (riskyModel && !config.AllowStartupRestoreOnOmen16OrVictus)
             {
-                _logging.Warn($"Startup hardware restore blocked on sensitive model '{model}'. Enable AllowStartupRestoreOnOmen16OrVictus to override.");
+                _logging.Warn($"Startup {category} restore blocked on sensitive model '{model}'. Enable AllowStartupRestoreOnOmen16OrVictus to override.");
                 return false;
             }
 
@@ -2921,6 +2963,174 @@ namespace OmenCore.ViewModels
                 CancellationToken.None,
                 TaskContinuationOptions.OnlyOnFaulted,
                 TaskScheduler.Default);
+        }
+
+        private async Task ApplySafeTuningRollbackAsync()
+        {
+            var applied = new List<string>();
+            var skipped = new List<string>();
+
+            TuningRollbackStatusText = "Applying safe rollback...";
+            UndervoltLastActionText = "Safe rollback is clearing persisted tuning state...";
+            UndervoltLastActionColor = System.Windows.Media.Brushes.SkyBlue;
+
+            try
+            {
+                var config = _configService.Config;
+                int? startupPl1 = _initialPl1Watts > 0 ? _initialPl1Watts : null;
+                int? startupPl2 = _initialPl2Watts > 0 ? _initialPl2Watts : null;
+                var outcome = TuningRollbackCoordinator.ApplySafeRollback(config, startupPl1, startupPl2);
+                _configService.Save(config);
+
+                applied.Add(outcome.ConfigChanged
+                    ? $"saved safe startup state ({string.Join(", ", outcome.ChangedAreas)})"
+                    : "startup state already safe");
+
+                TryRunTuningRollbackStep(
+                    "fan OEM auto",
+                    () =>
+                    {
+                        if (_fanService == null)
+                            throw new InvalidOperationException("fan service unavailable");
+
+                        if (!_fanService.RestoreOemAutoControl())
+                            throw new InvalidOperationException("controller returned false");
+                    },
+                    applied,
+                    skipped);
+
+                TryRunTuningRollbackStep(
+                    "Balanced performance mode",
+                    () => SelectPerformanceModeWithoutSave(TuningRollbackCoordinator.SafePerformanceMode),
+                    applied,
+                    skipped);
+
+                if (GpuPowerBoostAvailable)
+                {
+                    TryRunTuningRollbackStep(
+                        "GPU power Minimum",
+                        () =>
+                        {
+                            GpuPowerBoostLevel = TuningRollbackCoordinator.SafeGpuPowerBoostLevel;
+                            ApplyGpuPowerBoost();
+                        },
+                        applied,
+                        skipped);
+                }
+                else
+                {
+                    skipped.Add("GPU power boost backend unavailable");
+                }
+
+                if (CpuPowerLimitsAvailable && !CpuPowerLimitsLocked)
+                {
+                    TryRunTuningRollbackStep("CPU PL1/PL2 startup reset", ResetCpuPowerLimits, applied, skipped);
+                }
+                else
+                {
+                    skipped.Add(CpuPowerLimitsAvailable ? "CPU power limits locked/read-only" : "CPU power limits unavailable");
+                }
+
+                if (TccStatus.IsSupported)
+                {
+                    TryRunTuningRollbackStep("TCC offset reset", ResetTccOffset, applied, skipped);
+                }
+                else
+                {
+                    skipped.Add("TCC offset unavailable");
+                }
+
+                RequestedCoreOffset = 0;
+                RequestedCacheOffset = 0;
+                EnablePerCoreUndervolt = false;
+                RequestedPerCoreOffsets = null;
+                foreach (var core in PerCoreOffsets)
+                {
+                    core.OffsetMv = null;
+                }
+
+                if (IsUndervoltSupported)
+                {
+                    try
+                    {
+                        await ResetUndervoltAsync();
+                        applied.Add("CPU undervolt reset");
+                    }
+                    catch (Exception ex)
+                    {
+                        skipped.Add($"CPU undervolt reset failed: {ex.Message}");
+                        _logging.Warn($"Safe tuning rollback CPU undervolt reset failed: {ex.Message}");
+                    }
+                }
+                else
+                {
+                    skipped.Add("CPU undervolt backend unavailable");
+                    UndervoltLastActionText = "Safe rollback cleared saved undervolt startup state; live CPU undervolt backend unavailable.";
+                    UndervoltLastActionColor = System.Windows.Media.Brushes.Gold;
+                }
+
+                if (GpuNvapiAvailable && (GpuOcAvailable || GpuPowerLimitAvailable))
+                {
+                    TryRunTuningRollbackStep("NVIDIA GPU tuning reset", ResetGpuOc, applied, skipped);
+                }
+                else if (_amdGpuService?.IsAvailable == true)
+                {
+                    TryRunTuningRollbackStep("AMD GPU tuning reset", ResetAmdGpuOc, applied, skipped);
+                }
+                else
+                {
+                    skipped.Add("GPU OC backend unavailable");
+                }
+
+                if (AmdPowerLimitsAvailable)
+                {
+                    TryRunTuningRollbackStep("AMD CPU power defaults", ResetAmdPowerLimits, applied, skipped);
+                }
+                else if (IsAmdCpu)
+                {
+                    skipped.Add("AMD CPU power backend unavailable");
+                }
+
+                StartupRecoveryNoticeVisible = true;
+                StartupRecoveryNoticeText = "Safe tuning rollback applied. Startup tuning state has been normalized to Balanced/Auto defaults; unavailable live hardware backends were skipped.";
+
+                var skippedText = skipped.Count > 0 ? $" Skipped: {string.Join("; ", skipped)}." : string.Empty;
+                TuningRollbackStatusText = $"Applied: {string.Join("; ", applied)}.{skippedText}";
+                _logging.Info($"Safe tuning rollback completed. Applied=[{string.Join("; ", applied)}], Skipped=[{string.Join("; ", skipped)}]");
+
+                OnPropertyChanged(nameof(CurrentPerformanceModeName));
+                OnPropertyChanged(nameof(CurrentPerformanceModeIndicator));
+                OnPropertyChanged(nameof(IsQuietMode));
+                OnPropertyChanged(nameof(IsBalancedMode));
+                OnPropertyChanged(nameof(IsPerformanceMode));
+                OnPropertyChanged(nameof(GpuOcRequestedChipText));
+                OnPropertyChanged(nameof(GpuOcConfirmedChipText));
+            }
+            catch (Exception ex)
+            {
+                TuningRollbackStatusText = $"Safe rollback failed: {ex.Message}";
+                UndervoltLastActionText = $"Safe rollback failed: {ex.Message}";
+                UndervoltLastActionColor = System.Windows.Media.Brushes.OrangeRed;
+                _logging.Error($"Safe tuning rollback failed: {ex.Message}", ex);
+            }
+        }
+
+        private void TryRunTuningRollbackStep(
+            string label,
+            Action action,
+            ICollection<string> applied,
+            ICollection<string> skipped)
+        {
+            try
+            {
+                action();
+                applied.Add(label);
+            }
+            catch (Exception ex)
+            {
+                skipped.Add($"{label}: {ex.Message}");
+                _logging.Warn($"Safe tuning rollback step '{label}' skipped/failed: {ex.Message}");
+            }
         }
         
         private void ApplyTccOffset()
@@ -3064,6 +3274,14 @@ namespace OmenCore.ViewModels
                 CpuPl1Watts = (int)Math.Round(pl1);
                 CpuPl2Watts = (int)Math.Round(pl2);
                 CpuPowerLimitsLocked = isLocked;
+
+                // Capture startup baseline once so ResetCpuPowerLimits can restore the
+                // actual BIOS-reported values rather than hardcoded Intel-mobile guesses.
+                if (_initialPl1Watts == 0 && pl1 > 0)
+                {
+                    _initialPl1Watts = CpuPl1Watts;
+                    _initialPl2Watts = CpuPl2Watts;
+                }
 
                 if (pl1 <= 0 && pl2 <= 0)
                 {
@@ -3216,11 +3434,14 @@ namespace OmenCore.ViewModels
 
             try
             {
-                // Reset to Intel defaults: typically 45W PL1 and 65W PL2 for mobile
-                int defaultPl1 = 45;
-                int defaultPl2 = 65;
+                // Restore the values read from hardware at startup rather than using
+                // hardcoded Intel-mobile guesses (45W/65W is wrong for many H-series
+                // CPUs and meaningless for AMD). Fall back to hardcoded values only
+                // when the initial read returned 0 (e.g. firmware locked on first boot).
+                int defaultPl1 = _initialPl1Watts > 0 ? _initialPl1Watts : 45;
+                int defaultPl2 = _initialPl2Watts > 0 ? _initialPl2Watts : 65;
 
-                _logging.Info($"Resetting CPU power limits to defaults: PL1={defaultPl1}W, PL2={defaultPl2}W");
+                _logging.Info($"Resetting CPU power limits to startup-read values: PL1={defaultPl1}W, PL2={defaultPl2}W");
                 _msrAccess.SetPowerLimits(defaultPl1, defaultPl2);
 
                 CpuPl1Watts = defaultPl1;
@@ -3229,9 +3450,9 @@ namespace OmenCore.ViewModels
                 var (newPl1, newPl2, _, _, _) = _msrAccess.GetPowerLimitStatus();
                 CurrentPl1Watts = newPl1;
                 CurrentPl2Watts = newPl2;
-                CpuPowerLimitsStatus = $"✓ Reset to defaults (PL1: {newPl1:F0}W, PL2: {newPl2:F0}W)";
+                CpuPowerLimitsStatus = $"✓ Reset to startup values (PL1: {newPl1:F0}W, PL2: {newPl2:F0}W)";
 
-                _logging.Info("CPU power limits reset to defaults");
+                _logging.Info($"CPU power limits reset to startup-read values (PL1={defaultPl1}W, PL2={defaultPl2}W)");
             }
             catch (Exception ex)
             {
@@ -3455,27 +3676,43 @@ namespace OmenCore.ViewModels
         {
             try
             {
-                var current = _wmiBios?.GetGpuPower();
+                // Use GetGpuPowerDetailed() so ppabLevel (integer) is available.
+                // GetGpuPower() only returns ppab as bool, making Extended and Maximum
+                // indistinguishable — hardware stuck at Maximum while Extended was requested
+                // would incorrectly pass the old bool check.
+                var current = _wmiBios?.GetGpuPowerDetailed();
                 if (!current.HasValue)
                 {
                     // Cannot read back — assume success to avoid false negatives
-                    _logging.Debug("GPU power readback: GetGpuPower returned null — skipping verification");
+                    _logging.Debug("GPU power readback: GetGpuPowerDetailed returned null — skipping verification");
                     return true;
                 }
 
                 bool expectedCustomTgp = requestedLevel != HpWmiBios.GpuPowerLevel.Minimum;
-                bool expectedPpab = requestedLevel == HpWmiBios.GpuPowerLevel.Maximum
-                                 || requestedLevel == HpWmiBios.GpuPowerLevel.Extended3
-                                 || requestedLevel == HpWmiBios.GpuPowerLevel.Extended4;
+
+                // Map requested level to the minimum acceptable ppabLevel integer.
+                // Maximum  → ppabLevel >= 1
+                // Extended3 → ppabLevel >= 2
+                // Extended4 → ppabLevel >= 3
+                // All others (Minimum/Medium) → ppabLevel == 0
+                int expectedPpabLevel = requestedLevel switch
+                {
+                    HpWmiBios.GpuPowerLevel.Maximum   => 1,
+                    HpWmiBios.GpuPowerLevel.Extended3 => 2,
+                    HpWmiBios.GpuPowerLevel.Extended4 => 3,
+                    _                                 => 0
+                };
 
                 bool customTgpOk = current.Value.customTgp == expectedCustomTgp;
-                bool ppabOk = current.Value.ppab == expectedPpab;
+                bool ppabOk = expectedPpabLevel == 0
+                    ? current.Value.ppabLevel == 0
+                    : current.Value.ppabLevel >= expectedPpabLevel;
 
-                _logging.Info($"GPU power readback: customTgp={current.Value.customTgp} (expected={expectedCustomTgp}), ppab={current.Value.ppab} (expected={expectedPpab}), dState={current.Value.dState}");
+                _logging.Info($"GPU power readback: customTgp={current.Value.customTgp} (expected={expectedCustomTgp}), ppabLevel={current.Value.ppabLevel} (expected>={expectedPpabLevel}), dState={current.Value.dState}");
 
                 if (!customTgpOk || !ppabOk)
                 {
-                    _logging.Warn($"GPU power readback mismatch: customTgp match={customTgpOk}, ppab match={ppabOk}");
+                    _logging.Warn($"GPU power readback mismatch: customTgp match={customTgpOk}, ppabLevel match={ppabOk}");
                     return false;
                 }
 
@@ -3863,6 +4100,38 @@ namespace OmenCore.ViewModels
             {
                 _logging.Warn($"Failed to save performance mode to config: {ex.Message}");
             }
+        }
+
+        public static IReadOnlyList<PerformanceMode> BuildPerformanceModesForUi(AppConfig config)
+        {
+            var configuredModes = config.PerformanceModes?.Count > 0
+                ? config.PerformanceModes
+                : DefaultConfiguration.Create().PerformanceModes;
+
+            return configuredModes
+                .Select(mode => new PerformanceMode
+                {
+                    Name = mode.Name,
+                    CpuPowerLimitWatts = mode.CpuPowerLimitWatts,
+                    CpuBoostPowerLimitWatts = mode.CpuBoostPowerLimitWatts,
+                    GpuPowerLimitWatts = mode.GpuPowerLimitWatts,
+                    LinkedPowerPlanGuid = mode.LinkedPowerPlanGuid,
+                    Description = string.IsNullOrWhiteSpace(mode.Description)
+                        ? GetDefaultPerformanceModeDescription(mode.Name)
+                        : mode.Description
+                })
+                .ToList();
+        }
+
+        private static string GetDefaultPerformanceModeDescription(string? modeName)
+        {
+            return modeName?.Trim().ToLowerInvariant() switch
+            {
+                "quiet" or "silent" or "powersaver" => "Power saving mode - reduced fan noise, lower power limits. Best for quiet environments and light tasks.",
+                "performance" => "High performance mode - higher CPU/GPU power targets for gaming and heavy workloads.",
+                "turbo" or "extreme" => "Maximum configured performance profile for short high-load sessions.",
+                _ => "Default mode - balanced performance and power consumption. Good for everyday use."
+            };
         }
         
         #region GPU Overclocking (NVAPI)
@@ -4363,6 +4632,12 @@ namespace OmenCore.ViewModels
                 var config = _configService.Config;
                 if (config.GpuOc != null && config.GpuOc.ApplyOnStartup)
                 {
+                    if (!ShouldRunStartupHardwareRestore(StartupRestoreCategory.Tuning))
+                    {
+                        _logging.Warn("Startup tuning restore is disabled - skipping automatic GPU OC reapply");
+                        return;
+                    }
+
                     var guardrailNote = ApplyGpuOcRequestToUi(
                         config.GpuOc.CoreClockOffsetMHz,
                         config.GpuOc.MemoryClockOffsetMHz,

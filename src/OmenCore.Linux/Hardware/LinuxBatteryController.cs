@@ -43,7 +43,7 @@ public class LinuxBatteryController
                     _acAdapterPath = dir;
                 }
             }
-            catch
+            catch (Exception ex) when (IsRecoverablePowerSupplyException(ex))
             {
                 // Ignore discovery errors
             }
@@ -74,7 +74,9 @@ public class LinuxBatteryController
                     _lastOnBattery = online == "0"; // 0 = not plugged in = on battery
                     return _lastOnBattery;
                 }
-                catch { }
+                catch (Exception ex) when (IsRecoverablePowerSupplyException(ex))
+                {
+                }
             }
         }
         
@@ -90,7 +92,9 @@ public class LinuxBatteryController
                     _lastOnBattery = status == "discharging";
                     return _lastOnBattery;
                 }
-                catch { }
+                catch (Exception ex) when (IsRecoverablePowerSupplyException(ex))
+                {
+                }
             }
         }
         
@@ -115,7 +119,9 @@ public class LinuxBatteryController
             if (int.TryParse(content, out var capacity))
                 return capacity;
         }
-        catch { }
+        catch (Exception ex) when (IsRecoverablePowerSupplyException(ex))
+        {
+        }
         
         return null;
     }
@@ -136,9 +142,12 @@ public class LinuxBatteryController
         {
             return File.ReadAllText(statusPath).Trim();
         }
-        catch
+        catch (Exception ex) when (IsRecoverablePowerSupplyException(ex))
         {
             return null;
         }
     }
+
+    private static bool IsRecoverablePowerSupplyException(Exception ex) =>
+        ex is IOException or UnauthorizedAccessException or FormatException;
 }

@@ -80,6 +80,7 @@ namespace OmenCore.Services
             config.Undervolt ??= new();
             config.Monitoring ??= new();
             config.Updates ??= new();
+            config.Features ??= new();
 
             // Validate monitoring interval
             if (config.MonitoringIntervalMs < 500 || config.MonitoringIntervalMs > 10000)

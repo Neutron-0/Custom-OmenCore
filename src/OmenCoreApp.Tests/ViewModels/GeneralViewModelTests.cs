@@ -209,6 +209,62 @@ namespace OmenCoreApp.Tests.ViewModels
         }
 
         [Fact]
+        public void UpdateFromMonitoringSample_WhenCpuPowerIsZero_ShowsUnavailablePowerDisplay()
+        {
+            var vm = CreateViewModel(out var logging);
+            try
+            {
+                vm.UpdateFromMonitoringSample(new MonitoringSample
+                {
+                    CpuTemperatureC = 53,
+                    CpuTemperatureState = TelemetryDataState.Valid,
+                    CpuLoadPercent = 4,
+                    CpuPowerWatts = 0,
+                    CpuPowerState = TelemetryDataState.Zero,
+                    GpuTemperatureC = 45,
+                    GpuTemperatureState = TelemetryDataState.Valid,
+                    GpuPowerWatts = 0
+                });
+
+                vm.CpuPowerWatts.Should().Be(0);
+                vm.CpuPowerDisplay.Should().Be("--W");
+                vm.IsCpuPowerAvailable.Should().BeFalse();
+                vm.CpuPowerTooltip.Should().Contain("returned 0W");
+            }
+            finally
+            {
+                logging.Dispose();
+            }
+        }
+
+        [Fact]
+        public void UpdateFromMonitoringSample_WhenCpuPowerIsPositive_ShowsWatts()
+        {
+            var vm = CreateViewModel(out var logging);
+            try
+            {
+                vm.UpdateFromMonitoringSample(new MonitoringSample
+                {
+                    CpuTemperatureC = 63,
+                    CpuTemperatureState = TelemetryDataState.Valid,
+                    CpuLoadPercent = 38,
+                    CpuPowerWatts = 32.4,
+                    CpuPowerState = TelemetryDataState.Valid,
+                    GpuTemperatureC = 45,
+                    GpuTemperatureState = TelemetryDataState.Valid
+                });
+
+                vm.CpuPowerDisplay.Should().Be("32W");
+                vm.IsCpuPowerAvailable.Should().BeTrue();
+                vm.CpuPowerTooltip.Should().Contain("package power");
+            }
+            finally
+            {
+                logging.Dispose();
+            }
+        }
+
+        [Fact]
         public void UpdateFromMonitoringSample_SuppressesMinorRapidProjectionStorms()
         {
             RuntimeUiPerformanceCounters.ResetForTests();

@@ -11,6 +11,21 @@ namespace OmenCoreApp.Tests.Services.KeyboardLighting
     public class WmiBiosBackendTests
     {
         [Fact]
+        public void RgbApplyResult_AcceptedButUnverified_DoesNotCountAsSuccess()
+        {
+            var result = new RgbApplyResult
+            {
+                BackendReportedSuccess = true,
+                SupportsVerification = true,
+                VerificationPassed = false,
+                VerificationAdvisory = "Color verification failed - keyboard may not support this method"
+            };
+
+            result.AcceptedButUnverified.Should().BeTrue();
+            result.Success.Should().BeFalse();
+        }
+
+        [Fact]
         public async Task VerifyColorReadbackWithRetriesAsync_ThirdReadMatches_ReturnsSuccess()
         {
             var expected = new[]

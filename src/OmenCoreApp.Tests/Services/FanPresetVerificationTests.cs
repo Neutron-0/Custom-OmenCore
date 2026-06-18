@@ -413,6 +413,78 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public void CommandHistory_RecordsCapabilityGatesAndTelemetrySnapshot()
+        {
+            var logging = new LoggingService();
+            logging.Initialize();
+
+            var controller = new NoEffectController();
+            var hwMonitor = new OmenCore.Hardware.LibreHardwareMonitorImpl();
+            var thermalProvider = new OmenCore.Hardware.ThermalSensorProvider(hwMonitor);
+            var notificationService = new NotificationService(logging);
+            var capabilities = new OmenCore.Hardware.DeviceCapabilities
+            {
+                ProductId = "878C",
+                ModelName = "OMEN Laptop 15-ek0xxx",
+                Chassis = OmenCore.Hardware.ChassisType.Laptop,
+                ModelFamily = OmenCore.Hardware.OmenModelFamily.Legacy,
+                IsKnownModel = true,
+                ModelConfig = OmenCore.Hardware.ModelCapabilityDatabase.GetCapabilities("878C")
+            };
+            var fanService = new FanService(
+                controller,
+                thermalProvider,
+                logging,
+                notificationService,
+                1000,
+                new ResumeRecoveryDiagnosticsService(),
+                capabilities: capabilities);
+
+            try
+            {
+                var telemetryField = typeof(FanService).GetField(
+                    "_fanTelemetry",
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic);
+                var telemetry = telemetryField!.GetValue(fanService)
+                    .Should().BeAssignableTo<System.Collections.ObjectModel.ObservableCollection<FanTelemetry>>()
+                    .Subject;
+                telemetry.Add(new FanTelemetry
+                {
+                    Name = "CPU Fan",
+                    SpeedRpm = 1000,
+                    DutyCyclePercent = 40,
+                    RpmState = TelemetryDataState.Valid,
+                    RpmSource = RpmSource.WmiBios
+                });
+
+                fanService.ForceSetFanSpeed(55);
+
+                var entry = fanService.GetCommandHistorySnapshot()
+                    .Last(e => e.Command == "ForceSetFanSpeed");
+
+                entry.ProductId.Should().Be("878C");
+                entry.ModelName.Should().Be("OMEN Laptop 15-ek0xxx");
+                entry.FanWritesAvailable.Should().BeTrue();
+                entry.FanCurvesAvailable.Should().BeTrue();
+                entry.ManualFanControlAvailable.Should().BeTrue();
+                entry.DesktopFanWritesBlocked.Should().BeFalse();
+                entry.TelemetrySummary.Should().Contain("CPU Fan");
+                entry.TelemetrySummary.Should().Contain("1000 RPM");
+                entry.TelemetrySummary.Should().Contain("duty 40%");
+
+                var report = fanService.GetFanCommandHistoryReport();
+                report.Should().Contain("model=OMEN Laptop 15-ek0xxx (878C)");
+                report.Should().Contain("writes=True; curves=True; manual=True; desktopBlocked=False");
+                report.Should().Contain("readback=CPU Fan: 1000 RPM, duty 40%");
+            }
+            finally
+            {
+                fanService.Dispose();
+                logging.Dispose();
+            }
+        }
+
+        [Fact]
         public void FanActivityStateChanged_Fires_WhenCustomCurveStartsAndStops()
         {
             var logging = new LoggingService();

@@ -23,6 +23,9 @@ namespace OmenCore.ViewModels
         private const int UiProjectionFanRpmDelta = 120;
         private const string CelsiusSuffix = "\u00B0C";
         private const string MissingTemperatureDisplay = "--\u00B0C";
+        private const double MaxPlausibleDashboardTempC = 105;
+        private const double SuspectBiosSentinelTempC = 100;
+        private const double SuspectBiosSentinelDeltaC = 25;
 
         /// <summary>Time range options in minutes for the graph time-range selector.</summary>
         public static readonly int[] TimeRangeOptions = { 1, 5, 15, 30 };
@@ -557,15 +560,14 @@ namespace OmenCore.ViewModels
                 if (_fanService?.FanTelemetry == null || _fanService.FanTelemetry.Count == 0)
                     return "Fan curve unavailable";
                 
-                var cpuTemp = LatestMonitoringSample?.CpuTemperatureC ?? 0;
-                var gpuTemp = LatestMonitoringSample?.GpuTemperatureC ?? 0;
-                var validTemps = new[] { cpuTemp, gpuTemp }.Where(temp => temp > 0).ToList();
-                var avgTemp = validTemps.Count > 0 ? validTemps.Average() : 0;
+                var avgTemp = LatestMonitoringSample is { } sample
+                    ? GetDashboardThermalProjectionTemps(sample).DefaultIfEmpty(0).Average()
+                    : 0;
                 
                 var cpuFan = CpuFanDisplay;
                 var gpuFan = GpuFanDisplay;
                 
-                return $"{avgTemp:F0}°C → CPU: {cpuFan} • GPU: {gpuFan}";
+                return $"{avgTemp:F0}{CelsiusSuffix} -> CPU: {cpuFan} | GPU: {gpuFan}";
             }
         }
 
@@ -1151,8 +1153,13 @@ namespace OmenCore.ViewModels
             if (_fanService?.FanTelemetry == null || _fanService.FanTelemetry.Count == 0)
                 return;
             
-            // Calculate average temperature for fan curve
-            var avgTemp = (int)((sample.CpuTemperatureC + sample.GpuTemperatureC) / 2);
+            var usableTemps = GetDashboardThermalProjectionTemps(sample).ToList();
+            if (usableTemps.Count == 0)
+            {
+                return;
+            }
+
+            var avgTemp = (int)Math.Round(usableTemps.Average());
             
             // Get current fan speeds
             var cpuFanRpm = _fanService.FanTelemetry.Count > 0 ? _fanService.FanTelemetry[0].SpeedRpm : 0;
@@ -1172,6 +1179,59 @@ namespace OmenCore.ViewModels
             {
                 _fanCurvePoints.RemoveAt(0);
             }
+        }
+
+        private static IEnumerable<double> GetDashboardThermalProjectionTemps(MonitoringSample sample)
+        {
+            var cpuTemp = GetUsableDashboardTemperature(sample.CpuTemperatureC, sample.CpuTemperatureState);
+            var gpuTemp = GetUsableDashboardTemperature(sample.GpuTemperatureC, sample.GpuTemperatureState);
+
+            if (IsLikelyBrokenBiosSentinel(cpuTemp, gpuTemp))
+            {
+                cpuTemp = null;
+            }
+
+            if (IsLikelyBrokenBiosSentinel(gpuTemp, cpuTemp))
+            {
+                gpuTemp = null;
+            }
+
+            if (cpuTemp.HasValue)
+            {
+                yield return cpuTemp.Value;
+            }
+
+            if (gpuTemp.HasValue)
+            {
+                yield return gpuTemp.Value;
+            }
+        }
+
+        private static double? GetUsableDashboardTemperature(double temp, TelemetryDataState state)
+        {
+            if (state is TelemetryDataState.Invalid or TelemetryDataState.Unavailable or TelemetryDataState.Inactive or TelemetryDataState.Stale)
+            {
+                return null;
+            }
+
+            if (double.IsNaN(temp) || double.IsInfinity(temp) || temp <= 0 || temp > MaxPlausibleDashboardTempC)
+            {
+                return null;
+            }
+
+            return temp;
+        }
+
+        private static bool IsLikelyBrokenBiosSentinel(double? candidate, double? paired)
+        {
+            if (!candidate.HasValue || !paired.HasValue)
+            {
+                return false;
+            }
+
+            return Math.Abs(candidate.Value - SuspectBiosSentinelTempC) < 0.1
+                   && paired.Value <= 80
+                   && candidate.Value - paired.Value >= SuspectBiosSentinelDeltaC;
         }
         
         /// <summary>

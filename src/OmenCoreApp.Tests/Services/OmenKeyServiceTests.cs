@@ -41,6 +41,22 @@ namespace OmenCoreApp.Tests.Services
             InvokeIsOmenKey(service, VkF12, 0x0058).Should().BeFalse();
         }
 
+        [Fact]
+        public void GetDiagnosticSnapshot_ReportsDefaultGuardState_WhenNotStarted()
+        {
+            using var service = CreateService();
+
+            var snapshot = service.GetDiagnosticSnapshot();
+
+            snapshot.Enabled.Should().BeTrue();
+            snapshot.Action.Should().Be(OmenKeyAction.ToggleOmenCore);
+            snapshot.HookActive.Should().BeFalse();
+            snapshot.WmiWatcherActive.Should().BeFalse();
+            snapshot.StrictMode.Should().BeTrue();
+            snapshot.FirmwareFnPProfileCycleEnabled.Should().BeFalse();
+            snapshot.LastNeverInterceptAgeMs.Should().BeNull();
+        }
+
         private static OmenKeyService CreateService()
         {
             var logging = new LoggingService();

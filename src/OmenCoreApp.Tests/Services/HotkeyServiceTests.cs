@@ -88,6 +88,25 @@ namespace OmenCoreApp.Tests.Services
         }
 
         [Fact]
+        public void GetDiagnosticSnapshot_ReportsPendingBindings_WhenWindowHandleIsNotReady()
+        {
+            using var logging = new LoggingService();
+            var service = new HotkeyService(logging);
+
+            service.RegisterDefaultHotkeys();
+
+            var snapshot = service.GetDiagnosticSnapshot();
+
+            snapshot.Enabled.Should().BeTrue();
+            snapshot.WindowHandleReady.Should().BeFalse();
+            snapshot.RegisteredCount.Should().Be(0);
+            snapshot.PendingCount.Should().BeGreaterThan(0);
+            snapshot.PendingBindings.Should().Contain(binding =>
+                binding.Action == HotkeyAction.ShowWindow &&
+                binding.Chord == "Win + F12");
+        }
+
+        [Fact]
         public void UnregisterAllHotkeys_ClearsPendingQueue()
         {
             using var logging = new LoggingService();

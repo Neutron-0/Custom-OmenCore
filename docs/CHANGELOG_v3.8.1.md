@@ -131,3 +131,9 @@ A targeted pass over GPU power (`NvapiService`, `AmdGpuService`) and RGB/keyboar
 - Version metadata aligned to `3.8.1` across `VERSION.txt`, all active project files (`OmenCoreApp`, `OmenCore.Avalonia`, `OmenCore.Linux`, `OmenCore.HardwareWorker`), the installer script, the Avalonia version fallback, README, INSTALL, and the `launch-readiness.txt`/`field-validation-script.txt`/`priority-model-validation-cards.txt`/`rc-validation-matrix.txt` diagnostic headings (and their snapshot tests). `src/OmenCore.Desktop` was left unversioned per existing policy.
 - No #144 hardware acceptance claim is made until an `8A18` tester completes the bounded checks in the bug tracker.
 - No claim is made that this session's GPU OC chip, OMEN-key diagnostics, or background-timer registrations have been validated on physical OMEN/Victus hardware — this development environment is not HP hardware (`Win32_ComputerSystem.Manufacturer` is ASUS). All of #141, #142, #143, #144 hardware acceptance, and the PERF-3810-001 resource scenario matrix still require a real reference machine.
+- Windows artifacts built successfully with `build-installer.ps1 -Runtime win-x64 -SingleFile`: `OmenCoreSetup-3.8.1.exe` and `OmenCore-3.8.1-win-x64.zip`.
+- Linux artifact built successfully with `build-linux-package.ps1 -SkipBinaryVersionCheck`: `OmenCore-3.8.1-linux-x64.zip`, `.sha256`, and `version.json`. Binary execution smoke was skipped because this run was on Windows, not Linux/WSL — per the release gate, that smoke test and all physical hardware acceptance criteria above remain pending before tagging `v3.8.1`.
+- Artifact SHA256:
+  - `01194B495025D5C32EDBD13754BA7B55FC0403B78F1E023D2895F486B5AF6A9C  OmenCoreSetup-3.8.1.exe`
+  - `BF76A925D33C68C8A35393645DD2E6C0CDF181E99BB04798A7D2BBE8BD470C86  OmenCore-3.8.1-win-x64.zip`
+  - `938081AD650F6F5F01FEA405D505A2A3AD826DDF1706F53C3D2E71D02AFC8CE9  OmenCore-3.8.1-linux-x64.zip`

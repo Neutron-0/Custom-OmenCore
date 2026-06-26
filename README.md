@@ -78,12 +78,15 @@ v3.8.1 is a post-3.8.0 field-reliability patch. It focuses on GitHub #141-#145 f
 
 ## Current Development Focus
 
-**v3.8.1 should stay a patch/pre-release** until its tracked items have physical hardware validation: `8DCD` fan-thermal safety, `8D26` key routing, `8E9A` identity, background-resource budgets, and GPU OC startup reapply on real NVIDIA/AMD hardware.
+**v3.8.2 is a release-blocker patch for a critical Application Hang** reported within hours of v3.8.1 shipping (OMEN 16-xd0010ax / `8BCD`, hang within 10-20s of launch). The fix is code-complete and test-verified in this environment, but is not yet confirmed on the reporter's physical hardware — see [docs/CHANGELOG_v3.8.2.md](docs/CHANGELOG_v3.8.2.md).
 
-The active 3.8.1 work is tracked in:
+**v3.8.1's own tracked items are unchanged and still gated on physical hardware validation:** `8DCD` fan-thermal safety, `8D26` key routing, `8E9A` identity, background-resource budgets, and GPU OC startup reapply on real NVIDIA/AMD hardware.
 
-- [docs/CHANGELOG_v3.8.1.md](docs/CHANGELOG_v3.8.1.md) - patch release notes and validation status.
-- [docs/3.8.1-BUG-REPORTS.md](docs/3.8.1-BUG-REPORTS.md) - GitHub #141-#144, saved Custom fan selection, GPU OC persistence, background-resource work, test requirements, and hardware acceptance gates.
+The active work is tracked in:
+
+- [docs/CHANGELOG_v3.8.2.md](docs/CHANGELOG_v3.8.2.md) - the hang-fix patch release notes and validation status.
+- [docs/CHANGELOG_v3.8.1.md](docs/CHANGELOG_v3.8.1.md) - prior patch release notes and validation status.
+- [docs/3.8.1-BUG-REPORTS.md](docs/3.8.1-BUG-REPORTS.md) - GitHub #141-#144, saved Custom fan selection, GPU OC persistence, background-resource work, the v3.8.2 hang (`BUG-3820-001`), test requirements, and hardware acceptance gates.
 - [docs/3.8.1-MIGRATION-HANDOFF.md](docs/3.8.1-MIGRATION-HANDOFF.md) - fresh-PC setup, repository state, implementation order, and release procedure.
 
 Prior-release work is kept for historical reference:

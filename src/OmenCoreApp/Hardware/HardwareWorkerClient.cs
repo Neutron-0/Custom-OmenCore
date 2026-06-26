@@ -34,6 +34,14 @@ namespace OmenCore.Hardware
         
         private Process? _workerProcess;
         private NamedPipeClientStream? _pipeClient;
+        // Serializes request/response round-trips on the single shared pipe handle.
+        // Without this, two callers racing WriteAsync+ReadAsync on the same NamedPipeClientStream
+        // can have their responses delivered to the wrong caller (message N's reply read by the
+        // caller waiting on message N+1), permanently desyncing every future request on this
+        // connection. A timed-out read leaves an un-consumed response message sitting in the pipe
+        // buffer for exactly this reason, so any timeout/error also tears the connection down
+        // (see SendRequestAsync) rather than reusing a pipe that may have a stale message queued.
+        private readonly SemaphoreSlim _requestGate = new(1, 1);
         private readonly Action<string>? _logger;
         private readonly bool _orphanTimeoutEnabled;
         private readonly int _orphanTimeoutMinutes;
@@ -424,8 +432,11 @@ namespace OmenCore.Hardware
                     return _cachedSample;
                 }
                 
-                _logger?.Invoke($"[Worker] Received JSON ({json.Length} bytes): GPU={json.Contains("GpuTemperature", StringComparison.OrdinalIgnoreCase)}");
-                
+                // Note: deliberately no per-poll "received JSON" log line here. The previous
+                // implementation ran an O(n) json.Contains() substring scan over the telemetry
+                // payload on every ~2s poll purely to format a debug-level boolean that is
+                // dropped at the sink in production — wasted CPU/allocations on the hot path.
+                // The "Deserialized sample" line below already records the parsed result.
                 var sample = JsonSerializer.Deserialize<HardwareSample>(json);
                 if (sample != null)
                 {
@@ -465,8 +476,9 @@ namespace OmenCore.Hardware
             {
                 _workerProcess?.Dispose();
             }
-            catch
+            catch (Exception ex)
             {
+                _logger?.Invoke($"[Worker] Failed to dispose worker process handle: {ex.Message}");
             }
 
             _workerProcess = null;
@@ -476,27 +488,57 @@ namespace OmenCore.Hardware
         {
             if (_pipeClient == null || !_pipeClient.IsConnected)
                 return "";
-            
-            var buffer = ArrayPool<byte>.Shared.Rent(65536);
+
+            // Only one request/response round-trip on the pipe at a time (see field comment).
+            await _requestGate.WaitAsync();
             try
             {
-                var requestBytes = Encoding.UTF8.GetBytes(request);
-                await _pipeClient.WriteAsync(requestBytes, 0, requestBytes.Length);
-                await _pipeClient.FlushAsync();
-                
-                using var cts = new CancellationTokenSource(RequestTimeoutMs);
-                var bytesRead = await _pipeClient.ReadAsync(buffer, 0, buffer.Length, cts.Token);
-                
-                return Encoding.UTF8.GetString(buffer, 0, bytesRead);
-            }
-            catch (Exception ex)
-            {
-                _logger?.Invoke($"[Worker] Request error: {ex.Message}");
-                return "";
+                if (_pipeClient == null || !_pipeClient.IsConnected)
+                    return "";
+
+                var buffer = ArrayPool<byte>.Shared.Rent(65536);
+                try
+                {
+                    using var cts = new CancellationTokenSource(RequestTimeoutMs);
+
+                    var requestBytes = Encoding.UTF8.GetBytes(request);
+                    await _pipeClient.WriteAsync(requestBytes, 0, requestBytes.Length, cts.Token);
+                    await _pipeClient.FlushAsync(cts.Token);
+
+                    var bytesRead = await _pipeClient.ReadAsync(buffer, 0, buffer.Length, cts.Token);
+
+                    return Encoding.UTF8.GetString(buffer, 0, bytesRead);
+                }
+                catch (Exception ex)
+                {
+                    _logger?.Invoke($"[Worker] Request error: {ex.Message}");
+
+                    // A timed-out/failed read may leave an un-consumed response message sitting
+                    // in the pipe buffer (or a partially-read message split across the boundary).
+                    // Reusing this handle would hand that stale/partial message to the next,
+                    // unrelated request. Tear the connection down so the next call reconnects
+                    // fresh — IsConnected will report false and ShouldRecoverConnection/
+                    // TryConnectToExistingWorkerAsync handle re-establishing it.
+                    try
+                    {
+                        _pipeClient?.Dispose();
+                    }
+                    catch (Exception disposeEx)
+                    {
+                        _logger?.Invoke($"[Worker] Failed to dispose pipe after request error: {disposeEx.Message}");
+                    }
+                    _pipeClient = null;
+
+                    return "";
+                }
+                finally
+                {
+                    ArrayPool<byte>.Shared.Return(buffer);
+                }
             }
             finally
             {
-                ArrayPool<byte>.Shared.Return(buffer);
+                _requestGate.Release();
             }
         }
         

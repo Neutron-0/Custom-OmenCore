@@ -56,7 +56,9 @@ namespace OmenCoreApp.Tests
             "FanControllerFactory.cs:1168", // shifted from :1165 after WMI wrapper external-reset status properties
             "FanControllerFactory.cs:1200", // shifted from :1197 after WMI wrapper external-reset status properties
             "FanControllerFactory.cs:1218", // shifted from :1215 after WMI wrapper external-reset status properties
-            "HardwareWorkerClient.cs:468",
+            // HardwareWorkerClient.cs:468 — resolved in v3.8.2: the bare catch in
+            // ReleaseOwnedWorkerProcessHandle was converted to a typed, logging catch
+            // alongside the pipe-desync hang fix (BUG-3820-001).
             "LibreHardwareMonitorImpl.cs:2090", // shifted from :2106 after 3.7.0 live temperature projection cleanup
             "LibreHardwareMonitorImpl.cs:2219", // shifted from :2235 after 3.7.0 live temperature projection cleanup
             "LibreHardwareMonitorImpl.cs:2245", // shifted from :2261 after 3.7.0 live temperature projection cleanup
@@ -87,9 +89,10 @@ namespace OmenCoreApp.Tests
             "WmiFanController.cs:172", // shifted from :170 after v3.6.1 countdown-extension throttle
             "WmiFanController.cs:186", // shifted from :184 after v3.6.1 countdown-extension throttle
             "WmiFanController.cs:200", // shifted from :198 after v3.6.1 countdown-extension throttle
-            "DiagnosticLoggingService.cs:97",
-            "DiagnosticLoggingService.cs:333",
-            "DiagnosticLoggingService.cs:336",
+            // DiagnosticLoggingService.cs:97/333/336 — resolved in v3.8.2: converted to typed
+            // catches (Debug.WriteLine for single-point failures, silent typed skip for the
+            // per-process inspection loop) so the diagnostic subsystem's own failures are no
+            // longer invisible — the same "logs just stop" lesson behind BUG-3820-001.
             "FanService.cs:2044", // shifted from :1983 after #25 RPM-state propagation + monitor-loop allocation cleanup
             "GameLibraryService.cs:269",
             "GameLibraryService.cs:335",

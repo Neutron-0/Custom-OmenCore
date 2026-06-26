@@ -94,7 +94,12 @@ namespace OmenCore.Services
             {
                 _captureTask?.Wait(TimeSpan.FromSeconds(2));
             }
-            catch { }
+            catch (Exception ex)
+            {
+                // Expected when the capture task observes the cancellation above; surface
+                // anything unexpected to the debugger without recursing into this service.
+                Debug.WriteLine($"[DiagnosticLogging] Capture task did not stop cleanly: {ex.Message}");
+            }
             
             _cts?.Dispose();
             _cts = null;
@@ -330,10 +335,18 @@ namespace OmenCore.Services
                             result.Add($"{proc.ProcessName} (PID: {proc.Id})");
                         }
                     }
-                    catch { }
+                    catch (Exception)
+                    {
+                        // Process exited between enumeration and inspection, or access is
+                        // denied for a protected/system process — skip it. Logging per-process
+                        // would be noise across dozens of normal system processes.
+                    }
                 }
             }
-            catch { }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[DiagnosticLogging] Relevant-process enumeration failed: {ex.Message}");
+            }
             
             return result;
         }

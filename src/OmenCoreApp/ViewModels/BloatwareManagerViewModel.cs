@@ -259,10 +259,10 @@ namespace OmenCore.ViewModels
             ToggleAllPreviewItemsCommand = new RelayCommand(_ => ToggleAllPreviewItems(), _ => IsRemovalPreviewVisible && RemovalPreviewItems.Count > 0 && CanInteract);
 
             // Initialize preset commands
-            ApplyTelemetryOnlyPresetCommand = new RelayCommand(async _ => await ApplyTelemetryOnlyPresetAsync(), _ => AllApps.Count > 0 && CanInteract);
-            ApplyOmenConflictReducerPresetCommand = new RelayCommand(async _ => await ApplyOmenConflictReducerPresetAsync(), _ => AllApps.Count > 0 && CanInteract);
-            ApplyWindowsConsumerAppsPresetCommand = new RelayCommand(async _ => await ApplyWindowsConsumerAppsPresetAsync(), _ => AllApps.Count > 0 && CanInteract);
-            ApplyFullStandalonePresetCommand = new RelayCommand(async _ => await ApplyFullStandalonePresetAsync(), _ => AllApps.Count > 0 && CanInteract);
+            ApplyTelemetryOnlyPresetCommand = new RelayCommand(_ => ApplyTelemetryOnlyPreset(), _ => AllApps.Count > 0 && CanInteract);
+            ApplyOmenConflictReducerPresetCommand = new RelayCommand(_ => ApplyOmenConflictReducerPreset(), _ => AllApps.Count > 0 && CanInteract);
+            ApplyWindowsConsumerAppsPresetCommand = new RelayCommand(_ => ApplyWindowsConsumerAppsPreset(), _ => AllApps.Count > 0 && CanInteract);
+            ApplyFullStandalonePresetCommand = new RelayCommand(_ => ApplyFullStandalonePreset(), _ => AllApps.Count > 0 && CanInteract);
 
             // Initialize categories
             foreach (var cat in Enum.GetValues<BloatwareCategory>().Where(c => c != BloatwareCategory.Unknown))
@@ -951,7 +951,7 @@ namespace OmenCore.ViewModels
             (ApplyFullStandalonePresetCommand as RelayCommand)?.RaiseCanExecuteChanged();
         }
 
-        private async Task ApplyTelemetryOnlyPresetAsync()
+        private void ApplyTelemetryOnlyPreset()
         {
             var toRemove = AllApps
                 .Where(a => !a.IsRemoved && a.Category == BloatwareCategory.Telemetry)
@@ -964,7 +964,7 @@ namespace OmenCore.ViewModels
             BuildRemovalPreview("Telemetry Only Preset", toRemove);
         }
 
-        private async Task ApplyOmenConflictReducerPresetAsync()
+        private void ApplyOmenConflictReducerPreset()
         {
             var toRemove = AllApps
                 .Where(a => !a.IsRemoved && a.Category == BloatwareCategory.OemSoftware &&
@@ -983,7 +983,7 @@ namespace OmenCore.ViewModels
             BuildRemovalPreview("OMEN Conflict Reducer Preset", toRemove);
         }
 
-        private async Task ApplyWindowsConsumerAppsPresetAsync()
+        private void ApplyWindowsConsumerAppsPreset()
         {
             var toRemove = AllApps
                 .Where(a => !a.IsRemoved && a.Category == BloatwareCategory.WindowsApps)
@@ -996,7 +996,7 @@ namespace OmenCore.ViewModels
             BuildRemovalPreview("Windows Consumer Apps Preset", toRemove);
         }
 
-        private async Task ApplyFullStandalonePresetAsync()
+        private void ApplyFullStandalonePreset()
         {
             var toRemove = AllApps
                 .Where(a => !a.IsRemoved &&

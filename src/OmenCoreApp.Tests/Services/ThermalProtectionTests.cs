@@ -39,7 +39,7 @@ namespace OmenCoreApp.Tests.Services
                     });
                 }
                 
-                public async System.Threading.Tasks.Task<bool> TryRestartAsync() => false;
+                public System.Threading.Tasks.Task<bool> TryRestartAsync() => System.Threading.Tasks.Task.FromResult(false);
             }
         }
 

@@ -45,7 +45,7 @@ namespace OmenCoreApp.Tests.ViewModels
         }
 
         [Fact]
-        public async Task ExportTelemetryCommand_InvokesService_AndLogs()
+        public void ExportTelemetryCommand_InvokesService_AndLogs()
         {
             // nothing throws during viewmodel construction, so just build one
             using var vm = new MainViewModel();

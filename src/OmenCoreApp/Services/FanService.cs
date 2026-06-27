@@ -1778,6 +1778,14 @@ namespace OmenCore.Services
                     _logging.Info("Fan monitor loop stopped");
                     return;
                 }
+                catch (ObjectDisposedException)
+                {
+                    // Stop()/Dispose() cancels then immediately disposes the CancellationTokenSource
+                    // with no wait for this loop to observe it; Task.Delay can race and throw this
+                    // instead of OperationCanceledException. Same graceful-exit outcome either way.
+                    _logging.Info("Fan monitor loop stopped");
+                    return;
+                }
             }
             
             while (!token.IsCancellationRequested)
@@ -2010,6 +2018,13 @@ namespace OmenCore.Services
                 }
                 catch (OperationCanceledException)
                 {
+                    break;
+                }
+                catch (ObjectDisposedException)
+                {
+                    // See matching catch above the initial delay: Stop()/Dispose() can race
+                    // Task.Delay's cancellation-token registration into throwing this instead
+                    // of OperationCanceledException. Same graceful-exit outcome either way.
                     break;
                 }
             }

@@ -498,22 +498,19 @@ namespace OmenCore.Services.SystemOptimizer.Optimizations
         {
             try
             {
-                var psi = new ProcessStartInfo
+                // Read the registry directly rather than parsing `fsutil behavior query` text output.
+                // `fsutil behavior set disablelastaccess <0-3>` stores the mode in the low 2 bits and
+                // ORs in 0x80000000 to mark it explicitly configured, so the stored DWORD after a
+                // successful "disable" apply is 0x80000001, not 1 - mask off the explicit-flag bit.
+                using var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Control\FileSystem");
+                var value = key?.GetValue("NtfsDisableLastAccessUpdate");
+                if (value == null)
                 {
-                    FileName = "fsutil",
-                    Arguments = "behavior query disablelastaccess",
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                    RedirectStandardOutput = true
-                };
-                
-                using var process = Process.Start(psi);
-                var output = process?.StandardOutput.ReadToEnd() ?? "";
-                process?.WaitForExit();
-                
-                // Values: 0=enabled, 1=disabled, 2=system managed disabled, 3=system managed enabled
-                return output.Contains("= 1") || output.Contains("= 2") || 
-                       output.Contains("=1") || output.Contains("=2");
+                    return false;
+                }
+
+                var mode = (int)value & 0x3;
+                return mode == 1 || mode == 2; // 1=disabled, 2=system-managed disabled
             }
             catch
             {
